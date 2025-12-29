@@ -41,6 +41,70 @@ const loginSchema = {
 
 const router = Router();
 
+/**
+ * @openapi
+ * /auth/register:
+ *   post:
+ *     tags:
+ *       - Auth
+ *     summary: Register a new user
+ *     description: Creates a new user account with email and password. Automatically logs in the user after successful registration.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *                 description: Password (minimum 8 characters)
+ *                 example: mySecurePassword123
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *         headers:
+ *           Set-Cookie:
+ *             description: Session cookie for authentication
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Email already in use
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Register
 router.post('/register', validateRequest(registerSchema), async (req: Request, res: Response) => {
   try {
@@ -107,6 +171,73 @@ router.post('/register', validateRequest(registerSchema), async (req: Request, r
   }
 });
 
+/**
+ * @openapi
+ * /auth/login:
+ *   post:
+ *     tags:
+ *       - Auth
+ *     summary: Login user
+ *     description: Authenticates a user with email and password. Returns a session cookie for subsequent authenticated requests.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 description: User's password
+ *                 example: mySecurePassword123
+ *               rememberMe:
+ *                 type: boolean
+ *                 description: Extend session duration (90 days vs 30 days)
+ *                 default: false
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         headers:
+ *           Set-Cookie:
+ *             description: Session cookie for authentication
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         description: Invalid email or password
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Login
 router.post('/login', validateRequest(loginSchema), async (req: Request, res: Response) => {
   try {
@@ -173,6 +304,44 @@ router.post('/login', validateRequest(loginSchema), async (req: Request, res: Re
   }
 });
 
+/**
+ * @openapi
+ * /auth/logout:
+ *   post:
+ *     tags:
+ *       - Auth
+ *     summary: Logout user
+ *     description: Invalidates the current session and clears the session cookie.
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ *         headers:
+ *           Set-Cookie:
+ *             description: Blank session cookie to clear authentication
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Logged out successfully
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Logout
 router.post('/logout', async (req: Request, res: Response) => {
   try {
@@ -194,6 +363,48 @@ router.post('/logout', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /auth/session:
+ *   get:
+ *     tags:
+ *       - Auth
+ *     summary: Get current session
+ *     description: Returns the current authenticated user's session information. Also refreshes OAuth tokens if needed.
+ *     responses:
+ *       200:
+ *         description: Session information retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                     session:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                         userId:
+ *                           type: string
+ *                         expiresAt:
+ *                           type: string
+ *                           format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get current session
 router.get('/session', async (req: Request, res: Response) => {
   try {

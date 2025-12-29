@@ -59,6 +59,9 @@ import autocompleteRoutes from './api/routes/autocomplete.js';
 import snippetsRoutes from './api/routes/snippets.js';
 import diffsRoutes from './api/routes/diffs.js';
 
+// Import Swagger/OpenAPI
+import { swaggerSpec, swaggerUi, swaggerUiOptions } from './api/swagger/index.js';
+
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
 
@@ -230,6 +233,55 @@ healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
 // Start periodic health checks (every 30 seconds)
 healthMonitor.startPeriodicChecks(30000);
 
+/**
+ * @openapi
+ * /health:
+ *   get:
+ *     tags:
+ *       - Health
+ *     summary: Basic health check
+ *     description: Fast health check endpoint for load balancers. Returns basic service status.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ *         headers:
+ *           X-Container-ID:
+ *             description: Container identifier
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: ok
+ *                     service:
+ *                       type: string
+ *                       example: website-backend
+ *                     containerId:
+ *                       type: string
+ *                     build:
+ *                       type: object
+ *                       properties:
+ *                         commitSha:
+ *                           type: string
+ *                         timestamp:
+ *                           type: string
+ *                         imageTag:
+ *                           type: string
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ */
 // Basic health check endpoint (fast, for load balancers)
 app.get('/health', (req, res) => {
   res.setHeader('X-Container-ID', CONTAINER_ID);
@@ -317,6 +369,13 @@ app.get('/metrics', (req, res) => {
     success: true,
     data: metrics.getMetricsJson(),
   });
+});
+
+// Swagger/OpenAPI Documentation
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+app.get('/api/openapi.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
 });
 
 // Add API routes
@@ -411,6 +470,9 @@ async function startServer() {
   console.log('  GET  /ready                            - Kubernetes readiness probe');
   console.log('  GET  /live                             - Kubernetes liveness probe');
   console.log('  GET  /metrics                          - Performance metrics (JSON)');
+  console.log('');
+  console.log('  GET  /api/docs                         - Swagger UI documentation');
+  console.log('  GET  /api/openapi.json                 - OpenAPI specification');
   console.log('');
   console.log('  POST /api/execute-remote               - Execute AI request (SSE)');
   console.log('  GET  /api/resume/:sessionId            - Resume session (SSE)');

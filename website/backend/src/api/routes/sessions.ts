@@ -62,6 +62,15 @@ async function archiveClaudeRemoteSession(
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Sessions
+ *     description: AI coding session management
+ *   - name: Sessions-Public
+ *     description: Public session sharing endpoints (no auth required)
+ */
+
 // Log all incoming requests to sessions routes for debugging
 router.use((req: Request, res: Response, next) => {
   logger.info(`Sessions route request: ${req.method} ${req.path}`, {
@@ -85,9 +94,70 @@ router.use((req: Request, res: Response, next) => {
 // ============================================================================
 
 /**
- * GET /api/sessions/shared/:token
- * Public endpoint to access a shared session via share token
- * No authentication required - anyone with the link can view
+ * @openapi
+ * /sessions/shared/{token}:
+ *   get:
+ *     tags:
+ *       - Sessions-Public
+ *     summary: Get shared session by token
+ *     description: Public endpoint to access a shared session via share token. No authentication required.
+ *     security: []
+ *     parameters:
+ *       - name: token
+ *         in: path
+ *         required: true
+ *         description: Share token (UUID)
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Shared session retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 session:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       format: uuid
+ *                     userRequest:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                       enum: [pending, running, completed, error]
+ *                     repositoryOwner:
+ *                       type: string
+ *                     repositoryName:
+ *                       type: string
+ *                     branch:
+ *                       type: string
+ *                     provider:
+ *                       type: string
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                     completedAt:
+ *                       type: string
+ *                       format: date-time
+ *                     previewUrl:
+ *                       type: string
+ *                       nullable: true
+ *                     isShared:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Share token is required
+ *       404:
+ *         description: Session not found or share link expired
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/shared/:token', async (req: Request, res: Response) => {
   try {
@@ -329,6 +399,65 @@ router.get('/shared/:token/events/stream', async (req: Request, res: Response) =
 // END PUBLIC SHARE ROUTES
 // ============================================================================
 
+/**
+ * @openapi
+ * /sessions/create-code-session:
+ *   post:
+ *     tags:
+ *       - Sessions
+ *     summary: Create a new code session
+ *     description: Creates a new AI coding session with specified repository and branch.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - repositoryOwner
+ *               - repositoryName
+ *               - baseBranch
+ *               - branch
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Session title
+ *               repositoryOwner:
+ *                 type: string
+ *                 description: GitHub repository owner
+ *                 example: octocat
+ *               repositoryName:
+ *                 type: string
+ *                 description: GitHub repository name
+ *                 example: hello-world
+ *               baseBranch:
+ *                 type: string
+ *                 description: Base branch to fork from
+ *                 example: main
+ *               branch:
+ *                 type: string
+ *                 description: Feature branch name
+ *                 example: feature/add-readme
+ *     responses:
+ *       200:
+ *         description: Session created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 session:
+ *                   $ref: '#/components/schemas/ChatSession'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Create a new code session
 router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -394,6 +523,39 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
   }
 });
 
+/**
+ * @openapi
+ * /sessions:
+ *   get:
+ *     tags:
+ *       - Sessions
+ *     summary: List all sessions
+ *     description: Returns all active (non-deleted) chat sessions for the authenticated user.
+ *     responses:
+ *       200:
+ *         description: Sessions retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     sessions:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/ChatSession'
+ *                     total:
+ *                       type: integer
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get all chat sessions for user (excluding deleted ones)
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -415,6 +577,80 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /sessions/search:
+ *   get:
+ *     tags:
+ *       - Sessions
+ *     summary: Search sessions
+ *     description: Search sessions by query string with optional filters.
+ *     parameters:
+ *       - name: q
+ *         in: query
+ *         required: true
+ *         description: Search query string
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         description: Maximum number of results (max 100)
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         description: Number of results to skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - name: status
+ *         in: query
+ *         description: Filter by session status
+ *         schema:
+ *           type: string
+ *           enum: [pending, running, completed, error]
+ *       - name: favorite
+ *         in: query
+ *         description: Filter by favorite status
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       200:
+ *         description: Search results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     sessions:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/ChatSession'
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *                     query:
+ *                       type: string
+ *       400:
+ *         description: Search query is required or invalid status
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Search sessions by query string
 router.get('/search', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -594,6 +830,44 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /sessions/{id}:
+ *   get:
+ *     tags:
+ *       - Sessions
+ *     summary: Get session by ID
+ *     description: Returns a specific chat session with preview URL if applicable.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Session ID (UUID)
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Session retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 session:
+ *                   $ref: '#/components/schemas/ChatSession'
+ *       400:
+ *         description: Invalid session ID
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get specific chat session
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -1612,6 +1886,67 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
   }
 });
 
+/**
+ * @openapi
+ * /sessions/{id}:
+ *   delete:
+ *     tags:
+ *       - Sessions
+ *     summary: Delete session
+ *     description: Soft deletes a session (moves to trash). Also archives the Claude Remote session and deletes the GitHub branch if applicable.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Session ID (UUID)
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Session deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Session deleted
+ *                     cleanup:
+ *                       type: object
+ *                       properties:
+ *                         branch:
+ *                           type: object
+ *                           properties:
+ *                             success:
+ *                               type: boolean
+ *                             message:
+ *                               type: string
+ *                         remoteSession:
+ *                           type: object
+ *                           properties:
+ *                             success:
+ *                               type: boolean
+ *                             message:
+ *                               type: string
+ *       400:
+ *         description: Invalid session ID
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a chat session (soft delete with branch cleanup)
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
