@@ -4,13 +4,14 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService } from '@webedt/shared';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
+import { ASession, syncUserSessions } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
@@ -2365,16 +2366,23 @@ router.get('/:id/stream', requireAuth, streamEventsHandler);
  * POST /api/sessions/sync
  * Sync sessions from Anthropic's Claude Remote API
  *
- * This endpoint:
- * 1. Lists all active sessions from Anthropic API
- * 2. Finds sessions that don't exist in our database
- * 3. Imports missing sessions with their events
- * 4. Optionally starts streaming for active sessions
+ * This endpoint uses syncUserSessions from the shared package which provides:
+ * - Sophisticated duplicate prevention (branch matching, time window matching, sessionPath matching)
+ * - Running session status updates
+ * - Event deduplication and import
+ * - Cleanup of redundant pending sessions
+ * - Session list broadcaster notifications
  *
- * Query params:
- * - activeOnly: boolean (default: true) - Only sync non-archived sessions
- * - stream: boolean (default: false) - Start streaming for active sessions
- * - limit: number (default: 50) - Max sessions to fetch from Anthropic
+ * The shared sync logic handles:
+ * 1. Checking and updating running sessions that may have completed
+ * 2. Importing new sessions with duplicate prevention
+ * 3. Linking existing local sessions to remote sessions
+ * 4. Cleaning up orphaned pending sessions
+ *
+ * Query params (for backward compatibility, logged but not all are used by shared sync):
+ * - activeOnly: boolean (default: true) - Note: shared sync skips archived sessions by default
+ * - stream: boolean (default: false) - Note: streaming should use /events/stream endpoint
+ * - limit: number (default: 50) - Note: shared sync uses CLAUDE_SYNC_LIMIT from env
  */
 router.post('/sync', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -2384,16 +2392,17 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
     return res.status(401).json({ success: false, error: 'Not authenticated' });
   }
 
-  const activeOnly = req.query.activeOnly !== 'false';
-  const shouldStream = req.query.stream === 'true';
-  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+  // Parse query params for backward compatibility (logged for debugging)
+  // Prefixed with underscore as they are intentionally unused by shared sync
+  const _activeOnly = req.query.activeOnly !== 'false';
+  const _shouldStream = req.query.stream === 'true';
+  const _limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
-  logger.info('Starting session sync from Anthropic API', {
+  logger.info('Starting session sync using shared syncUserSessions', {
     component: 'SessionSync',
     userId,
-    activeOnly,
-    shouldStream,
-    limit
+    // Log query params for debugging, even though shared sync may not use them all
+    queryParams: { activeOnly: _activeOnly, shouldStream: _shouldStream, limit: _limit },
   });
 
   try {
@@ -2411,232 +2420,33 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    // Refresh token if needed
-    const refreshedAuth = await ensureValidToken(user.claudeAuth);
+    // Use syncUserSessions from shared package
+    // This provides sophisticated duplicate prevention and session linking logic
+    const result = await syncUserSessions(userId, user.claudeAuth);
 
-    // Update token in database if it was refreshed
-    if (refreshedAuth.accessToken !== user.claudeAuth.accessToken) {
-      await db
-        .update(users)
-        .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-        .where(eq(users.id, userId));
-    }
-
-    // Create Claude client
-    const client = getClaudeClient({
-      accessToken: refreshedAuth.accessToken,
-      environmentId: CLAUDE_ENVIRONMENT_ID,
-      baseUrl: CLAUDE_API_BASE_URL,
-    });
-
-    // Fetch sessions from Anthropic
-    const remoteSessions = await client.listSessions(limit);
-    logger.info(`Fetched ${remoteSessions.data.length} sessions from Anthropic`, {
+    logger.info('Session sync completed using shared syncUserSessions', {
       component: 'SessionSync',
-      hasMore: remoteSessions.has_more
+      userId,
+      imported: result.imported,
+      updated: result.updated,
+      errors: result.errors,
+      skipped: result.skipped,
     });
 
-    // Get existing remote session IDs from our database
-    const existingSessions = await db
-      .select({ remoteSessionId: chatSessions.remoteSessionId })
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, userId),
-          isNotNull(chatSessions.remoteSessionId)
-        )
-      );
-
-    const existingRemoteIds = new Set(
-      existingSessions.map(s => s.remoteSessionId).filter(Boolean)
-    );
-
-    // Find sessions that need to be imported
-    const sessionsToImport = remoteSessions.data.filter(session => {
-      // Skip if already in database
-      if (existingRemoteIds.has(session.id)) {
-        return false;
-      }
-      // Filter by status if activeOnly
-      if (activeOnly && session.session_status === 'archived') {
-        return false;
-      }
-      return true;
-    });
-
-    logger.info(`Found ${sessionsToImport.length} sessions to import`, {
-      component: 'SessionSync',
-      total: remoteSessions.data.length,
-      existing: existingRemoteIds.size
-    });
-
-    const imported: Array<{
-      id: string;
-      remoteSessionId: string;
-      title: string;
-      status: string;
-      eventsImported: number;
-    }> = [];
-
-    const errors: Array<{
-      remoteSessionId: string;
-      error: string;
-    }> = [];
-
-    // Import each missing session
-    for (const remoteSession of sessionsToImport) {
-      try {
-        // Fetch events for this session
-        const eventsResponse = await client.getEvents(remoteSession.id);
-        const sessionEvents = eventsResponse.data || [];
-
-        // Extract repository info from session context
-        const gitSource = remoteSession.session_context?.sources?.find(s => s.type === 'git_repository');
-        const gitOutcome = remoteSession.session_context?.outcomes?.find(o => o.type === 'git_repository');
-
-        let repositoryUrl: string | undefined;
-        let repositoryOwner: string | undefined;
-        let repositoryName: string | undefined;
-        let branch: string | undefined;
-
-        if (gitSource?.url) {
-          repositoryUrl = gitSource.url;
-          const match = gitSource.url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-          if (match) {
-            repositoryOwner = match[1];
-            repositoryName = match[2].replace(/\.git$/, '');
-          }
-        }
-
-        if (gitOutcome?.git_info?.branches?.[0]) {
-          branch = gitOutcome.git_info.branches[0];
-        }
-
-        // Map Anthropic status to our status
-        const statusMap: Record<string, string> = {
-          'idle': 'completed',
-          'running': 'running',
-          'completed': 'completed',
-          'failed': 'error',
-          'archived': 'completed'
-        };
-        const status = statusMap[remoteSession.session_status] || 'pending';
-
-        // Create chat session in database
-        const sessionId = uuidv4();
-        const sessionPath = repositoryOwner && repositoryName && branch
-          ? generateSessionPath(repositoryOwner, repositoryName, branch)
-          : undefined;
-
-        // Extract user request from first user event
-        let userRequest = remoteSession.title || 'Imported session';
-        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && (e.message as any)?.content);
-        const firstUserMessage = firstUserEvent?.message as { content?: unknown } | undefined;
-        if (firstUserMessage?.content) {
-          const content = firstUserMessage.content;
-          userRequest = typeof content === 'string'
-            ? content.slice(0, 500)
-            : JSON.stringify(content).slice(0, 500);
-        }
-
-        // Extract total cost from result event
-        let totalCost: string | undefined;
-        const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd);
-        if (resultEvent?.total_cost_usd) {
-          totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
-        }
-
-        await db.insert(chatSessions).values({
-          id: sessionId,
-          userId,
-          userRequest,
-          status,
-          provider: 'claude',
-          remoteSessionId: remoteSession.id,
-          remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
-          totalCost,
-          repositoryUrl,
-          repositoryOwner,
-          repositoryName,
-          branch,
-          sessionPath,
-          createdAt: new Date(remoteSession.created_at),
-          completedAt: status === 'completed' || status === 'error'
-            ? new Date(remoteSession.updated_at)
-            : undefined,
-        });
-
-        // Import events
-        let eventsImported = 0;
-        for (const event of sessionEvents) {
-          await db.insert(events).values({
-            chatSessionId: sessionId,
-            eventData: event,
-            timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-          });
-          eventsImported++;
-        }
-
-        imported.push({
-          id: sessionId,
-          remoteSessionId: remoteSession.id,
-          title: remoteSession.title,
-          status,
-          eventsImported
-        });
-
-        logger.info(`Imported session ${remoteSession.id}`, {
-          component: 'SessionSync',
-          sessionId,
-          eventsImported,
-          status
-        });
-
-        // If session is active and streaming requested, start polling
-        if (shouldStream && remoteSession.session_status === 'running') {
-          // Note: Full streaming implementation would require spawning a background
-          // polling task. For now, we just mark it as running and the user can
-          // use the /events/stream endpoint to start receiving events.
-          logger.info(`Session ${remoteSession.id} is running - use /api/sessions/${sessionId}/events/stream to receive events`, {
-            component: 'SessionSync'
-          });
-        }
-
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({
-          remoteSessionId: remoteSession.id,
-          error: errorMessage
-        });
-        logger.error(`Failed to import session ${remoteSession.id}`, error as Error, {
-          component: 'SessionSync'
-        });
-      }
-    }
-
-    // Find sessions that exist but might have new events (running sessions)
-    const runningSessions = remoteSessions.data.filter(
-      session => session.session_status === 'running' && existingRemoteIds.has(session.id)
-    );
-
+    // Return response with both new fields and backward-compatible structure
+    // Note: Some detailed fields from the old API are no longer available
+    // as the shared sync logic aggregates results internally
     return res.json({
       success: true,
       data: {
-        totalFromApi: remoteSessions.data.length,
-        alreadyExists: existingRemoteIds.size,
-        imported: imported.length,
-        errors: errors.length,
-        runningSessions: runningSessions.length,
-        hasMore: remoteSessions.has_more,
-        details: {
-          imported,
-          errors,
-          running: runningSessions.map(s => ({
-            remoteSessionId: s.id,
-            title: s.title,
-            status: s.session_status
-          }))
-        }
+        // New fields from shared sync
+        imported: result.imported,
+        updated: result.updated,
+        errors: result.errors,
+        skipped: result.skipped,
+        // Backward-compatible fields (best-effort mapping)
+        alreadyExists: result.skipped,
+        runningSessions: result.updated,
       }
     });
 
@@ -2656,6 +2466,12 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
  * This is useful for:
  * - Catching up on events for a session that was running
  * - Re-syncing events if some were missed
+ *
+ * Uses SessionService.sync() from the shared package which provides:
+ * - Proper event deduplication by UUID
+ * - Transaction-safe event insertion and session updates
+ * - Correct null/undefined normalization
+ * - SessionPath generation
  */
 router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -2667,7 +2483,7 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
   }
 
   try {
-    // Get the session
+    // Verify session belongs to user and is not deleted
     const [session] = await db
       .select()
       .from(chatSessions)
@@ -2705,97 +2521,65 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
       });
     }
 
-    // Refresh token if needed
-    const refreshedAuth = await ensureValidToken(user.claudeAuth);
-
-    // Create Claude client
-    const client = getClaudeClient({
-      accessToken: refreshedAuth.accessToken,
-      environmentId: CLAUDE_ENVIRONMENT_ID,
-      baseUrl: CLAUDE_API_BASE_URL,
-    });
-
-    // Get remote session status
-    const remoteSession = await client.getSession(session.remoteSessionId);
-
-    // Get existing event UUIDs
-    const existingEvents = await db
-      .select({ eventData: events.eventData })
+    // Count existing events before sync for backward-compatible response
+    // Use COUNT(*) instead of fetching all eventData for better performance
+    const [{ count: existingEventsCount }] = await db
+      .select({ count: sql<number>`count(*)` })
       .from(events)
       .where(eq(events.chatSessionId, sessionId));
 
-    const existingUuids = new Set(
-      existingEvents
-        .map(e => (e.eventData as { uuid?: string })?.uuid)
-        .filter(Boolean)
-    );
-
-    // Fetch all events from Anthropic
-    const eventsResponse = await client.getEvents(session.remoteSessionId);
-    const remoteEvents = eventsResponse.data || [];
-
-    // Find new events
-    const newEvents = remoteEvents.filter(e => !existingUuids.has(e.uuid));
-
-    // Import new events
-    let imported = 0;
-    for (const event of newEvents) {
-      await db.insert(events).values({
-        chatSessionId: sessionId,
-        eventData: event,
-        timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-      });
-      imported++;
-    }
-
-    // Update session status if changed
-    const statusMap: Record<string, string> = {
-      'idle': 'completed',
-      'running': 'running',
-      'completed': 'completed',
-      'failed': 'error',
-      'archived': 'completed'
-    };
-    const newStatus = statusMap[remoteSession.session_status] || session.status;
-
-    // Extract total cost from result event if present
-    let totalCost = session.totalCost;
-    const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
-    if (resultEvent?.total_cost_usd) {
-      totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
-    }
-
-    if (newStatus !== session.status || totalCost !== session.totalCost) {
-      await db
-        .update(chatSessions)
-        .set({
-          status: newStatus,
-          totalCost,
-          completedAt: (newStatus === 'completed' || newStatus === 'error') && !session.completedAt
-            ? new Date()
-            : session.completedAt,
-        })
-        .where(eq(chatSessions.id, sessionId));
-    }
-
-    logger.info(`Synced events for session ${sessionId}`, {
-      component: 'SessionSync',
-      remoteSessionId: session.remoteSessionId,
-      existingEvents: existingUuids.size,
-      newEvents: imported,
-      remoteStatus: remoteSession.session_status
+    // Use SessionService.sync() from shared package via ServiceProvider
+    // This provides proper event deduplication, transaction safety, and status mapping
+    const sessionService = ServiceProvider.get(ASession);
+    const syncResult = await sessionService.sync(sessionId, {
+      claudeAuth: user.claudeAuth,
+      environmentId: CLAUDE_ENVIRONMENT_ID,
     });
 
+    // Count events after sync to calculate new events imported
+    // Use COUNT(*) instead of fetching all eventData for better performance
+    const [{ count: totalEventsCount }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(events)
+      .where(eq(events.chatSessionId, sessionId));
+    const newEventsImported = totalEventsCount - existingEventsCount;
+
+    // Map local status back to remote status for backward compatibility
+    const statusToRemoteStatus: Record<string, string> = {
+      'completed': 'idle',
+      'running': 'running',
+      'error': 'failed',
+      'pending': 'idle',
+    };
+    const remoteStatus = statusToRemoteStatus[syncResult.status] || 'idle';
+
+    logger.info(`Synced session using SessionService.sync()`, {
+      component: 'SessionSync',
+      sessionId,
+      remoteSessionId: session.remoteSessionId,
+      existingEvents: existingEventsCount,
+      newEvents: newEventsImported,
+      status: syncResult.status,
+      remoteStatus,
+    });
+
+    // Return response with both new fields and backward-compatible structure
     return res.json({
       success: true,
       data: {
-        sessionId,
-        remoteSessionId: session.remoteSessionId,
-        existingEvents: existingUuids.size,
-        newEventsImported: imported,
-        totalEvents: existingUuids.size + imported,
-        remoteStatus: remoteSession.session_status,
-        localStatus: newStatus
+        sessionId: syncResult.id,
+        remoteSessionId: syncResult.remoteSessionId,
+        // Backward-compatible fields
+        existingEvents: existingEventsCount,
+        newEventsImported,
+        totalEvents: totalEventsCount,
+        remoteStatus,
+        localStatus: syncResult.status,
+        // New fields from sync result
+        status: syncResult.status,
+        totalCost: syncResult.totalCost,
+        branch: syncResult.branch,
+        completedAt: syncResult.completedAt,
       }
     });
 
