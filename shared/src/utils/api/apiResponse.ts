@@ -27,11 +27,9 @@ export interface ApiErrorResponse {
     message: string;
     code?: string;
     fields?: Record<string, string[]>;
-    /** Request correlation ID for tracing */
-    requestId?: string;
   };
   timestamp: string;
-  /** Request correlation ID for tracing (also in error object for convenience) */
+  /** Request correlation ID for tracing */
   requestId?: string;
 }
 
@@ -89,7 +87,6 @@ export function errorResponse(message: string, code?: string, requestId?: string
     error: {
       message,
       ...(code && { code }),
-      ...(correlationId && { requestId: correlationId }),
     },
     timestamp: new Date().toISOString(),
     ...(correlationId && { requestId: correlationId }),
@@ -116,7 +113,6 @@ export function validationErrorResponse(
       message,
       code: ApiErrorCode.VALIDATION_ERROR,
       ...(fields && { fields }),
-      ...(correlationId && { requestId: correlationId }),
     },
     timestamp: new Date().toISOString(),
     ...(correlationId && { requestId: correlationId }),

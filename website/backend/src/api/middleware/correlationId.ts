@@ -25,6 +25,41 @@ import { randomUUID } from 'crypto';
 export const CORRELATION_ID_HEADER = 'X-Request-ID';
 
 /**
+ * Maximum length for correlation IDs to prevent log injection attacks
+ */
+const MAX_CORRELATION_ID_LENGTH = 128;
+
+/**
+ * Regex pattern to match control characters that could affect log parsing
+ * Matches ASCII control characters (0x00-0x1F) and DEL (0x7F)
+ */
+const CONTROL_CHARS_REGEX = /[\x00-\x1f\x7f]/g;
+
+/**
+ * Sanitize a correlation ID value
+ * - Trims whitespace
+ * - Limits length to prevent abuse
+ * - Removes control characters to prevent log injection
+ *
+ * @param value - Raw header value
+ * @returns Sanitized correlation ID or undefined if invalid
+ */
+function sanitizeCorrelationId(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  // Remove control characters and limit length
+  const sanitized = trimmed
+    .replace(CONTROL_CHARS_REGEX, '')
+    .slice(0, MAX_CORRELATION_ID_LENGTH);
+
+  // Return undefined if sanitization removed all content
+  return sanitized || undefined;
+}
+
+/**
  * Extends Express Request with correlation tracking data
  */
 declare global {
@@ -35,12 +70,6 @@ declare global {
        * Available on all requests after correlationIdMiddleware runs
        */
       correlationId: string;
-
-      /**
-       * Timestamp when the request was received
-       * Used for request duration tracking
-       */
-      requestStartTime: number;
     }
   }
 }
@@ -84,13 +113,15 @@ export function correlationIdMiddleware(
   // Extract correlation ID from header or generate a new one
   // X-Request-ID is a standard header used by load balancers and API gateways
   const headerValue = req.headers[CORRELATION_ID_HEADER.toLowerCase()];
-  const correlationId = typeof headerValue === 'string' && headerValue.trim()
-    ? headerValue.trim()
+
+  // Sanitize header value to prevent log injection attacks
+  // If invalid or not provided, generate a new UUID
+  const correlationId = typeof headerValue === 'string'
+    ? sanitizeCorrelationId(headerValue) ?? randomUUID()
     : randomUUID();
 
   // Attach to request object for use in route handlers
   req.correlationId = correlationId;
-  req.requestStartTime = Date.now();
 
   // Set response header so clients can correlate responses
   res.setHeader(CORRELATION_ID_HEADER, correlationId);

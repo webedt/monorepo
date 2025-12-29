@@ -46,30 +46,35 @@ class Logger extends ALogger {
   }
 
   /**
-   * Enhance context with correlation ID from async context if not already present
+   * Enhance context with correlation ID from async context if not already present.
+   * Optimized to return the original context reference when no enrichment is needed,
+   * avoiding unnecessary object creation in hot paths.
    */
   private enrichContext(context?: LogContext | VerboseContext): LogContext | VerboseContext | undefined {
     // Try to get correlation ID from async context
     const asyncCorrelationId = getCorrelationId();
 
-    if (!asyncCorrelationId && !context) {
-      return undefined;
-    }
-
+    // Fast path: no correlation ID available, return context as-is
     if (!asyncCorrelationId) {
       return context;
     }
 
-    // Add correlation ID if not already present
-    const verboseCtx = context as VerboseContext | undefined;
-    if (!verboseCtx?.requestId && !verboseCtx?.correlationId) {
-      return {
-        ...context,
-        requestId: asyncCorrelationId,
-      };
+    // Fast path: no context provided, create minimal context with just the correlation ID
+    if (!context) {
+      return { requestId: asyncCorrelationId };
     }
 
-    return context;
+    // Fast path: context already has requestId or correlationId, return as-is
+    const verboseCtx = context as VerboseContext;
+    if (verboseCtx.requestId || verboseCtx.correlationId) {
+      return context;
+    }
+
+    // Only create a new object when we actually need to add the correlation ID
+    return {
+      ...context,
+      requestId: asyncCorrelationId,
+    };
   }
 
   private formatMessage(
