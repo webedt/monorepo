@@ -53,6 +53,8 @@
     "bcrypt": "^5.1.1",
     "drizzle-kit": "^0.31.8",
     "lucia": "^3.2.2",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "uuid": "^13.0.0"

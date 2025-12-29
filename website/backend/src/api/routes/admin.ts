@@ -660,4 +660,137 @@ router.get('/stats', requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /admin/rate-limits:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get rate limit dashboard
+ *     description: Returns comprehensive rate limiting metrics, configuration, and circuit breaker status. Admin access required.
+ *     responses:
+ *       200:
+ *         description: Rate limit dashboard data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     metrics:
+ *                       type: object
+ *                       properties:
+ *                         totalRequests:
+ *                           type: integer
+ *                           description: Total requests processed
+ *                         totalBlocked:
+ *                           type: integer
+ *                           description: Total requests blocked by rate limiting
+ *                         hitsByTier:
+ *                           type: object
+ *                           description: Blocked requests by rate limit tier
+ *                         hitsByPath:
+ *                           type: object
+ *                           description: Blocked requests by API path
+ *                         hitsByUser:
+ *                           type: object
+ *                           description: Blocked requests by user ID
+ *                         adminBypass:
+ *                           type: integer
+ *                           description: Requests bypassed due to admin status
+ *                         circuitBreakerDegraded:
+ *                           type: integer
+ *                           description: Requests with degraded limits due to circuit breaker
+ *                         lastReset:
+ *                           type: string
+ *                           format: date-time
+ *                     config:
+ *                       type: object
+ *                       description: Rate limit configuration per tier
+ *                     storeStats:
+ *                       type: object
+ *                       description: Per-tier store statistics (keys, hits, blocked)
+ *                     circuitBreakers:
+ *                       type: object
+ *                       description: Circuit breaker states and failure counts
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// GET /api/admin/rate-limits - Get rate limit dashboard
+router.get('/rate-limits', requireAdmin, async (req, res) => {
+  try {
+    const { getRateLimitDashboard } = await import('../middleware/rateLimit.js');
+    const dashboard = getRateLimitDashboard();
+    sendSuccess(res, dashboard);
+  } catch (error) {
+    console.error('Error fetching rate limit dashboard:', error);
+    sendInternalError(res, 'Failed to fetch rate limit dashboard');
+  }
+});
+
+/**
+ * @openapi
+ * /admin/rate-limits/reset:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Reset rate limit metrics
+ *     description: Resets all rate limit metrics counters. Admin access required. This does not reset active rate limit windows.
+ *     responses:
+ *       200:
+ *         description: Rate limit metrics reset successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Rate limit metrics reset successfully
+ *                     resetAt:
+ *                       type: string
+ *                       format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// POST /api/admin/rate-limits/reset - Reset rate limit metrics
+router.post('/rate-limits/reset', requireAdmin, async (req, res) => {
+  try {
+    const { resetRateLimitMetrics } = await import('../middleware/rateLimit.js');
+    resetRateLimitMetrics();
+    sendSuccess(res, {
+      message: 'Rate limit metrics reset successfully',
+      resetAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error resetting rate limit metrics:', error);
+    sendInternalError(res, 'Failed to reset rate limit metrics');
+  }
+});
+
 export default router;

@@ -2,8 +2,16 @@
  * Rate Limiting Middleware
  *
  * Provides defense-in-depth API rate limiting with configurable limits
- * based on endpoint sensitivity. This supplements infrastructure-level
- * rate limiting (nginx, Traefik, etc.) for additional security.
+ * based on endpoint sensitivity. Uses sliding window algorithm for smoother
+ * rate limiting compared to fixed windows.
+ *
+ * Features:
+ * - Sliding window algorithm for accurate rate limiting
+ * - Per-user and per-IP rate limiting
+ * - Admin override capability
+ * - Circuit breaker integration
+ * - Comprehensive metrics and monitoring
+ * - In-memory storage with Redis-ready architecture
  *
  * Rate limit tiers:
  * - Strict: Auth endpoints (login/register) - prevents brute-force attacks
@@ -13,18 +21,34 @@
  * - Sync Operations: Session sync with Claude Remote API - prevents excessive API calls
  * - Search Operations: Database-heavy search queries - prevents resource exhaustion
  * - Collaboration: Real-time workspace features - prevents spam
+ * - File Operations: File read/write operations - prevents abuse
  */
 
 import rateLimit from 'express-rate-limit';
-import type { Request, Response, NextFunction } from 'express';
-import { logger, metrics } from '@webedt/shared';
+import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import {
+  logger,
+  metrics,
+  createSlidingWindowStore,
+  circuitBreakerRegistry,
+} from '@webedt/shared';
+import type { SlidingWindowStore } from '@webedt/shared';
 
 import type { AuthRequest } from './auth.js';
 
 /**
  * Rate limit tier types for metrics tracking
  */
-export type RateLimitTier = 'auth' | 'public' | 'standard' | 'ai' | 'sync' | 'search' | 'collaboration' | 'sse';
+export type RateLimitTier =
+  | 'auth'
+  | 'public'
+  | 'standard'
+  | 'ai'
+  | 'sync'
+  | 'search'
+  | 'collaboration'
+  | 'sse'
+  | 'file';
 
 /**
  * Rate limit configuration from environment variables
@@ -67,23 +91,38 @@ const config = {
   sseWindowMs: parseInt(process.env.RATE_LIMIT_SSE_WINDOW_MS || '60000', 10),
   sseMaxRequests: parseInt(process.env.RATE_LIMIT_SSE_MAX || '10', 10),
 
+  // File operation limits (default: 100 requests per minute)
+  // Applies to: file read/write operations
+  fileWindowMs: parseInt(process.env.RATE_LIMIT_FILE_WINDOW_MS || '60000', 10),
+  fileMaxRequests: parseInt(process.env.RATE_LIMIT_FILE_MAX || '100', 10),
+
   // Whether to skip rate limiting (for testing/development)
   skipRateLimiting: process.env.SKIP_RATE_LIMITING === 'true',
+
+  // Whether to skip rate limiting for admins (default: true)
+  skipForAdmins: process.env.RATE_LIMIT_SKIP_ADMINS !== 'false',
+
+  // Circuit breaker degradation multiplier (reduce limits when circuit is open)
+  circuitBreakerDegradationFactor: parseFloat(process.env.RATE_LIMIT_CB_DEGRADATION || '0.5'),
 };
 
 /**
  * Metrics tracking for rate limit hits
  */
 interface RateLimitMetrics {
-  totalHits: number;
+  totalRequests: number;
+  totalBlocked: number;
   hitsByTier: Record<RateLimitTier, number>;
   hitsByPath: Record<string, number>;
   hitsByUser: Record<string, number>;
+  adminBypass: number;
+  circuitBreakerDegraded: number;
   lastReset: Date;
 }
 
 const rateLimitMetrics: RateLimitMetrics = {
-  totalHits: 0,
+  totalRequests: 0,
+  totalBlocked: 0,
   hitsByTier: {
     auth: 0,
     public: 0,
@@ -93,10 +132,28 @@ const rateLimitMetrics: RateLimitMetrics = {
     search: 0,
     collaboration: 0,
     sse: 0,
+    file: 0,
   },
   hitsByPath: {},
   hitsByUser: {},
+  adminBypass: 0,
+  circuitBreakerDegraded: 0,
   lastReset: new Date(),
+};
+
+/**
+ * Sliding window stores for each tier
+ */
+const stores: Record<RateLimitTier, SlidingWindowStore> = {
+  auth: createSlidingWindowStore(config.authWindowMs),
+  public: createSlidingWindowStore(config.publicWindowMs),
+  standard: createSlidingWindowStore(config.standardWindowMs),
+  ai: createSlidingWindowStore(config.aiWindowMs),
+  sync: createSlidingWindowStore(config.syncWindowMs),
+  search: createSlidingWindowStore(config.searchWindowMs),
+  collaboration: createSlidingWindowStore(config.collaborationWindowMs),
+  sse: createSlidingWindowStore(config.sseWindowMs),
+  file: createSlidingWindowStore(config.fileWindowMs),
 };
 
 /**
@@ -107,10 +164,53 @@ export function getRateLimitMetrics(): RateLimitMetrics {
 }
 
 /**
+ * Get detailed rate limit dashboard data
+ */
+export function getRateLimitDashboard(): {
+  metrics: RateLimitMetrics;
+  config: Record<string, { windowMs: number; maxRequests: number }>;
+  storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
+  circuitBreakers: Record<string, { state: string; failures: number }>;
+} {
+  const storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }> = {} as any;
+
+  for (const [tier, store] of Object.entries(stores)) {
+    storeStats[tier as RateLimitTier] = store.getStats();
+  }
+
+  const circuitBreakers: Record<string, { state: string; failures: number }> = {};
+  const allStats = circuitBreakerRegistry.getAllStats();
+  for (const [name, stats] of Object.entries(allStats)) {
+    circuitBreakers[name] = {
+      state: stats.state,
+      failures: stats.consecutiveFailures,
+    };
+  }
+
+  return {
+    metrics: getRateLimitMetrics(),
+    config: {
+      auth: { windowMs: config.authWindowMs, maxRequests: config.authMaxRequests },
+      public: { windowMs: config.publicWindowMs, maxRequests: config.publicMaxRequests },
+      standard: { windowMs: config.standardWindowMs, maxRequests: config.standardMaxRequests },
+      ai: { windowMs: config.aiWindowMs, maxRequests: config.aiMaxRequests },
+      sync: { windowMs: config.syncWindowMs, maxRequests: config.syncMaxRequests },
+      search: { windowMs: config.searchWindowMs, maxRequests: config.searchMaxRequests },
+      collaboration: { windowMs: config.collaborationWindowMs, maxRequests: config.collaborationMaxRequests },
+      sse: { windowMs: config.sseWindowMs, maxRequests: config.sseMaxRequests },
+      file: { windowMs: config.fileWindowMs, maxRequests: config.fileMaxRequests },
+    },
+    storeStats,
+    circuitBreakers,
+  };
+}
+
+/**
  * Reset rate limit metrics (for testing)
  */
 export function resetRateLimitMetrics(): void {
-  rateLimitMetrics.totalHits = 0;
+  rateLimitMetrics.totalRequests = 0;
+  rateLimitMetrics.totalBlocked = 0;
   rateLimitMetrics.hitsByTier = {
     auth: 0,
     public: 0,
@@ -120,9 +220,12 @@ export function resetRateLimitMetrics(): void {
     search: 0,
     collaboration: 0,
     sse: 0,
+    file: 0,
   };
   rateLimitMetrics.hitsByPath = {};
   rateLimitMetrics.hitsByUser = {};
+  rateLimitMetrics.adminBypass = 0;
+  rateLimitMetrics.circuitBreakerDegraded = 0;
   rateLimitMetrics.lastReset = new Date();
 }
 
@@ -131,7 +234,7 @@ export function resetRateLimitMetrics(): void {
  */
 function recordRateLimitHit(tier: RateLimitTier, path: string, ip: string, userId?: string): void {
   // Update local metrics
-  rateLimitMetrics.totalHits++;
+  rateLimitMetrics.totalBlocked++;
   rateLimitMetrics.hitsByTier[tier]++;
   rateLimitMetrics.hitsByPath[path] = (rateLimitMetrics.hitsByPath[path] || 0) + 1;
 
@@ -149,21 +252,66 @@ function recordRateLimitHit(tier: RateLimitTier, path: string, ip: string, userI
     path,
     ip,
     userId: userId || 'anonymous',
-    totalHits: rateLimitMetrics.totalHits,
+    totalBlocked: rateLimitMetrics.totalBlocked,
   });
+}
+
+/**
+ * Record a request (for metrics)
+ */
+function recordRequest(tier: RateLimitTier): void {
+  rateLimitMetrics.totalRequests++;
+}
+
+/**
+ * Check if circuit breaker is degraded for a specific tier
+ */
+function isCircuitBreakerDegraded(tier: RateLimitTier): boolean {
+  // Map tiers to relevant circuit breakers
+  const tierToBreaker: Partial<Record<RateLimitTier, string>> = {
+    ai: 'claude-remote',
+    sync: 'claude-remote',
+  };
+
+  const breakerName = tierToBreaker[tier];
+  if (!breakerName) return false;
+
+  try {
+    const stats = circuitBreakerRegistry.getAllStats();
+    const breakerStats = stats[breakerName];
+    if (breakerStats && (breakerStats.state === 'open' || breakerStats.state === 'half_open')) {
+      rateLimitMetrics.circuitBreakerDegraded++;
+      return true;
+    }
+  } catch {
+    // Circuit breaker not initialized yet
+  }
+
+  return false;
+}
+
+/**
+ * Get effective max requests considering circuit breaker state
+ */
+function getEffectiveMaxRequests(tier: RateLimitTier, baseMax: number): number {
+  if (isCircuitBreakerDegraded(tier)) {
+    return Math.floor(baseMax * config.circuitBreakerDegradationFactor);
+  }
+  return baseMax;
 }
 
 /**
  * Standard rate limit response handler
  * Returns proper 429 response with Retry-After header
  */
-function createRateLimitHandler(tier: RateLimitTier) {
+function createRateLimitHandler(tier: RateLimitTier, store: SlidingWindowStore) {
   return (req: Request, res: Response, _next: NextFunction, options: { windowMs: number }): void => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const authReq = req as AuthRequest;
     const userId = authReq.user?.id;
 
     recordRateLimitHit(tier, req.path, ip, userId);
+    store.recordBlocked();
 
     // Calculate retry-after in seconds
     const retryAfterSeconds = Math.ceil(options.windowMs / 1000);
@@ -210,10 +358,62 @@ function authenticatedKeyGenerator(req: Request): string {
 }
 
 /**
- * Skip function to disable rate limiting when configured
+ * Skip function that checks for admin users and global skip
  */
-function skipRateLimiting(): boolean {
-  return config.skipRateLimiting;
+function createSkipFunction(tier: RateLimitTier) {
+  return (req: Request): boolean => {
+    // Global skip for testing/development
+    if (config.skipRateLimiting) {
+      return true;
+    }
+
+    // Skip for admin users if enabled
+    if (config.skipForAdmins) {
+      const authReq = req as AuthRequest;
+      if (authReq.user?.isAdmin) {
+        rateLimitMetrics.adminBypass++;
+        logger.debug('Rate limit bypassed for admin', {
+          component: 'RateLimit',
+          tier,
+          userId: authReq.user.id,
+          path: req.path,
+        });
+        return true;
+      }
+    }
+
+    // Record the request
+    recordRequest(tier);
+
+    return false;
+  };
+}
+
+/**
+ * Create a rate limiter with sliding window store and admin override
+ */
+function createEnhancedRateLimiter(
+  tier: RateLimitTier,
+  windowMs: number,
+  maxRequests: number,
+  keyGen: (req: Request) => string = authenticatedKeyGenerator
+): RequestHandler {
+  const store = stores[tier];
+
+  return rateLimit({
+    windowMs,
+    max: (req: Request) => getEffectiveMaxRequests(tier, maxRequests),
+    standardHeaders: true, // Return rate limit info in headers
+    legacyHeaders: false, // Disable X-RateLimit-* headers
+    keyGenerator: keyGen,
+    skip: createSkipFunction(tier),
+    handler: createRateLimitHandler(tier, store),
+    store: store as any, // express-rate-limit store interface
+    message: {
+      success: false,
+      error: 'Too many requests. Please try again later.',
+    },
+  });
 }
 
 /**
@@ -225,19 +425,12 @@ function skipRateLimiting(): boolean {
  *
  * Default: 5 requests per minute
  */
-export const authRateLimiter = rateLimit({
-  windowMs: config.authWindowMs,
-  max: config.authMaxRequests,
-  standardHeaders: true, // Return rate limit info in headers
-  legacyHeaders: false, // Disable X-RateLimit-* headers
-  keyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('auth'),
-  message: {
-    success: false,
-    error: 'Too many authentication attempts. Please try again later.',
-  },
-});
+export const authRateLimiter = createEnhancedRateLimiter(
+  'auth',
+  config.authWindowMs,
+  config.authMaxRequests,
+  keyGenerator // IP-based only for auth
+);
 
 /**
  * Moderate rate limiter for public share endpoints
@@ -249,19 +442,12 @@ export const authRateLimiter = rateLimit({
  *
  * Default: 30 requests per minute
  */
-export const publicShareRateLimiter = rateLimit({
-  windowMs: config.publicWindowMs,
-  max: config.publicMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('public'),
-  message: {
-    success: false,
-    error: 'Too many requests. Please try again later.',
-  },
-});
+export const publicShareRateLimiter = createEnhancedRateLimiter(
+  'public',
+  config.publicWindowMs,
+  config.publicMaxRequests,
+  keyGenerator // IP-based only for public
+);
 
 /**
  * Standard rate limiter for authenticated API endpoints
@@ -271,19 +457,11 @@ export const publicShareRateLimiter = rateLimit({
  *
  * Default: 100 requests per minute
  */
-export const standardRateLimiter = rateLimit({
-  windowMs: config.standardWindowMs,
-  max: config.standardMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: authenticatedKeyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('standard'),
-  message: {
-    success: false,
-    error: 'Too many requests. Please try again later.',
-  },
-});
+export const standardRateLimiter = createEnhancedRateLimiter(
+  'standard',
+  config.standardWindowMs,
+  config.standardMaxRequests
+);
 
 /**
  * AI operations rate limiter for expensive AI endpoints
@@ -295,20 +473,13 @@ export const standardRateLimiter = rateLimit({
  *
  * Default: 10 requests per minute per user
  * Uses authenticated key generator for per-user tracking
+ * Integrates with circuit breaker for degraded mode
  */
-export const aiOperationRateLimiter = rateLimit({
-  windowMs: config.aiWindowMs,
-  max: config.aiMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: authenticatedKeyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('ai'),
-  message: {
-    success: false,
-    error: 'Too many AI requests. Please wait before submitting another request.',
-  },
-});
+export const aiOperationRateLimiter = createEnhancedRateLimiter(
+  'ai',
+  config.aiWindowMs,
+  config.aiMaxRequests
+);
 
 /**
  * Sync operations rate limiter for Claude Remote API sync
@@ -319,20 +490,13 @@ export const aiOperationRateLimiter = rateLimit({
  *
  * Default: 5 requests per minute per user
  * Uses authenticated key generator for per-user tracking
+ * Integrates with circuit breaker for degraded mode
  */
-export const syncOperationRateLimiter = rateLimit({
-  windowMs: config.syncWindowMs,
-  max: config.syncMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: authenticatedKeyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('sync'),
-  message: {
-    success: false,
-    error: 'Too many sync requests. Please wait before syncing again.',
-  },
-});
+export const syncOperationRateLimiter = createEnhancedRateLimiter(
+  'sync',
+  config.syncWindowMs,
+  config.syncMaxRequests
+);
 
 /**
  * Search operations rate limiter for database-heavy searches
@@ -345,19 +509,11 @@ export const syncOperationRateLimiter = rateLimit({
  * Default: 30 requests per minute per user
  * Uses authenticated key generator for per-user tracking
  */
-export const searchRateLimiter = rateLimit({
-  windowMs: config.searchWindowMs,
-  max: config.searchMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: authenticatedKeyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('search'),
-  message: {
-    success: false,
-    error: 'Too many search requests. Please slow down.',
-  },
-});
+export const searchRateLimiter = createEnhancedRateLimiter(
+  'search',
+  config.searchWindowMs,
+  config.searchMaxRequests
+);
 
 /**
  * Collaboration rate limiter for real-time workspace features
@@ -370,19 +526,26 @@ export const searchRateLimiter = rateLimit({
  * Higher limit to allow real-time updates
  * Uses authenticated key generator for per-user tracking
  */
-export const collaborationRateLimiter = rateLimit({
-  windowMs: config.collaborationWindowMs,
-  max: config.collaborationMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: authenticatedKeyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('collaboration'),
-  message: {
-    success: false,
-    error: 'Too many collaboration requests. Please slow down.',
-  },
-});
+export const collaborationRateLimiter = createEnhancedRateLimiter(
+  'collaboration',
+  config.collaborationWindowMs,
+  config.collaborationMaxRequests
+);
+
+/**
+ * File operations rate limiter for file operations
+ *
+ * Applies to:
+ * - File read/write operations
+ * - Workspace file operations
+ *
+ * Default: 100 requests per minute per user
+ */
+export const fileOperationRateLimiter = createEnhancedRateLimiter(
+  'file',
+  config.fileWindowMs,
+  config.fileMaxRequests
+);
 
 /**
  * SSE rate limiter for streaming endpoints
@@ -413,19 +576,12 @@ function sseKeyGenerator(req: Request): string {
   return `sse:${userId}:${sessionId}:${ip}`;
 }
 
-export const sseRateLimiter = rateLimit({
-  windowMs: config.sseWindowMs,
-  max: config.sseMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: sseKeyGenerator,
-  skip: skipRateLimiting,
-  handler: createRateLimitHandler('sse'),
-  message: {
-    success: false,
-    error: 'Too many SSE reconnection attempts. Please wait before reconnecting.',
-  },
-});
+export const sseRateLimiter = createEnhancedRateLimiter(
+  'sse',
+  config.sseWindowMs,
+  config.sseMaxRequests,
+  sseKeyGenerator
+);
 
 /**
  * Create a custom rate limiter with specific settings
@@ -439,23 +595,31 @@ export function createRateLimiter(
   windowMs: number,
   max: number,
   tier: RateLimitTier = 'standard'
-) {
+): RequestHandler {
   // Use authenticated key generator for user-specific tiers
-  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration', 'sse'].includes(tier);
+  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration', 'sse', 'file'].includes(tier);
 
-  return rateLimit({
+  return createEnhancedRateLimiter(
+    tier,
     windowMs,
     max,
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: useAuthenticatedKey ? authenticatedKeyGenerator : keyGenerator,
-    skip: skipRateLimiting,
-    handler: createRateLimitHandler(tier),
-    message: {
-      success: false,
-      error: 'Too many requests. Please try again later.',
-    },
-  });
+    useAuthenticatedKey ? authenticatedKeyGenerator : keyGenerator
+  );
+}
+
+/**
+ * Middleware to check if user is admin and bypass rate limiting
+ * Can be used as a pre-check before rate limiting middleware
+ */
+export function adminRateLimitBypass(req: Request, res: Response, next: NextFunction): void {
+  const authReq = req as AuthRequest;
+
+  if (authReq.user?.isAdmin && config.skipForAdmins) {
+    // Skip to the next non-rate-limiting middleware
+    // This is handled by the skip function in createEnhancedRateLimiter
+  }
+
+  next();
 }
 
 /**
@@ -469,8 +633,10 @@ export function logRateLimitConfig(): void {
     return;
   }
 
-  logger.info('Rate limiting enabled', {
+  logger.info('Rate limiting enabled with sliding window algorithm', {
     component: 'RateLimit',
+    skipForAdmins: config.skipForAdmins,
+    circuitBreakerDegradation: config.circuitBreakerDegradationFactor,
     auth: {
       windowMs: config.authWindowMs,
       maxRequests: config.authMaxRequests,
@@ -503,10 +669,25 @@ export function logRateLimitConfig(): void {
       maxRequests: config.collaborationMaxRequests,
       description: 'Workspace presence, events',
     },
+    file: {
+      windowMs: config.fileWindowMs,
+      maxRequests: config.fileMaxRequests,
+      description: 'File read/write operations',
+    },
     sse: {
       windowMs: config.sseWindowMs,
       maxRequests: config.sseMaxRequests,
       description: 'SSE streaming endpoints - per session',
     },
   });
+}
+
+/**
+ * Cleanup function for graceful shutdown
+ */
+export function cleanupRateLimitStores(): void {
+  for (const store of Object.values(stores)) {
+    store.destroy();
+  }
+  logger.info('Rate limit stores cleaned up', { component: 'RateLimit' });
 }

@@ -16,7 +16,7 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { shouldRefreshClaudeToken, refreshClaudeToken, type ClaudeAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
-import { encryptUserFields, decryptUserFields } from '@webedt/shared';
+// Note: Encryption/decryption is now automatic via Drizzle custom column types
 import type { ImageAiKeysData } from '@webedt/shared';
 
 const router = Router();
@@ -72,13 +72,10 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    // Update user with Claude auth (encrypted)
-    const encryptedFields = encryptUserFields({ claudeAuth });
+    // Update user with Claude auth (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      // Type assertion needed: encrypted fields may contain encrypted strings
-      // where the schema expects JSON objects (when encryption is enabled)
-      .set(encryptedFields as typeof users.$inferInsert)
+      .set({ claudeAuth })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -163,9 +160,8 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
       return;
     }
 
-    // Decrypt the Claude auth data
-    const decrypted = decryptUserFields({ claudeAuth: user.claudeAuth });
-    const claudeAuth = decrypted.claudeAuth as ClaudeAuth;
+    // Claude auth is automatically decrypted by Drizzle column type
+    const claudeAuth = user.claudeAuth as ClaudeAuth;
 
     // Check if refresh is needed
     if (!shouldRefreshClaudeToken(claudeAuth)) {
@@ -185,11 +181,10 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
     logger.info('Refreshing Claude OAuth token', { component: 'UserRoutes', userId: authReq.user!.id });
     const newClaudeAuth = await refreshClaudeToken(claudeAuth);
 
-    // Update in database (encrypted)
-    const encryptedNewAuth = encryptUserFields({ claudeAuth: newClaudeAuth });
+    // Update in database (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedNewAuth as typeof users.$inferInsert)
+      .set({ claudeAuth: newClaudeAuth })
       .where(eq(users.id, authReq.user!.id));
 
     logger.info('Claude OAuth token refreshed and saved', {
@@ -253,9 +248,8 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
       return;
     }
 
-    // Decrypt the Claude auth data
-    const decryptedAuth = decryptUserFields({ claudeAuth: user.claudeAuth });
-    let claudeAuth = decryptedAuth.claudeAuth as ClaudeAuth;
+    // Claude auth is automatically decrypted by Drizzle column type
+    let claudeAuth = user.claudeAuth as ClaudeAuth;
     let wasRefreshed = false;
 
     // Auto-refresh if needed
@@ -265,11 +259,10 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
         claudeAuth = await refreshClaudeToken(claudeAuth);
         wasRefreshed = true;
 
-        // Update in database (encrypted)
-        const encryptedAuth = encryptUserFields({ claudeAuth });
+        // Update in database (encryption is automatic via Drizzle column type)
         await db
           .update(users)
-          .set(encryptedAuth as typeof users.$inferInsert)
+          .set({ claudeAuth })
           .where(eq(users.id, authReq.user!.id));
 
         logger.info('Token auto-refreshed and saved', { component: 'UserRoutes' });
@@ -340,11 +333,10 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Update user with Codex auth (encrypted)
-    const encryptedCodexFields = encryptUserFields({ codexAuth });
+    // Update user with Codex auth (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedCodexFields as typeof users.$inferInsert)
+      .set({ codexAuth })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -457,11 +449,10 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       scope: geminiAuth.scope,
     };
 
-    // Update user with Gemini auth (encrypted)
-    const encryptedGeminiFields = encryptUserFields({ geminiAuth: normalizedAuth });
+    // Update user with Gemini auth (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedGeminiFields as typeof users.$inferInsert)
+      .set({ geminiAuth: normalizedAuth })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -1072,11 +1063,10 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
       return;
     }
 
-    // Encrypt the API key before storing
-    const encryptedApiKeyFields = encryptUserFields({ openrouterApiKey: apiKey });
+    // Store the API key (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedApiKeyFields as typeof users.$inferInsert)
+      .set({ openrouterApiKey: apiKey })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -1265,11 +1255,10 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
       }
     }
 
-    // Encrypt the API keys before storing
-    const encryptedImageAiFields = encryptUserFields({ imageAiKeys: sanitizedKeys });
+    // Store the API keys (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedImageAiFields as typeof users.$inferInsert)
+      .set({ imageAiKeys: sanitizedKeys })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({

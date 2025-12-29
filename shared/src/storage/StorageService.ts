@@ -23,6 +23,21 @@ interface UserIdRow {
   id: string;
 }
 
+/**
+ * Type guard to validate raw SQL result as UserIdRow array
+ */
+function isUserIdRowArray(rows: unknown): rows is UserIdRow[] {
+  return (
+    Array.isArray(rows) &&
+    rows.every(row =>
+      typeof row === 'object' &&
+      row !== null &&
+      'id' in row &&
+      typeof (row as { id: unknown }).id === 'string'
+    )
+  );
+}
+
 // Storage tier definitions (in bytes)
 export const STORAGE_TIERS = {
   FREE: 1 * 1024 * 1024 * 1024,      // 1 GB
@@ -274,8 +289,7 @@ export class StorageService {
       RETURNING id
     `);
 
-    const resultRows = result.rows as unknown as UserIdRow[];
-    if (resultRows.length === 0) {
+    if (!isUserIdRowArray(result.rows) || result.rows.length === 0) {
       throw new Error(`User not found: ${userId}`);
     }
   }
@@ -295,8 +309,7 @@ export class StorageService {
       RETURNING id
     `);
 
-    const resultRows = result.rows as unknown as UserIdRow[];
-    if (resultRows.length === 0) {
+    if (!isUserIdRowArray(result.rows) || result.rows.length === 0) {
       throw new Error(`User not found: ${userId}`);
     }
   }

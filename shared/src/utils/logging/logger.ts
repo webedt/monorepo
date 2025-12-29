@@ -176,8 +176,9 @@ class Logger extends ALogger {
           console.error(`  Stack: ${error.stack}`);
         }
         // Show cause chain if available (verbose mode)
-        if (isVerbose() && (error as any).cause) {
-          console.error(`  Cause: ${JSON.stringify((error as any).cause, null, 2)}`);
+        // ES2022 Error supports optional 'cause' property
+        if (isVerbose() && 'cause' in error && error.cause !== undefined) {
+          console.error(`  Cause: ${JSON.stringify(error.cause, null, 2)}`);
         }
       } else {
         console.error(`  Details: ${JSON.stringify(error, null, 2)}`);

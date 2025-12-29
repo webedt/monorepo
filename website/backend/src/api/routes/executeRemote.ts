@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
-import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@webedt/shared';
+import { isValidGeminiAuth, tokenRefreshService } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
 import type { ProviderType } from '@webedt/shared';
@@ -229,14 +229,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       geminiAuth = userData.geminiAuth as GeminiAuth;
       try {
-        const refreshedAuth = await ensureValidGeminiToken(geminiAuth);
-        if (refreshedAuth.accessToken !== geminiAuth.accessToken) {
-          // Token was refreshed, save it
-          await db.update(users)
-            .set({ geminiAuth: refreshedAuth as unknown as typeof users.$inferInsert['geminiAuth'] })
-            .where(eq(users.id, user.id));
-          geminiAuth = refreshedAuth;
-        }
+        // Use centralized token refresh service for Gemini tokens
+        geminiAuth = await tokenRefreshService.ensureValidGeminiTokenForUser(user.id, geminiAuth);
       } catch (error) {
         logger.error('Failed to refresh Gemini token', error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Gemini token expired. Please reconnect your Gemini account.' });
@@ -258,14 +252,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       claudeAuth = userData.claudeAuth as ClaudeAuth;
       try {
-        const refreshedAuth = await ensureValidToken(claudeAuth);
-        if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
-          // Token was refreshed, save it
-          await db.update(users)
-            .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-            .where(eq(users.id, user.id));
-          claudeAuth = refreshedAuth;
-        }
+        // Use centralized token refresh service for Claude tokens
+        claudeAuth = await tokenRefreshService.ensureValidTokenForUser(user.id, claudeAuth);
       } catch (error) {
         logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });

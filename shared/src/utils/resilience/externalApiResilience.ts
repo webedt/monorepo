@@ -29,6 +29,7 @@ import { withRetry, RETRY_CONFIGS } from './retry.js';
 import type { CircuitBreakerConfig } from './ACircuitBreaker.js';
 import type { RetryConfig } from './retry.js';
 import { logger } from '../logging/logger.js';
+import { getStatusCode, getErrorCode } from '../errorTypes.js';
 
 // =============================================================================
 // Circuit Breaker Configurations
@@ -74,20 +75,20 @@ export const GITHUB_RETRY_CONFIG: Partial<RetryConfig> = {
   ...RETRY_CONFIGS.rateLimitAware,
   operationName: 'github-api',
   isRetryable: (error: Error) => {
-    const statusCode = (error as any).status || (error as any).statusCode;
+    const statusCode = getStatusCode(error);
 
     // Don't retry client errors (except rate limits)
-    if (statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
       return false;
     }
 
     // Retry rate limits, server errors, and network issues
-    if (statusCode === 429 || statusCode >= 500) {
+    if (statusCode === 429 || (statusCode !== undefined && statusCode >= 500)) {
       return true;
     }
 
     // Retry network errors
-    const code = (error as any).code;
+    const code = getErrorCode(error);
     if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' ||
         code === 'ECONNRESET' || code === 'ECONNREFUSED') {
       return true;
@@ -113,7 +114,7 @@ export const CLAUDE_REMOTE_RETRY_CONFIG: Partial<RetryConfig> = {
   jitterFactor: 0.3,
   operationName: 'claude-remote-api',
   isRetryable: (error: Error) => {
-    const statusCode = (error as any).status || (error as any).statusCode;
+    const statusCode = getStatusCode(error);
 
     // Don't retry auth errors
     if (statusCode === 401 || statusCode === 403) {
@@ -126,12 +127,12 @@ export const CLAUDE_REMOTE_RETRY_CONFIG: Partial<RetryConfig> = {
     }
 
     // Retry rate limits and server errors
-    if (statusCode === 429 || statusCode >= 500) {
+    if (statusCode === 429 || (statusCode !== undefined && statusCode >= 500)) {
       return true;
     }
 
     // Retry network errors
-    const code = (error as any).code;
+    const code = getErrorCode(error);
     if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' ||
         code === 'ECONNRESET' || code === 'ECONNREFUSED') {
       return true;

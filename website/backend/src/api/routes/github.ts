@@ -8,9 +8,9 @@ import { Octokit } from '@octokit/rest';
 import { db, users, chatSessions, events, eq, and, isNull } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger, ServiceProvider, AClaudeWebClient, withGitHubResilience, withClaudeRemoteResilience } from '@webedt/shared';
+import { logger, ServiceProvider, AClaudeWebClient, withGitHubResilience, withClaudeRemoteResilience, tokenRefreshService } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
-import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
+import type { ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
 const router = Router();
@@ -44,15 +44,24 @@ function getRequestOrigin(req: Request): string {
   return `${protocol}://${host}`;
 }
 
-// Helper function to archive Claude Remote session
+/**
+ * Archive a Claude Remote session with token refresh.
+ * Uses centralized tokenRefreshService to ensure tokens are refreshed and persisted.
+ *
+ * @param remoteSessionId - The remote session ID to archive
+ * @param userId - The user ID for token refresh persistence
+ * @param claudeAuth - The Claude authentication credentials
+ * @param environmentId - Optional environment ID override
+ */
 async function archiveClaudeRemoteSession(
   remoteSessionId: string,
+  userId: string,
   claudeAuth: ClaudeAuth,
   environmentId?: string
 ): Promise<{ success: boolean; message: string }> {
   try {
-    // Refresh token if needed
-    const refreshedAuth = await ensureValidToken(claudeAuth);
+    // Use centralized token refresh service for Claude tokens with persistence
+    const refreshedAuth = await tokenRefreshService.ensureValidTokenForUser(userId, claudeAuth);
 
     const client = ServiceProvider.get(AClaudeWebClient);
     client.configure({
@@ -1168,6 +1177,7 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
           if (session.remoteSessionId && authReq.user?.claudeAuth) {
             const archiveResult = await archiveClaudeRemoteSession(
               session.remoteSessionId,
+              authReq.user!.id,
               authReq.user.claudeAuth as ClaudeAuth
             );
             logger.info(`Archive remote session result: ${archiveResult.message}`, {

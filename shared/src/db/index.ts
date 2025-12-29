@@ -92,23 +92,29 @@ function getDbInstance(): NodePgDatabase<typeof schema> {
   return _db;
 }
 
+/**
+ * Create a lazy-initialization proxy for database objects.
+ * Uses dynamic property access which requires type assertions.
+ * This is a deliberate use of Record<string, unknown> for proxy forwarding.
+ */
+function createLazyProxy<T extends object>(getTarget: () => T): T {
+  return new Proxy({} as T, {
+    get(_, prop) {
+      const target = getTarget();
+      // Proxy handlers require dynamic access; cast is unavoidable but safe
+      // since we forward all property access to the actual target
+      const targetRecord = target as unknown as Record<string | symbol, unknown>;
+      const value = targetRecord[prop];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 // Create proxies for backward compatibility
 // These will lazily initialize the pool/db on first access
-export const pool: pg.Pool = new Proxy({} as pg.Pool, {
-  get(_, prop) {
-    const realPool = ensurePool();
-    const value = (realPool as any)[prop];
-    return typeof value === 'function' ? value.bind(realPool) : value;
-  },
-});
+export const pool: pg.Pool = createLazyProxy(ensurePool);
 
-export const db: NodePgDatabase<typeof schema> = new Proxy({} as NodePgDatabase<typeof schema>, {
-  get(_, prop) {
-    const realDb = getDbInstance();
-    const value = (realDb as any)[prop];
-    return typeof value === 'function' ? value.bind(realDb) : value;
-  },
-});
+export const db: NodePgDatabase<typeof schema> = createLazyProxy(getDbInstance);
 
 // Re-export schema tables (these don't need DB connection)
 export const { users, sessions, chatSessions, messages, events } = schema;
@@ -635,3 +641,17 @@ export {
   between,
   exists,
 } from 'drizzle-orm';
+
+// Re-export encrypted column types for schema definition
+export {
+  encryptedText,
+  encryptedJsonColumn,
+} from './encryptedColumns.js';
+
+// Re-export auth data types (canonical definitions from authTypes.ts)
+export type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from './authTypes.js';

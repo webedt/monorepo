@@ -24,6 +24,7 @@ import {
 } from '@webedt/shared';
 
 import { connectionTracker } from './api/middleware/connectionTracker.js';
+import { cleanupRateLimitStores } from './api/middleware/rateLimit.js';
 
 export interface GracefulShutdownConfig {
   /**
@@ -156,6 +157,10 @@ export async function gracefulShutdown(
     // Step 5b: Stop trash cleanup service
     logger.info('Stopping trash cleanup service', { component: 'GracefulShutdown' });
     await trashCleanupService.dispose();
+
+    // Step 5c: Clean up rate limit stores
+    logger.info('Cleaning up rate limit stores', { component: 'GracefulShutdown' });
+    cleanupRateLimitStores();
 
     // Step 6: Stop accepting new connections on the server
     logger.info('Closing HTTP server to new connections', { component: 'GracefulShutdown' });
