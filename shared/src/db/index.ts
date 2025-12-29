@@ -641,3 +641,17 @@ export {
   between,
   exists,
 } from 'drizzle-orm';
+
+// Re-export encrypted column types for schema definition
+export {
+  encryptedText,
+  encryptedJsonColumn,
+} from './encryptedColumns.js';
+
+// Re-export auth data types (canonical definitions from authTypes.ts)
+export type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from './authTypes.js';
