@@ -561,6 +561,9 @@ export class MidiParser {
     let value = 0;
     let byte: number;
     do {
+      if (this.position >= this.data.length) {
+        throw new Error('Unexpected end of file while reading variable length quantity');
+      }
       byte = this.data[this.position++];
       value = (value << 7) | (byte & 0x7f);
     } while (byte & 0x80);
