@@ -11,6 +11,8 @@ import { sceneStore } from '../../stores/sceneStore';
 import { editModeStore } from '../../stores/editModeStore';
 import { customComponentsStore } from '../../stores';
 
+import './scene-viewport.css';
+
 import type { SceneObject, Scene } from '../../stores/sceneStore';
 import type { EditMode } from '../../stores/editModeStore';
 import type { CustomComponentChild } from '../../types';

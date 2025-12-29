@@ -6,6 +6,8 @@
 import { Component } from '../base/Component';
 import { beatGridStore } from '../../stores/beatGridStore';
 
+import './waveform-editor.css';
+
 import type { BeatGridSettings } from '../../stores/beatGridStore';
 
 export interface AudioSelection {
@@ -182,6 +184,9 @@ export class WaveformEditor extends Component<HTMLDivElement> {
 
     const width = this.canvas.width / window.devicePixelRatio;
     const height = this.canvas.height / window.devicePixelRatio;
+
+    // Guard against division by zero
+    if (width === 0 || height === 0) return;
 
     // Clear
     this.ctx.fillStyle = '#0f1117';

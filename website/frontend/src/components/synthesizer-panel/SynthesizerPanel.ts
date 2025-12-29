@@ -7,6 +7,8 @@ import { Component } from '../base/Component';
 import { audioSourceStore } from '../../stores/audioSourceStore';
 import { AUDIO_PRESETS } from '../../lib/audio';
 
+import './synthesizer-panel.css';
+
 import type { AudioSourceSettings } from '../../stores/audioSourceStore';
 import type { WaveformType } from '../../lib/audio';
 

@@ -6,6 +6,8 @@
 import { Component } from '../base/Component';
 import { sceneStore } from '../../stores/sceneStore';
 
+import './scene-hierarchy-panel.css';
+
 import type { SceneObject } from '../../stores/sceneStore';
 
 export interface SceneHierarchyPanelOptions {
@@ -63,6 +65,23 @@ export class SceneHierarchyPanel extends Component {
         this.options.onAddObject?.();
       });
     }
+
+    // Use event delegation for hierarchy items to avoid memory leak
+    const treeContainer = this.element.querySelector('.hierarchy-tree');
+    if (treeContainer) {
+      this.on(treeContainer, 'click', (e) => {
+        const target = e.target as HTMLElement;
+        const hierarchyItem = target.closest('.hierarchy-item') as HTMLElement | null;
+        if (hierarchyItem) {
+          const objectId = hierarchyItem.dataset.id;
+          if (objectId) {
+            this.selectedObjectId = objectId;
+            this.updateHierarchy();
+            this.options.onObjectSelect?.(objectId);
+          }
+        }
+      });
+    }
   }
 
   private updateHierarchy(): void {
@@ -96,18 +115,7 @@ export class SceneHierarchyPanel extends Component {
     `).join('');
 
     treeContainer.innerHTML = items;
-
-    // Add click handlers
-    treeContainer.querySelectorAll('.hierarchy-item').forEach(item => {
-      this.on(item, 'click', () => {
-        const objectId = (item as HTMLElement).dataset.id;
-        if (objectId) {
-          this.selectedObjectId = objectId;
-          this.updateHierarchy();
-          this.options.onObjectSelect?.(objectId);
-        }
-      });
-    });
+    // Click handlers are managed via event delegation in setupEventListeners()
   }
 
   private getObjectIcon(obj: SceneObject): string {
