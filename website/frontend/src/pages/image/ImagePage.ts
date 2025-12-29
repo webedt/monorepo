@@ -11,6 +11,9 @@ import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { imageLayersStore } from '../../stores/imageLayersStore';
 import { onionSkinningStore } from '../../stores/onionSkinningStore';
+import { formatInfo } from '../../lib/export';
+
+import type { ExportFormat } from '../../lib/export';
 import type { OnionSkinningSettings } from '../../stores/onionSkinningStore';
 import type { Session } from '../../types';
 import './image.css';
@@ -63,6 +66,9 @@ export class ImagePage extends Page<ImagePageOptions> {
   private currentFilePath: string | null = null;
   private hasUnsavedChanges = false;
 
+  // Export format
+  private selectedFormat: ExportFormat = 'png';
+
   // Event handlers for cleanup
   private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
@@ -105,7 +111,15 @@ export class ImagePage extends Page<ImagePageOptions> {
             <div class="ai-status-badge">
               <span class="ai-badge ai-badge--online">AI Ready</span>
             </div>
-            <div class="save-btn-container"></div>
+            <div class="export-controls">
+              <select class="format-selector" title="Export Format">
+                <option value="png" selected>PNG</option>
+                <option value="jpg">JPEG</option>
+                <option value="ora">OpenRaster (.ora)</option>
+                <option value="psd">Photoshop (.psd)</option>
+              </select>
+              <div class="save-btn-container"></div>
+            </div>
           </div>
         </header>
         <div class="offline-indicator-container"></div>
@@ -296,10 +310,18 @@ export class ImagePage extends Page<ImagePageOptions> {
       });
     }
 
+    // Setup format selector
+    const formatSelector = this.$('.format-selector') as HTMLSelectElement;
+    if (formatSelector) {
+      formatSelector.addEventListener('change', () => {
+        this.selectedFormat = formatSelector.value as ExportFormat;
+      });
+    }
+
     // Setup save button
     const saveBtnContainer = this.$('.save-btn-container') as HTMLElement;
     if (saveBtnContainer) {
-      const saveBtn = new Button('Save', {
+      const saveBtn = new Button('Export', {
         variant: 'primary',
         size: 'sm',
         onClick: () => this.saveImage(),
@@ -1426,8 +1448,11 @@ export class ImagePage extends Page<ImagePageOptions> {
     this.isSaving = true;
 
     try {
-      // Get composite image from all layers
-      const blob = await imageLayersStore.getCompositeBlob('image/png');
+      // Get the format info for the selected format
+      const format = formatInfo[this.selectedFormat];
+
+      // Export image in selected format
+      const blob = await imageLayersStore.exportAs(this.selectedFormat);
 
       if (!blob) {
         throw new Error('Failed to create image');
@@ -1451,16 +1476,22 @@ export class ImagePage extends Page<ImagePageOptions> {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'image.png';
+        a.download = `image${format.extension}`;
         a.click();
         URL.revokeObjectURL(url);
-        toast.success('Image downloaded');
+
+        // Show format-specific success message
+        if (this.selectedFormat === 'ora' || this.selectedFormat === 'psd') {
+          toast.success(`Exported as ${format.name} with layers preserved`);
+        } else {
+          toast.success(`Image downloaded as ${format.name}`);
+        }
       }
 
       this.hasUnsavedChanges = false;
     } catch (error) {
       console.error('Failed to save image:', error);
-      toast.error('Failed to save image');
+      toast.error('Failed to export image');
     } finally {
       this.isSaving = false;
     }

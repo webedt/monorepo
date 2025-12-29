@@ -46,6 +46,9 @@ export interface ClaudeAuth {
 
 export interface CodexAuth {
   apiKey?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
 }
 
 export interface GeminiAuth {
