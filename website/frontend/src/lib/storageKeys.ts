@@ -1,6 +1,6 @@
 /**
  * Storage Keys
- * Centralized constants for all localStorage keys used in the application.
+ * Centralized constants for all localStorage and sessionStorage keys used in the application.
  * This prevents key collisions and makes it easy to find all storage usage.
  */
 
@@ -8,7 +8,7 @@
 const PREFIX = 'webedt';
 
 /**
- * Storage keys for store persistence
+ * Storage keys for store persistence (localStorage)
  */
 export const STORE_KEYS = {
   /** Widget layout and configuration */
@@ -23,6 +23,15 @@ export const STORE_KEYS = {
   EDITOR_SETTINGS: `${PREFIX}_editor_settings`,
   /** Onion skinning preferences for animation */
   ONION_SKINNING: `${PREFIX}_onion_skinning`,
+} as const;
+
+/**
+ * Storage keys for session persistence (sessionStorage)
+ * These persist only within the current browser tab session.
+ */
+export const SESSION_KEYS = {
+  /** Worker execution state (active session, heartbeat) */
+  WORKER: `${PREFIX}_worker_store`,
 } as const;
 
 /**

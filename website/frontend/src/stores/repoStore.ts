@@ -143,3 +143,11 @@ if (import.meta.hot) {
     repoStore.saveForHmr();
   });
 }
+
+/**
+ * Clear the storage cache. Used by tests to ensure fresh reads from localStorage.
+ * @internal
+ */
+export function __clearStorageCache(): void {
+  repoStorage.clearCache();
+}

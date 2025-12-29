@@ -19,12 +19,22 @@
 
 import type { ZodType } from 'zod';
 
+/** Storage backend type - 'local' for localStorage, 'session' for sessionStorage */
+export type StorageType = 'local' | 'session';
+
+/** Get the storage backend based on type */
+function getStorage(type: StorageType): Storage {
+  return type === 'session' ? sessionStorage : localStorage;
+}
+
 export interface TypedStorageOptions<T> {
   key: string;
   schema: ZodType<T>;
   defaultValue: T;
   version?: number;
   migrate?: (oldData: unknown, oldVersion: number) => T;
+  /** Storage backend to use. Defaults to 'local' (localStorage). */
+  storageType?: StorageType;
 }
 
 export class TypedStorage<T> {
@@ -33,6 +43,7 @@ export class TypedStorage<T> {
   private readonly defaultValue: T;
   private readonly version: number;
   private readonly migrate?: (oldData: unknown, oldVersion: number) => T;
+  private readonly storage: Storage;
   private cache: T | null = null;
 
   constructor(options: TypedStorageOptions<T>) {
@@ -41,6 +52,7 @@ export class TypedStorage<T> {
     this.defaultValue = options.defaultValue;
     this.version = options.version ?? 1;
     this.migrate = options.migrate;
+    this.storage = getStorage(options.storageType ?? 'local');
   }
 
   /**
@@ -53,7 +65,7 @@ export class TypedStorage<T> {
     }
 
     try {
-      const raw = localStorage.getItem(this.key);
+      const raw = this.storage.getItem(this.key);
       if (!raw) {
         this.cache = this.defaultValue;
         return this.defaultValue;
@@ -83,7 +95,7 @@ export class TypedStorage<T> {
         data: validated,
       };
 
-      localStorage.setItem(this.key, JSON.stringify(wrapped));
+      this.storage.setItem(this.key, JSON.stringify(wrapped));
       this.cache = validated;
     } catch (error) {
       console.error(`TypedStorage: Failed to save ${this.key}:`, error);
@@ -104,7 +116,7 @@ export class TypedStorage<T> {
    */
   remove(): void {
     try {
-      localStorage.removeItem(this.key);
+      this.storage.removeItem(this.key);
       this.cache = null;
     } catch (error) {
       console.error(`TypedStorage: Failed to remove ${this.key}:`, error);
@@ -216,16 +228,19 @@ export class SimpleStorage<T extends string | number | boolean> {
   private readonly key: string;
   private readonly defaultValue: T;
   private readonly validator?: (value: unknown) => value is T;
+  private readonly storage: Storage;
   private cache: T | null = null;
 
   constructor(
     key: string,
     defaultValue: T,
-    validator?: (value: unknown) => value is T
+    validator?: (value: unknown) => value is T,
+    storageType: StorageType = 'local'
   ) {
     this.key = key;
     this.defaultValue = defaultValue;
     this.validator = validator;
+    this.storage = getStorage(storageType);
   }
 
   get(): T {
@@ -234,7 +249,7 @@ export class SimpleStorage<T extends string | number | boolean> {
     }
 
     try {
-      const raw = localStorage.getItem(this.key);
+      const raw = this.storage.getItem(this.key);
       if (raw === null) {
         this.cache = this.defaultValue;
         return this.defaultValue;
@@ -267,7 +282,7 @@ export class SimpleStorage<T extends string | number | boolean> {
 
   set(value: T): void {
     try {
-      localStorage.setItem(this.key, String(value));
+      this.storage.setItem(this.key, String(value));
       this.cache = value;
     } catch (error) {
       console.error(`SimpleStorage: Failed to save ${this.key}:`, error);
@@ -276,10 +291,10 @@ export class SimpleStorage<T extends string | number | boolean> {
 
   remove(): void {
     try {
-      localStorage.removeItem(this.key);
+      this.storage.removeItem(this.key);
       this.cache = null;
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error(`SimpleStorage: Failed to remove ${this.key}:`, error);
     }
   }
 
@@ -296,6 +311,7 @@ export class ArrayStorage<T> {
   private readonly defaultValue: T[];
   private readonly maxItems: number;
   private readonly itemValidator?: (item: unknown) => item is T;
+  private readonly storage: Storage;
   private cache: T[] | null = null;
 
   constructor(
@@ -304,12 +320,14 @@ export class ArrayStorage<T> {
     options: {
       maxItems?: number;
       itemValidator?: (item: unknown) => item is T;
+      storageType?: StorageType;
     } = {}
   ) {
     this.key = key;
     this.defaultValue = defaultValue;
     this.maxItems = options.maxItems ?? Infinity;
     this.itemValidator = options.itemValidator;
+    this.storage = getStorage(options.storageType ?? 'local');
   }
 
   get(): T[] {
@@ -318,7 +336,7 @@ export class ArrayStorage<T> {
     }
 
     try {
-      const raw = localStorage.getItem(this.key);
+      const raw = this.storage.getItem(this.key);
       if (!raw) {
         this.cache = [...this.defaultValue];
         return this.cache;
@@ -346,7 +364,7 @@ export class ArrayStorage<T> {
   set(value: T[]): void {
     try {
       const trimmed = value.slice(0, this.maxItems);
-      localStorage.setItem(this.key, JSON.stringify(trimmed));
+      this.storage.setItem(this.key, JSON.stringify(trimmed));
       this.cache = trimmed;
     } catch (error) {
       console.error(`ArrayStorage: Failed to save ${this.key}:`, error);
@@ -368,10 +386,10 @@ export class ArrayStorage<T> {
 
   remove(): void {
     try {
-      localStorage.removeItem(this.key);
+      this.storage.removeItem(this.key);
       this.cache = null;
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error(`ArrayStorage: Failed to remove ${this.key}:`, error);
     }
   }
 
@@ -387,16 +405,19 @@ export class RecordStorage<T> {
   private readonly key: string;
   private readonly defaultValue: Record<string, T>;
   private readonly schema?: ZodType<Record<string, T>>;
+  private readonly storage: Storage;
   private cache: Record<string, T> | null = null;
 
   constructor(
     key: string,
     defaultValue: Record<string, T>,
-    schema?: ZodType<Record<string, T>>
+    schema?: ZodType<Record<string, T>>,
+    storageType: StorageType = 'local'
   ) {
     this.key = key;
     this.defaultValue = defaultValue;
     this.schema = schema;
+    this.storage = getStorage(storageType);
   }
 
   get(): Record<string, T> {
@@ -405,7 +426,7 @@ export class RecordStorage<T> {
     }
 
     try {
-      const raw = localStorage.getItem(this.key);
+      const raw = this.storage.getItem(this.key);
       if (!raw) {
         this.cache = { ...this.defaultValue };
         return this.cache;
@@ -437,7 +458,7 @@ export class RecordStorage<T> {
 
   set(value: Record<string, T>): void {
     try {
-      localStorage.setItem(this.key, JSON.stringify(value));
+      this.storage.setItem(this.key, JSON.stringify(value));
       this.cache = value;
     } catch (error) {
       console.error(`RecordStorage: Failed to save ${this.key}:`, error);
@@ -451,10 +472,10 @@ export class RecordStorage<T> {
 
   remove(): void {
     try {
-      localStorage.removeItem(this.key);
+      this.storage.removeItem(this.key);
       this.cache = null;
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error(`RecordStorage: Failed to remove ${this.key}:`, error);
     }
   }
 

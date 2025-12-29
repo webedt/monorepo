@@ -7,8 +7,13 @@ import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
 import { sessionsApi, userApi, createSessionExecuteEventSource } from '../../lib/api';
 import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
-import { UI_KEYS, LEGACY_KEYS } from '../../lib/storageKeys';
-import { SimpleStorage, RecordStorage } from '../../lib/typedStorage';
+import { LEGACY_KEYS } from '../../lib/storageKeys';
+import {
+  chatViewModeStorage,
+  chatTimestampsStorage,
+  chatWidescreenStorage,
+  chatEventFiltersStorage,
+} from '../../lib/storageInstances';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
 
@@ -106,15 +111,6 @@ const NORMAL_MODE_EVENTS: Set<string> = new Set([
   'session_created', // Session started
   'session-created', // Session started (alt format)
 ]);
-
-// Typed storage instances for chat settings
-const chatViewModeStorage = new SimpleStorage<string>(UI_KEYS.CHAT_VIEW_MODE, '');
-const chatTimestampsStorage = new SimpleStorage<boolean>(UI_KEYS.CHAT_SHOW_TIMESTAMPS, false);
-const chatWidescreenStorage = new SimpleStorage<boolean>(UI_KEYS.CHAT_WIDESCREEN, false);
-const chatEventFiltersStorage = new RecordStorage<boolean>(
-  UI_KEYS.CHAT_EVENT_FILTERS,
-  { ...DEFAULT_EVENT_FILTERS }
-);
 
 interface ChatPageOptions extends PageOptions {
   params?: {

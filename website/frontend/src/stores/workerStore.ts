@@ -3,7 +3,11 @@
  * Tracks AI worker execution state
  */
 
+import { z } from 'zod';
+
 import { Store } from '../lib/store';
+import { SESSION_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
 
 interface WorkerState {
   executingSessionId: string | null;
@@ -12,42 +16,50 @@ interface WorkerState {
   lastHeartbeat: number | null;
 }
 
+const WorkerStateSchema = z.object({
+  executingSessionId: z.string().nullable(),
+  executionStartedAt: z.number().nullable(),
+  hasActiveStream: z.boolean(),
+  lastHeartbeat: z.number().nullable(),
+});
+
+const DEFAULT_STATE: WorkerState = {
+  executingSessionId: null,
+  executionStartedAt: null,
+  hasActiveStream: false,
+  lastHeartbeat: null,
+};
+
+// Use sessionStorage for tab-specific persistence
+const workerStorage = new TypedStorage({
+  key: SESSION_KEYS.WORKER,
+  schema: WorkerStateSchema,
+  defaultValue: DEFAULT_STATE,
+  version: 1,
+  storageType: 'session',
+});
+
 export class WorkerStore extends Store<WorkerState> {
   private heartbeatTimeout: number | null = null;
 
   constructor() {
-    super({
-      executingSessionId: null,
-      executionStartedAt: null,
-      hasActiveStream: false,
-      lastHeartbeat: null,
-    });
+    super(DEFAULT_STATE);
 
     // Persist to sessionStorage for tab survival
     this.loadFromStorage();
   }
 
   private loadFromStorage(): void {
-    try {
-      const stored = sessionStorage.getItem('workerStore');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Only restore if execution was recent (within 5 minutes)
-        if (parsed.executionStartedAt && Date.now() - parsed.executionStartedAt < 5 * 60 * 1000) {
-          this.setState(parsed);
-        }
-      }
-    } catch {
-      // Ignore parse errors
+    const stored = workerStorage.get();
+
+    // Only restore if execution was recent (within 5 minutes)
+    if (stored.executionStartedAt && Date.now() - stored.executionStartedAt < 5 * 60 * 1000) {
+      this.setState(stored);
     }
 
     // Save on changes
     this.subscribe((state) => {
-      try {
-        sessionStorage.setItem('workerStore', JSON.stringify(state));
-      } catch {
-        // Ignore storage errors
-      }
+      workerStorage.set(state);
     });
   }
 
@@ -153,4 +165,12 @@ if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     workerStore.saveForHmr();
   });
+}
+
+/**
+ * Clear the storage cache. Used by tests to ensure fresh reads from sessionStorage.
+ * @internal
+ */
+export function __clearStorageCache(): void {
+  workerStorage.clearCache();
 }

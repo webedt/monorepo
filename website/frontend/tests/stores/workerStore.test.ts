@@ -7,9 +7,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Import the actual WorkerStore class
-import { WorkerStore } from '../../src/stores/workerStore';
+import { WorkerStore, __clearStorageCache } from '../../src/stores/workerStore';
+import { SESSION_KEYS } from '../../src/lib/storageKeys';
 
-const STORAGE_KEY = 'workerStore';
+const STORAGE_KEY = SESSION_KEYS.WORKER;
 const STALE_THRESHOLD_MS = 30000; // 30 seconds
 const EXECUTION_RESTORE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -20,6 +21,8 @@ describe('WorkerStore', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     sessionStorage.clear();
+    // Clear TypedStorage cache to ensure fresh reads
+    __clearStorageCache();
     // Create fresh instance - sessionStorage is empty so initial state is defaults
     workerStore = new WorkerStore();
   });
@@ -338,22 +341,30 @@ describe('WorkerStore', () => {
       vi.setSystemTime(1000);
       workerStore.startExecution('session-123');
 
+      // TypedStorage uses versioned format
       const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
-      expect(stored.executingSessionId).toBe('session-123');
-      expect(stored.hasActiveStream).toBe(true);
+      expect(stored.version).toBe(1);
+      expect(stored.data.executingSessionId).toBe('session-123');
+      expect(stored.data.hasActiveStream).toBe(true);
     });
 
     it('should restore recent execution from sessionStorage', () => {
       const now = Date.now();
       vi.setSystemTime(now);
 
+      // TypedStorage expects versioned format
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-        executingSessionId: 'saved-session',
-        executionStartedAt: now - 60000, // 1 minute ago (within window)
-        hasActiveStream: true,
-        lastHeartbeat: now - 30000,
+        version: 1,
+        data: {
+          executingSessionId: 'saved-session',
+          executionStartedAt: now - 60000, // 1 minute ago (within window)
+          hasActiveStream: true,
+          lastHeartbeat: now - 30000,
+        },
       }));
 
+      // Clear cache to ensure fresh read from storage
+      __clearStorageCache();
       const store = new WorkerStore();
 
       expect(store.getState().executingSessionId).toBe('saved-session');
@@ -366,13 +377,19 @@ describe('WorkerStore', () => {
       const now = Date.now();
       vi.setSystemTime(now);
 
+      // TypedStorage expects versioned format
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-        executingSessionId: 'old-session',
-        executionStartedAt: now - (EXECUTION_RESTORE_WINDOW_MS + 1), // Too old
-        hasActiveStream: true,
-        lastHeartbeat: now - EXECUTION_RESTORE_WINDOW_MS,
+        version: 1,
+        data: {
+          executingSessionId: 'old-session',
+          executionStartedAt: now - (EXECUTION_RESTORE_WINDOW_MS + 1), // Too old
+          hasActiveStream: true,
+          lastHeartbeat: now - EXECUTION_RESTORE_WINDOW_MS,
+        },
       }));
 
+      // Clear cache to ensure fresh read from storage
+      __clearStorageCache();
       const store = new WorkerStore();
 
       expect(store.getState().executingSessionId).toBeNull();
@@ -383,6 +400,8 @@ describe('WorkerStore', () => {
     it('should handle malformed sessionStorage data', () => {
       sessionStorage.setItem(STORAGE_KEY, 'invalid json{{{');
 
+      // Clear cache to ensure fresh read from storage
+      __clearStorageCache();
       const store = new WorkerStore();
 
       // Should fall back to defaults

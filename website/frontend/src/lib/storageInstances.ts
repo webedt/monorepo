@@ -8,8 +8,34 @@
  * the same key will have inconsistent caches.
  */
 
-import { SimpleStorage, ArrayStorage } from './typedStorage';
+import { SimpleStorage, ArrayStorage, RecordStorage } from './typedStorage';
 import { UI_KEYS, COMPONENT_KEYS } from './storageKeys';
+
+// Default event filters for detailed chat mode
+const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
+  user: true,
+  user_message: true,
+  input_preview: true,
+  submission_preview: true,
+  resuming: false,
+  assistant: true,
+  assistant_message: true,
+  tool_use: true,
+  tool_result: false,
+  message: true,
+  system: false,
+  error: true,
+  connected: false,
+  completed: true,
+  session_name: true,
+  'session-created': true,
+  session_created: true,
+  title_generation: true,
+  result: true,
+  env_manager_log: false,
+  heartbeat: false,
+  thinking: true,
+};
 
 /**
  * Last selected repository (owner/repo format).
@@ -40,4 +66,31 @@ export const universalSearchRecentStorage = new ArrayStorage<string>(
     maxItems: 5,
     itemValidator: (item): item is string => typeof item === 'string',
   }
+);
+
+/**
+ * Chat view mode storage.
+ * Used by ChatPage to persist view mode preference.
+ */
+export const chatViewModeStorage = new SimpleStorage<string>(UI_KEYS.CHAT_VIEW_MODE, '');
+
+/**
+ * Chat timestamps toggle.
+ * Used by ChatPage to persist timestamp display preference.
+ */
+export const chatTimestampsStorage = new SimpleStorage<boolean>(UI_KEYS.CHAT_SHOW_TIMESTAMPS, false);
+
+/**
+ * Chat widescreen mode toggle.
+ * Used by ChatPage to persist widescreen preference.
+ */
+export const chatWidescreenStorage = new SimpleStorage<boolean>(UI_KEYS.CHAT_WIDESCREEN, false);
+
+/**
+ * Chat event filters for detailed mode.
+ * Used by ChatPage to persist which event types to show.
+ */
+export const chatEventFiltersStorage = new RecordStorage<boolean>(
+  UI_KEYS.CHAT_EVENT_FILTERS,
+  { ...DEFAULT_EVENT_FILTERS }
 );

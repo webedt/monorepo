@@ -7,9 +7,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Import the actual RepoStore class
-import { RepoStore } from '../../src/stores/repoStore';
+import { RepoStore, __clearStorageCache } from '../../src/stores/repoStore';
+import { STORE_KEYS } from '../../src/lib/storageKeys';
 
-const STORAGE_KEY = 'repoStore';
+const STORAGE_KEY = STORE_KEYS.REPO;
 const MAX_RECENT_REPOS = 10;
 
 describe('RepoStore', () => {
@@ -18,6 +19,8 @@ describe('RepoStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // Clear TypedStorage cache to ensure fresh reads
+    __clearStorageCache();
     // Create fresh instance - localStorage is empty so initial state is defaults
     repoStore = new RepoStore();
   });
@@ -233,19 +236,27 @@ describe('RepoStore', () => {
       const store = new RepoStore();
       store.selectRepo('owner/repo', 'main');
 
+      // TypedStorage uses versioned format
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      expect(stored.selectedRepo).toBe('owner/repo');
-      expect(stored.selectedBranch).toBe('main');
+      expect(stored.version).toBe(1);
+      expect(stored.data.selectedRepo).toBe('owner/repo');
+      expect(stored.data.selectedBranch).toBe('main');
     });
 
     it('should load state from localStorage on init', () => {
+      // TypedStorage expects versioned format
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        selectedRepo: 'saved/repo',
-        selectedBranch: 'saved-branch',
-        isLocked: true,
-        recentRepos: ['saved/repo', 'another/repo'],
+        version: 1,
+        data: {
+          selectedRepo: 'saved/repo',
+          selectedBranch: 'saved-branch',
+          isLocked: true,
+          recentRepos: ['saved/repo', 'another/repo'],
+        },
       }));
 
+      // Clear cache to ensure fresh read from storage
+      __clearStorageCache();
       const store = new RepoStore();
 
       const state = store.getState();
@@ -258,6 +269,8 @@ describe('RepoStore', () => {
     it('should handle malformed localStorage data', () => {
       localStorage.setItem(STORAGE_KEY, 'invalid json{{{');
 
+      // Clear cache to ensure fresh read from storage
+      __clearStorageCache();
       const store = new RepoStore();
 
       // Should fall back to defaults
@@ -265,11 +278,17 @@ describe('RepoStore', () => {
     });
 
     it('should handle partial localStorage data', () => {
+      // TypedStorage expects versioned format
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        selectedRepo: 'owner/repo',
-        // Missing other fields
+        version: 1,
+        data: {
+          selectedRepo: 'owner/repo',
+          // Missing other fields - TypedStorage merges with defaults
+        },
       }));
 
+      // Clear cache to ensure fresh read from storage
+      __clearStorageCache();
       const store = new RepoStore();
 
       expect(store.getState().selectedRepo).toBe('owner/repo');
