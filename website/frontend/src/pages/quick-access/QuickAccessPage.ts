@@ -3,11 +3,17 @@
  * Provides quick access to recent sessions and quick-start options
  */
 
+import { z } from 'zod';
+
 import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Icon, Spinner, toast, SearchableSelect } from '../../components';
 import { sessionsApi, githubApi } from '../../lib/api';
+import { UI_KEYS } from '../../lib/storageKeys';
+import { TypedStorage, SimpleStorage, ArrayStorage } from '../../lib/typedStorage';
 import { authStore } from '../../stores/authStore';
+
 import type { Session, Repository, Branch } from '../../types';
+
 import './quick-access.css';
 
 interface QuickStartTemplate {
@@ -17,6 +23,29 @@ interface QuickStartTemplate {
   repositoryName: string;
   defaultBranch: string;
 }
+
+const QuickStartTemplateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  repositoryOwner: z.string(),
+  repositoryName: z.string(),
+  defaultBranch: z.string(),
+});
+
+const quickStartTemplatesStorage = new TypedStorage({
+  key: UI_KEYS.QUICK_START_TEMPLATES,
+  schema: z.array(QuickStartTemplateSchema),
+  defaultValue: [],
+  version: 1,
+});
+
+const recentReposStorage = new ArrayStorage<string>(
+  UI_KEYS.RECENT_REPOS,
+  [],
+  { itemValidator: (item): item is string => typeof item === 'string' }
+);
+
+const lastRepoStorage = new SimpleStorage<string>(UI_KEYS.LAST_REPO, '');
 
 export class QuickAccessPage extends Page<PageOptions> {
   readonly route = '/quick-access';
@@ -325,36 +354,28 @@ export class QuickAccessPage extends Page<PageOptions> {
 
   private async loadQuickStartTemplates(): Promise<void> {
     try {
-      // Load templates from localStorage
-      const saved = localStorage.getItem('webedt_quick_start_templates');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Validate the parsed data structure
-        if (Array.isArray(parsed) && parsed.every(this.isValidTemplate)) {
-          this.quickStartTemplates = parsed;
-        }
+      // Load templates using typed storage
+      const saved = quickStartTemplatesStorage.get();
+      if (saved.length > 0) {
+        this.quickStartTemplates = saved;
       }
 
       // If no templates, create default from recent repos
       if (this.quickStartTemplates.length === 0) {
-        const recentRepos = localStorage.getItem('webedt_recent_repos');
-        if (recentRepos) {
-          const parsed = JSON.parse(recentRepos);
-          // Validate it's an array of strings
-          if (Array.isArray(parsed) && parsed.every((item): item is string => typeof item === 'string')) {
-            this.quickStartTemplates = parsed.slice(0, 3).map((repoStr, index) => {
-              const [owner, name] = repoStr.split('/');
-              // Try to find the repo in loaded repos to get actual default branch
-              const repo = this.repos.find(r => r.owner.login === owner && r.name === name);
-              return {
-                id: `template-${index}`,
-                name: name,
-                repositoryOwner: owner,
-                repositoryName: name,
-                defaultBranch: repo?.default_branch || 'main',
-              };
-            });
-          }
+        const recentRepos = recentReposStorage.get();
+        if (recentRepos.length > 0) {
+          this.quickStartTemplates = recentRepos.slice(0, 3).map((repoStr, index) => {
+            const [owner, name] = repoStr.split('/');
+            // Try to find the repo in loaded repos to get actual default branch
+            const repo = this.repos.find(r => r.owner.login === owner && r.name === name);
+            return {
+              id: `template-${index}`,
+              name: name,
+              repositoryOwner: owner,
+              repositoryName: name,
+              defaultBranch: repo?.default_branch || 'main',
+            };
+          });
         }
       }
     } catch (error) {
@@ -363,18 +384,6 @@ export class QuickAccessPage extends Page<PageOptions> {
     } finally {
       this.renderQuickStartTemplates();
     }
-  }
-
-  private isValidTemplate(item: unknown): item is QuickStartTemplate {
-    return (
-      typeof item === 'object' &&
-      item !== null &&
-      typeof (item as QuickStartTemplate).id === 'string' &&
-      typeof (item as QuickStartTemplate).name === 'string' &&
-      typeof (item as QuickStartTemplate).repositoryOwner === 'string' &&
-      typeof (item as QuickStartTemplate).repositoryName === 'string' &&
-      typeof (item as QuickStartTemplate).defaultBranch === 'string'
-    );
   }
 
   private renderQuickStartTemplates(): void {
@@ -537,7 +546,7 @@ export class QuickAccessPage extends Page<PageOptions> {
       });
 
       // Save to recent repos
-      localStorage.setItem('webedt_last_repo', `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
+      lastRepoStorage.set(`${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
 
       toast.success('Session created!');
       this.navigate(`/session/${response.session.id}/chat`);

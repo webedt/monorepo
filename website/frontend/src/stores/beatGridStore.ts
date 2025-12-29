@@ -3,6 +3,11 @@
  * Manages BPM, beat positions, and snap-to-grid settings for audio editing
  */
 
+import { z } from 'zod';
+
+import { STORE_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
+
 export interface BeatGridSettings {
   bpm: number;
   beatOffset: number; // Offset in seconds for first beat
@@ -22,7 +27,14 @@ export interface BeatPosition {
 
 type BeatGridListener = (settings: BeatGridSettings) => void;
 
-const STORAGE_KEY = 'webedt_beat_grid_settings';
+const BeatGridSettingsSchema = z.object({
+  bpm: z.number().min(20).max(300).default(120),
+  beatOffset: z.number().min(0).default(0),
+  beatsPerMeasure: z.number().min(1).max(16).default(4),
+  snapEnabled: z.boolean().default(true),
+  gridVisible: z.boolean().default(true),
+  subdivisions: z.union([z.literal(1), z.literal(2), z.literal(4)]).default(1),
+});
 
 const DEFAULT_SETTINGS: BeatGridSettings = {
   bpm: 120,
@@ -33,33 +45,23 @@ const DEFAULT_SETTINGS: BeatGridSettings = {
   subdivisions: 1,
 };
 
+const beatGridStorage = new TypedStorage({
+  key: STORE_KEYS.BEAT_GRID,
+  schema: BeatGridSettingsSchema,
+  defaultValue: DEFAULT_SETTINGS,
+  version: 1,
+});
+
 class BeatGridStore {
   private settings: BeatGridSettings;
   private listeners: Set<BeatGridListener> = new Set();
 
   constructor() {
-    this.settings = this.loadFromStorage();
-  }
-
-  private loadFromStorage(): BeatGridSettings {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return { ...DEFAULT_SETTINGS, ...parsed };
-      }
-    } catch (error) {
-      console.error('Failed to load beat grid settings:', error);
-    }
-    return { ...DEFAULT_SETTINGS };
+    this.settings = beatGridStorage.get();
   }
 
   private saveToStorage(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
-    } catch (error) {
-      console.error('Failed to save beat grid settings:', error);
-    }
+    beatGridStorage.set(this.settings);
   }
 
   private notifyListeners(): void {
