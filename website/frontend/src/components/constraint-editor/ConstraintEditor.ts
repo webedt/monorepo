@@ -90,7 +90,7 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
   private objectId: string;
   private options: ConstraintEditorOptions;
   private unsubscribe: (() => void) | null = null;
-  private prevConstraintIds: string[] = [];
+  private prevConstraintFingerprint: string = '';
   private prevShowConstraints: boolean = true;
   private prevSelectedId: string | null = null;
 
@@ -115,21 +115,21 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
   private subscribeToStore(): void {
     // Track previous state to avoid unnecessary re-renders
     const state = constraintStore.getState();
-    this.prevConstraintIds = this.getConstraintIds(state);
+    this.prevConstraintFingerprint = this.getConstraintFingerprint(state);
     this.prevShowConstraints = state.showConstraints;
     this.prevSelectedId = state.selectedConstraintId;
 
     this.unsubscribe = constraintStore.subscribe(() => {
       const newState = constraintStore.getState();
-      const newConstraintIds = this.getConstraintIds(newState);
+      const newFingerprint = this.getConstraintFingerprint(newState);
 
       // Only re-render if relevant state changed
-      const constraintsChanged = !this.arraysEqual(this.prevConstraintIds, newConstraintIds);
+      const constraintsChanged = this.prevConstraintFingerprint !== newFingerprint;
       const showChanged = this.prevShowConstraints !== newState.showConstraints;
       const selectionChanged = this.prevSelectedId !== newState.selectedConstraintId;
 
       if (constraintsChanged || showChanged || selectionChanged) {
-        this.prevConstraintIds = newConstraintIds;
+        this.prevConstraintFingerprint = newFingerprint;
         this.prevShowConstraints = newState.showConstraints;
         this.prevSelectedId = newState.selectedConstraintId;
         this.render();
@@ -140,17 +140,10 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
     });
   }
 
-  private getConstraintIds(state: ReturnType<typeof constraintStore.getState>): string[] {
+  private getConstraintFingerprint(state: ReturnType<typeof constraintStore.getState>): string {
     const constraints = state.objectConstraints[this.objectId]?.constraints || [];
-    return constraints.map(c => `${c.id}:${c.enabled}`);
-  }
-
-  private arraysEqual(a: string[], b: string[]): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
+    // Serialize constraint data to detect any field changes, not just id/enabled
+    return JSON.stringify(constraints);
   }
 
   protected onUnmount(): void {

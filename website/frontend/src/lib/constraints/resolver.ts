@@ -374,18 +374,42 @@ export class ConstraintResolver {
     // Use axis-aligned distance for single-axis constraints
     if (constraint.axis === 'horizontal') {
       const currentDist = Math.abs(dx);
-      if (currentDist < 0.001) return;
+      if (currentDist < 0.001) {
+        state.errors.push({
+          constraintId: constraint.id,
+          objectId,
+          message: 'Distance constraint skipped: objects are nearly aligned horizontally',
+          severity: 'warning',
+        });
+        return;
+      }
       const direction = dx >= 0 ? 1 : -1;
       newX = targetCenter.x + direction * desiredDistance - layout.width / 2;
     } else if (constraint.axis === 'vertical') {
       const currentDist = Math.abs(dy);
-      if (currentDist < 0.001) return;
+      if (currentDist < 0.001) {
+        state.errors.push({
+          constraintId: constraint.id,
+          objectId,
+          message: 'Distance constraint skipped: objects are nearly aligned vertically',
+          severity: 'warning',
+        });
+        return;
+      }
       const direction = dy >= 0 ? 1 : -1;
       newY = targetCenter.y + direction * desiredDistance - layout.height / 2;
     } else {
       // 'both' - use 2D Euclidean distance
       const currentDistance = Math.sqrt(dx * dx + dy * dy);
-      if (currentDistance < 0.001) return;
+      if (currentDistance < 0.001) {
+        state.errors.push({
+          constraintId: constraint.id,
+          objectId,
+          message: 'Distance constraint skipped: objects are at nearly the same position',
+          severity: 'warning',
+        });
+        return;
+      }
       const scale = desiredDistance / currentDistance;
       newX = targetCenter.x + dx * scale - layout.width / 2;
       newY = targetCenter.y + dy * scale - layout.height / 2;

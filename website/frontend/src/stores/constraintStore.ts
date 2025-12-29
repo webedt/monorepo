@@ -272,10 +272,12 @@ export const constraintStore = createStore<
         constraintsToAdd.push(createMarginConstraint(objectId, parent, { top: 0, bottom: 0 }));
         break;
       case 'center-horizontal':
-        constraintsToAdd.push(createPinConstraint(objectId, 'center-left', parent, 'center-left', 0, 0));
+        // Pin top-center to top-center to center horizontally while preserving vertical position
+        constraintsToAdd.push(createPinConstraint(objectId, 'top-center', parent, 'top-center', 0, 0));
         break;
       case 'center-vertical':
-        constraintsToAdd.push(createPinConstraint(objectId, 'top-center', parent, 'top-center', 0, 0));
+        // Pin center-left to center-left to center vertically while preserving horizontal position
+        constraintsToAdd.push(createPinConstraint(objectId, 'center-left', parent, 'center-left', 0, 0));
         break;
       case 'center-both':
         constraintsToAdd.push(createPinConstraint(objectId, 'center', parent, 'center', 0, 0));
