@@ -85,6 +85,8 @@ export const daemonCommand = new Command('daemon')
       ),
     };
 
+    console.log('Project columns:', Object.keys(projectCache.statusOptions).join(', '));
+
     // Initialize token refresh service
     const tokenRefreshService = new DaemonTokenRefreshService();
 
@@ -158,11 +160,18 @@ interface IssueCooldown {
 /** Default number of cycles to wait before re-checking an issue */
 const DEFAULT_COOLDOWN_CYCLES = 3;
 
-/** Maximum cycles before considering an operation stuck and restarting */
-const MAX_STUCK_CYCLES = 6;
-
-/** Maximum time (ms) a session can be "running" before considered stuck (30 minutes) */
+/**
+ * Maximum time (ms) a session can be "running" before considered stuck.
+ * This is the PRIMARY stuck detection mechanism.
+ * Set to 30 minutes to give Claude enough time to work.
+ */
 const MAX_RUNNING_TIME_MS = 30 * 60 * 1000;
+
+/**
+ * Number of failed attempts before deprioritizing an issue.
+ * After this many timeouts/failures, the issue will be moved to the bottom of backlog.
+ */
+const MAX_FAILURE_ATTEMPTS = 3;
 
 interface DaemonContext {
   rootDir: string;
@@ -258,8 +267,9 @@ function incrementCooldownCycles(ctx: DaemonContext): void {
   for (const [issueNumber, cooldown] of ctx.issueCooldowns.entries()) {
     cooldown.cycleCount++;
 
-    // Clean up expired cooldowns (more than max stuck cycles)
-    if (cooldown.cycleCount > MAX_STUCK_CYCLES * 2) {
+    // Clean up old cooldowns (after 1 hour of cycles)
+    // At 5s intervals, that's 720 cycles
+    if (cooldown.cycleCount > 720) {
       ctx.issueCooldowns.delete(issueNumber);
     }
   }
@@ -275,15 +285,6 @@ function isInCooldown(ctx: DaemonContext, issueNumber: number): boolean {
   return cooldown.cycleCount < DEFAULT_COOLDOWN_CYCLES;
 }
 
-/**
- * Check if an issue is stuck (past max stuck cycles, needs restart)
- */
-function isStuck(ctx: DaemonContext, issueNumber: number): boolean {
-  const cooldown = ctx.issueCooldowns.get(issueNumber);
-  if (!cooldown) return false;
-
-  return cooldown.cycleCount >= MAX_STUCK_CYCLES;
-}
 
 /**
  * Set cooldown for an issue
@@ -330,22 +331,25 @@ async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
   console.log('\nFetching project items from GitHub...');
   const itemsByStatus = await projectsService.getItemsByStatus(projectCache.projectId);
 
-  // Print current state
+  // Print current state - normalize status names to lowercase for lookup
   const statusCounts: Record<string, number> = {};
+  const normalizedItemsByStatus = new Map<string, ProjectItem[]>();
   for (const [status, items] of itemsByStatus) {
-    statusCounts[status] = items.length;
+    const normalizedStatus = status.toLowerCase();
+    statusCounts[normalizedStatus] = items.length;
+    normalizedItemsByStatus.set(normalizedStatus, items);
   }
   console.log('Current status:', Object.entries(statusCounts).map(([k, v]) => `${k}:${v}`).join(' '));
 
-  // Get items by column
-  const backlog = itemsByStatus.get('backlog') || [];
-  const ready = itemsByStatus.get('ready') || [];
-  const inProgress = itemsByStatus.get('in progress') || [];
-  const inReview = itemsByStatus.get('in review') || [];
+  // Get items by column (using normalized lowercase keys)
+  const backlog = normalizedItemsByStatus.get('backlog') || [];
+  const ready = normalizedItemsByStatus.get('ready') || [];
+  const inProgress = normalizedItemsByStatus.get('in progress') || [];
+  const inReview = normalizedItemsByStatus.get('in review') || [];
 
   // Step 1: Discover new tasks (create issues, add to backlog)
   console.log('\n1. Discovering tasks...');
-  await discoverAndSync(ctx, backlog.length);
+  await discoverAndSync(ctx, backlog.length, ready.length, maxReady);
 
   // Step 2: Move backlog -> ready (top items up to maxReady)
   console.log('\n2. Moving tasks to Ready...');
@@ -364,8 +368,13 @@ async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
   await reviewCompletedTasks(ctx, inReview);
 }
 
-async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promise<void> {
-  const { rootDir, owner, repo, issuesService, projectsService, projectCache } = ctx;
+async function discoverAndSync(
+  ctx: DaemonContext,
+  backlogCount: number,
+  readyCount: number,
+  maxReady: number
+): Promise<void> {
+  const { rootDir, owner, repo, issuesService, projectsService, projectCache, claudeAuth } = ctx;
 
   // Check throttling
   if (backlogCount > 10) {
@@ -382,7 +391,7 @@ async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promis
   });
   const existingTitles = new Set(existingIssues.map((i) => i.title));
 
-  // Find new tasks
+  // Find new tasks from TODO comments
   let created = 0;
   for (const todo of todos) {
     const title = `[${todo.type.toUpperCase()}] ${todo.text.slice(0, 80)}`;
@@ -417,7 +426,187 @@ async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promis
     }
   }
 
-  console.log(`   Created ${created} new issues`);
+  console.log(`   Created ${created} new issues from TODOs`);
+
+  // If backlog is empty, ready queue is not full, and no TODOs found, use Claude to discover new tasks
+  const totalPending = backlogCount + readyCount;
+  if (totalPending < maxReady && created === 0 && claudeAuth) {
+    console.log(`   Backlog empty, triggering AI task discovery...`);
+    await discoverTasksWithClaude(ctx, maxReady - totalPending, existingTitles);
+  }
+}
+
+/**
+ * Use Claude to analyze the codebase and discover new tasks
+ */
+async function discoverTasksWithClaude(
+  ctx: DaemonContext,
+  numTasks: number,
+  existingTitles: Set<string>
+): Promise<void> {
+  const { owner, repo, issuesService, projectsService, projectCache, claudeAuth, githubToken } = ctx;
+
+  if (!claudeAuth) {
+    console.log('   Skipping AI discovery: No Claude credentials');
+    return;
+  }
+
+  const environmentId = process.env.CLAUDE_ENVIRONMENT_ID;
+  if (!environmentId) {
+    console.log('   Skipping AI discovery: CLAUDE_ENVIRONMENT_ID not set');
+    return;
+  }
+
+  try {
+    const gitUrl = `https://github.com/${owner}/${repo}`;
+
+    const prompt = `Analyze this codebase and suggest ${numTasks} high-value tasks that would improve the project.
+
+Focus on:
+1. Code quality improvements (refactoring, removing duplication)
+2. Missing features based on existing patterns
+3. Test coverage gaps
+4. Documentation improvements
+5. Performance optimizations
+6. Security improvements
+
+For each task, provide:
+- A clear, actionable title (prefix with [SPEC] for features, [TODO] for improvements, [BUG] for fixes)
+- A brief description of what needs to be done
+- Why it would be valuable
+
+Format your response as a JSON array:
+\`\`\`json
+[
+  {
+    "title": "[SPEC] Feature name:: Brief description",
+    "body": "Detailed description of what needs to be done and why it's valuable."
+  }
+]
+\`\`\`
+
+Note: Existing tasks are: ${Array.from(existingTitles).slice(0, 20).join(', ')}
+Do NOT suggest tasks that duplicate these existing ones.`;
+
+    const claudeClient = new ClaudeWebClient({
+      accessToken: claudeAuth.accessToken,
+      environmentId,
+    });
+
+    console.log('   Starting AI task discovery session...');
+    const { sessionId, webUrl } = await claudeClient.createSession({
+      prompt,
+      gitUrl,
+      title: 'Auto-task discovery',
+    });
+
+    console.log(`   Discovery session: ${webUrl}`);
+
+    // Wait for the session to complete (with timeout)
+    const maxWaitMs = 5 * 60 * 1000; // 5 minutes
+    const startTime = Date.now();
+    let sessionComplete = false;
+    let lastResult: string | undefined;
+
+    while (!sessionComplete && Date.now() - startTime < maxWaitMs) {
+      await sleep(10000); // Check every 10 seconds
+
+      const session = await claudeClient.getSession(sessionId);
+      if (session.session_status === 'idle' || session.session_status === 'completed') {
+        sessionComplete = true;
+        // Get the session events to find the response
+        const events = await claudeClient.getEvents(sessionId);
+        for (const event of events.data.reverse()) {
+          if (event.type === 'result' || event.type === 'assistant') {
+            const content = typeof event.message?.content === 'string'
+              ? event.message.content
+              : Array.isArray(event.message?.content)
+                ? event.message.content.map((c: { text?: string }) => c.text || '').join('')
+                : '';
+            if (content.includes('[')) {
+              lastResult = content;
+              break;
+            }
+          }
+        }
+      } else if (session.session_status === 'failed' || session.session_status === 'archived') {
+        console.log(`   Discovery session ${session.session_status}`);
+        return;
+      }
+    }
+
+    if (!sessionComplete) {
+      console.log('   Discovery session timed out');
+      return;
+    }
+
+    // Parse the response
+    if (!lastResult) {
+      console.log('   No tasks discovered');
+      return;
+    }
+
+    // Extract JSON from the response
+    const jsonMatch = lastResult.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      console.log('   Could not parse discovery response');
+      return;
+    }
+
+    let tasks: Array<{ title: string; body: string }>;
+    try {
+      tasks = JSON.parse(jsonMatch[1]);
+    } catch {
+      console.log('   Invalid JSON in discovery response');
+      return;
+    }
+
+    // Create issues for discovered tasks
+    let created = 0;
+    for (const task of tasks) {
+      if (existingTitles.has(task.title)) continue;
+
+      try {
+        const issue = await issuesService.createIssue(owner, repo, {
+          title: task.title,
+          body: `${task.body}\n\n---\n*Discovered by auto-task AI*`,
+          labels: ['auto-task', 'ai-discovered'],
+        });
+
+        const { itemId } = await projectsService.addItemToProject(
+          projectCache.projectId,
+          issue.nodeId
+        );
+
+        const backlogId = projectCache.statusOptions['backlog'];
+        if (backlogId) {
+          await projectsService.updateItemStatus(
+            projectCache.projectId,
+            itemId,
+            projectCache.statusFieldId,
+            backlogId
+          );
+        }
+
+        console.log(`   Created AI-discovered issue #${issue.number}: ${task.title.slice(0, 50)}...`);
+        existingTitles.add(task.title);
+        created++;
+      } catch (error) {
+        console.error(`   Failed to create issue: ${error}`);
+      }
+    }
+
+    console.log(`   Created ${created} AI-discovered issues`);
+
+    // Archive the discovery session
+    try {
+      await claudeClient.archiveSession(sessionId);
+    } catch {
+      // Ignore archive errors
+    }
+  } catch (error) {
+    console.error(`   AI discovery failed: ${error}`);
+  }
 }
 
 async function moveBacklogToReady(
@@ -426,7 +615,7 @@ async function moveBacklogToReady(
   readyCount: number,
   maxReady: number
 ): Promise<void> {
-  const { projectsService, projectCache } = ctx;
+  const { projectsService, projectCache, issuesService, owner, repo } = ctx;
 
   const slotsAvailable = maxReady - readyCount;
 
@@ -435,12 +624,36 @@ async function moveBacklogToReady(
     return;
   }
 
-  // Sort by issue number (lower = older = higher priority) since we don't have priority stored
-  // Could also sort by labels or other criteria
-  const toMove = backlog
-    .filter((item) => item.contentType === 'Issue' && item.number)
-    .sort((a, b) => (a.number || 0) - (b.number || 0))
-    .slice(0, slotsAvailable);
+  // Filter to issues only
+  const backlogIssues = backlog.filter((item) => item.contentType === 'Issue' && item.number);
+
+  if (backlogIssues.length === 0) {
+    console.log('   No items in backlog');
+    return;
+  }
+
+  // Get failure counts for backlog items (from GitHub comments)
+  const issueFailureCounts = new Map<number, number>();
+  for (const item of backlogIssues) {
+    if (!item.number) continue;
+    try {
+      const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      issueFailureCounts.set(item.number, taskInfo?.failureCount || 0);
+    } catch {
+      issueFailureCounts.set(item.number, 0);
+    }
+  }
+
+  // Sort by: 1) failure count (lower first), 2) issue number (lower = older = higher priority)
+  // This ensures items that keep failing get deprioritized
+  const sorted = backlogIssues.sort((a, b) => {
+    const failA = issueFailureCounts.get(a.number!) || 0;
+    const failB = issueFailureCounts.get(b.number!) || 0;
+    if (failA !== failB) return failA - failB; // Lower failures first
+    return (a.number || 0) - (b.number || 0); // Then by issue number
+  });
+
+  const toMove = sorted.slice(0, slotsAvailable);
 
   const readyId = projectCache.statusOptions['ready'];
   if (!readyId) {
@@ -449,6 +662,7 @@ async function moveBacklogToReady(
   }
 
   for (const item of toMove) {
+    const failures = issueFailureCounts.get(item.number!) || 0;
     try {
       await projectsService.updateItemStatus(
         projectCache.projectId,
@@ -456,7 +670,7 @@ async function moveBacklogToReady(
         projectCache.statusFieldId,
         readyId
       );
-      console.log(`   Moved #${item.number} to Ready`);
+      console.log(`   Moved #${item.number} to Ready${failures > 0 ? ` (${failures} prior failures)` : ''}`);
     } catch (error) {
       console.error(`   Failed to move task: ${error}`);
     }
@@ -583,6 +797,9 @@ async function startTasks(
       }
 
       console.log(`   View at: ${webUrl}`);
+
+      // Set cooldown immediately so checkInProgressTasks doesn't timeout this session prematurely
+      setCooldown(ctx, item.number, isRework ? 'rework_started' : 'task_started', sessionId);
 
       // Add comment to issue with session link (this IS our session tracking)
       const commentBody = isRework && previousInfo
@@ -894,17 +1111,23 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
         }
       } else {
         // Session is still running - check for timeout
-        const commentTime = new Date(taskInfo.createdAt);
+        // Use cooldown actionTime (when we started tracking) rather than comment time
+        // Comment time may be from a previous attempt
+        const cooldown = ctx.issueCooldowns.get(item.number);
 
         // Track this session in cooldown if not already tracked
-        if (!ctx.issueCooldowns.has(item.number)) {
+        if (!cooldown) {
           setCooldown(ctx, item.number, 'task_started', taskInfo.sessionId);
+          console.log(`   Still running (just started tracking)...`);
+          return; // Give it at least one cycle before checking timeout
         }
 
-        // Check if stuck (30 min timeout OR max cycles reached)
-        if (isSessionTimedOut(commentTime) || isStuck(ctx, item.number)) {
-          const elapsed = Math.round((Date.now() - commentTime.getTime()) / 60000);
-          console.log(`   Session stuck (running for ${elapsed} min), interrupting and moving to backlog`);
+        const trackingStartTime = cooldown.actionTime;
+
+        // Check if stuck (30 min timeout only - cycles are just for cooldown)
+        if (isSessionTimedOut(trackingStartTime)) {
+          const elapsed = Math.round((Date.now() - trackingStartTime.getTime()) / 60000);
+          console.log(`   Session timed out (running for ${elapsed} min), interrupting and moving to backlog`);
 
           // Interrupt the stuck session
           try {
@@ -935,7 +1158,8 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
             `### ⏱️ Session Timeout\n\nThe Claude session was running for ${elapsed} minutes without completing.\n\nSession interrupted and task moved back to backlog for retry.\n\n**Previous Session:** ${taskInfo.sessionId}`
           );
         } else {
-          console.log(`   Still running...`);
+          const elapsed = Math.round((Date.now() - trackingStartTime.getTime()) / 60000);
+          console.log(`   Still running (${elapsed} min elapsed, timeout at 30 min)...`);
         }
       }
     } catch (error) {
@@ -1123,10 +1347,17 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
             console.log(`   #${item.number}: ${taskInfo.type} session status: ${session.session_status}`);
 
             if (session.session_status === 'running') {
-              // Check if stuck (too many cycles or timed out)
-              const commentTime = new Date(taskInfo.createdAt);
-              if (isStuck(ctx, item.number) || isSessionTimedOut(commentTime)) {
-                console.log(`   #${item.number}: Session stuck/timed out, interrupting and restarting`);
+              // Get or create cooldown to track when we started waiting
+              let cooldown = ctx.issueCooldowns.get(item.number);
+              if (!cooldown) {
+                setCooldown(ctx, item.number, 'conflict_resolution', taskInfo.sessionId);
+                cooldown = ctx.issueCooldowns.get(item.number)!;
+              }
+
+              // Check if timed out (30 min since we started tracking)
+              if (isSessionTimedOut(cooldown.actionTime)) {
+                const elapsed = Math.round((Date.now() - cooldown.actionTime.getTime()) / 60000);
+                console.log(`   #${item.number}: Session timed out (${elapsed} min), interrupting`);
 
                 // Interrupt the stuck session
                 try {
@@ -1144,16 +1375,14 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
                   owner,
                   repo,
                   item.number,
-                  `### ⚠️ Session Timeout\n\nThe ${taskInfo.type} session was stuck and has been restarted.\n\n**Previous Session:** ${taskInfo.sessionId}`
+                  `### ⚠️ Session Timeout\n\nThe ${taskInfo.type} session was running for ${elapsed} minutes without completing.\n\n**Previous Session:** ${taskInfo.sessionId}`
                 );
                 return;
               }
 
-              // Still running, not stuck yet - set/update cooldown
-              if (!ctx.issueCooldowns.has(item.number)) {
-                setCooldown(ctx, item.number, 'conflict_resolution', taskInfo.sessionId);
-              }
-              console.log(`   Still running, waiting...`);
+              // Still running, not timed out yet
+              const elapsed = Math.round((Date.now() - cooldown.actionTime.getTime()) / 60000);
+              console.log(`   Still running (${elapsed} min elapsed, timeout at 30 min)...`);
               return;
             } else if (session.session_status === 'idle' || session.session_status === 'completed') {
               // Session finished - clear cooldown and continue with review
@@ -1405,16 +1634,43 @@ async function checkAndMergePR(
       if (branchName && environmentId) {
         try {
           const gitUrl = `https://github.com/${owner}/${repo}`;
-          const conflictPrompt = `The branch "${branchName}" has merge conflicts with the main branch.
+          const conflictPrompt = `URGENT: The branch "${branchName}" has merge conflicts with the main branch that MUST be resolved before the PR can be merged.
 
-Please:
-1. Fetch the latest changes from origin
-2. Merge the main branch into this branch
-3. Resolve any merge conflicts carefully, preserving the intended functionality
-4. Commit the merge resolution
-5. Push the updated branch
+## Steps to resolve:
 
-Be careful to understand both sides of the conflicts before resolving them.`;
+1. First, make sure you're on the correct branch:
+   \`\`\`
+   git checkout ${branchName}
+   \`\`\`
+
+2. Fetch the latest changes:
+   \`\`\`
+   git fetch origin
+   \`\`\`
+
+3. Merge main into this branch (this will show conflicts):
+   \`\`\`
+   git merge origin/main
+   \`\`\`
+
+4. Git will show you which files have conflicts. For each conflicted file:
+   - Open the file and find the conflict markers (<<<<<<, =======, >>>>>>>)
+   - Understand what changes came from main vs this branch
+   - Resolve the conflict by keeping the correct code (usually combining both changes appropriately)
+   - Remove the conflict markers
+   - Save the file
+
+5. After resolving all conflicts:
+   \`\`\`
+   git add .
+   git commit -m "Merge main and resolve conflicts"
+   git push origin ${branchName}
+   \`\`\`
+
+## Important:
+- Do NOT skip this task - the PR cannot be merged until conflicts are resolved
+- Make sure to actually run the git commands and resolve the conflicts
+- After pushing, verify that the push succeeded`;
 
           const claudeClient = new ClaudeWebClient({
             accessToken: claudeAuth.accessToken,
