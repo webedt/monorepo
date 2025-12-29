@@ -228,6 +228,44 @@ export interface IMetricsRegistryDocumentation {
   recordRateLimitHit(tier: string, path: string): void;
 
   /**
+   * Record an SSE subscription.
+   *
+   * @param broadcasterType - Type of broadcaster ('session_event' or 'session_list')
+   */
+  recordSseSubscription(broadcasterType: string): void;
+
+  /**
+   * Record an SSE unsubscription.
+   *
+   * @param broadcasterType - Type of broadcaster ('session_event' or 'session_list')
+   */
+  recordSseUnsubscription(broadcasterType: string): void;
+
+  /**
+   * Record an SSE subscriber eviction (stale connection cleanup).
+   *
+   * @param broadcasterType - Type of broadcaster ('session_event' or 'session_list')
+   * @param reason - Reason for eviction ('timeout', 'heartbeat_failed', 'lru_eviction')
+   */
+  recordSseEviction(broadcasterType: string, reason: string): void;
+
+  /**
+   * Update the count of sessions with active SSE subscribers.
+   *
+   * @param broadcasterType - Type of broadcaster ('session_event' or 'session_list')
+   * @param count - Number of active sessions/users
+   */
+  updateSseSessionCount(broadcasterType: string, count: number): void;
+
+  /**
+   * Record an SSE heartbeat attempt.
+   *
+   * @param broadcasterType - Type of broadcaster ('session_event' or 'session_list')
+   * @param success - Whether the heartbeat succeeded
+   */
+  recordSseHeartbeat(broadcasterType: string, success: boolean): void;
+
+  /**
    * Reset all metrics (useful for testing).
    */
   reset(): void;

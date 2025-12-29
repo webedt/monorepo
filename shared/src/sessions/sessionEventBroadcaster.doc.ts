@@ -183,4 +183,17 @@ export interface ISessionEventBroadcasterDocumentation {
    * ```
    */
   getSubscriberCount(sessionId: string): number;
+
+  /**
+   * Get total subscriber count across all sessions.
+   *
+   * @returns Total number of subscribers
+   *
+   * @example
+   * ```typescript
+   * const total = sessionEventBroadcaster.getTotalSubscriberCount();
+   * console.log(`${total} total SSE connections`);
+   * ```
+   */
+  getTotalSubscriberCount(): number;
 }
