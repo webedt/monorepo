@@ -11,7 +11,6 @@ import type { CodexEventCallback } from './types.js';
 import type { CodexPollOptions } from './types.js';
 import type { CodexContentBlock } from './types.js';
 import type { CodexMessage } from './types.js';
-import type { OpenAIResponse } from './types.js';
 import type { OpenAIStreamEvent } from './types.js';
 import { CodexError } from './types.js';
 import { logger } from '../utils/logging/logger.js';
@@ -19,11 +18,62 @@ import { logger } from '../utils/logging/logger.js';
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_MODEL = 'gpt-4o';
 
+// Session store configuration
+const MAX_SESSIONS = 1000;  // Maximum sessions to keep in memory
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;  // 24 hours TTL
+
 /**
- * In-memory session store for Codex sessions
+ * Session entry with timestamp for TTL tracking
+ */
+interface SessionEntry {
+  session: CodexSession;
+  createdAt: number;
+}
+
+/**
+ * In-memory session store for Codex sessions with TTL cleanup
  * In production, this should be replaced with database storage
  */
-const sessionStore = new Map<string, CodexSession>();
+const sessionStore = new Map<string, SessionEntry>();
+
+/**
+ * Clean up expired sessions and enforce max size limit
+ */
+function cleanupSessionStore(): void {
+  const now = Date.now();
+  const expiredKeys: string[] = [];
+
+  // Find expired sessions
+  for (const [key, entry] of sessionStore) {
+    if (now - entry.createdAt > SESSION_TTL_MS) {
+      expiredKeys.push(key);
+    }
+  }
+
+  // Remove expired sessions
+  for (const key of expiredKeys) {
+    sessionStore.delete(key);
+  }
+
+  // If still over limit, remove oldest sessions
+  if (sessionStore.size > MAX_SESSIONS) {
+    const entries = [...sessionStore.entries()]
+      .sort((a, b) => a[1].createdAt - b[1].createdAt);
+
+    const toRemove = entries.slice(0, sessionStore.size - MAX_SESSIONS);
+    for (const [key] of toRemove) {
+      sessionStore.delete(key);
+    }
+  }
+
+  if (expiredKeys.length > 0 || sessionStore.size > MAX_SESSIONS) {
+    logger.debug('Session store cleanup completed', {
+      component: 'CodexClient',
+      expiredRemoved: expiredKeys.length,
+      currentSize: sessionStore.size,
+    });
+  }
+}
 
 export class CodexClient extends ACodexClient {
   private auth: CodexAuth;
@@ -140,6 +190,9 @@ export class CodexClient extends ACodexClient {
   }
 
   async createSession(params: CreateCodexSessionParams): Promise<CreateCodexSessionResult> {
+    // Run cleanup before creating new session
+    cleanupSessionStore();
+
     const sessionId = `codex_${randomUUID()}`;
     const title = params.title || this.generateTitle(params.prompt);
     const branchPrefix = params.branchPrefix || this.generateBranchPrefix(params.prompt);
@@ -168,7 +221,7 @@ export class CodexClient extends ACodexClient {
       }],
     };
 
-    sessionStore.set(sessionId, session);
+    sessionStore.set(sessionId, { session, createdAt: Date.now() });
 
     return {
       sessionId,
@@ -177,11 +230,22 @@ export class CodexClient extends ACodexClient {
   }
 
   async getSession(sessionId: string): Promise<CodexSession> {
-    const session = sessionStore.get(sessionId);
-    if (!session) {
+    const entry = sessionStore.get(sessionId);
+    if (!entry) {
       throw new CodexError(`Session not found: ${sessionId}`, 404);
     }
-    return session;
+    return entry.session;
+  }
+
+  /**
+   * Helper to update session in store
+   */
+  private updateSession(session: CodexSession): void {
+    const entry = sessionStore.get(session.id);
+    if (entry) {
+      entry.session = session;
+      sessionStore.set(session.id, entry);
+    }
   }
 
   async sendMessage(sessionId: string, message: string | CodexContentBlock[]): Promise<void> {
@@ -193,7 +257,7 @@ export class CodexClient extends ACodexClient {
     });
     session.updatedAt = new Date().toISOString();
 
-    sessionStore.set(sessionId, session);
+    this.updateSession(session);
   }
 
   async execute(
@@ -216,7 +280,7 @@ export class CodexClient extends ACodexClient {
     try {
       // Update session status
       session.status = 'running';
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
       // Execute with OpenAI Responses API
       const result = await this.executeWithOpenAI(
@@ -232,7 +296,7 @@ export class CodexClient extends ACodexClient {
       session.status = 'completed';
       session.totalCost = result.totalCost;
       session.updatedAt = new Date().toISOString();
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
       // Emit result event
       await onEvent({
@@ -262,7 +326,7 @@ export class CodexClient extends ACodexClient {
 
       session.status = 'failed';
       session.updatedAt = new Date().toISOString();
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
       await onEvent({
         uuid: randomUUID(),
@@ -329,7 +393,8 @@ export class CodexClient extends ACodexClient {
     const decoder = new TextDecoder();
     let fullOutput = '';
     let numTurns = 0;
-    let totalTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     try {
       while (true) {
@@ -352,15 +417,21 @@ export class CodexClient extends ACodexClient {
               fullOutput += event.delta;
             }
 
-            // Track completion
+            // Track completion and token usage
             if (event.response?.status === 'completed') {
               numTurns++;
               if (event.response.usage) {
-                totalTokens += event.response.usage.total_tokens;
+                inputTokens += event.response.usage.input_tokens;
+                outputTokens += event.response.usage.output_tokens;
               }
             }
-          } catch {
-            // Ignore parse errors for malformed chunks
+          } catch (parseError) {
+            // Log parse errors for debugging malformed chunks
+            logger.debug('Failed to parse stream chunk', {
+              component: 'CodexClient',
+              sessionId: session.id,
+              error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+            });
           }
         }
       }
@@ -368,17 +439,17 @@ export class CodexClient extends ACodexClient {
       reader.releaseLock();
     }
 
-    // Estimate cost based on tokens (approximate GPT-4o pricing)
-    const costPerInputToken = 0.0000025;  // $2.50 per 1M tokens
-    const costPerOutputToken = 0.00001;   // $10 per 1M tokens
-    const estimatedCost = totalTokens * ((costPerInputToken + costPerOutputToken) / 2);
+    // Calculate cost based on actual token counts (GPT-4o pricing)
+    const costPerInputToken = 0.0000025;  // $2.50 per 1M input tokens
+    const costPerOutputToken = 0.00001;   // $10 per 1M output tokens
+    const estimatedCost = (inputTokens * costPerInputToken) + (outputTokens * costPerOutputToken);
 
     // Store assistant response
     session.messages.push({
       role: 'assistant',
       content: fullOutput
     });
-    sessionStore.set(session.id, session);
+    this.updateSession(session);
 
     return {
       output: fullOutput,
@@ -478,22 +549,26 @@ export class CodexClient extends ACodexClient {
 
     try {
       session.status = 'running';
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
-      // Build context from conversation history
-      const conversationContext = session.messages.map(msg => ({
-        role: msg.role,
-        content: typeof msg.content === 'string' ? msg.content : this.extractTextFromPrompt(msg.content as CodexContentBlock[])
-      }));
+      // Format conversation history as structured messages for context
+      const formattedMessages = this.formatMessagesForOpenAI(session.messages);
 
-      // Create a prompt that includes conversation context
-      const contextPrompt = conversationContext.map(m => `${m.role}: ${m.content}`).join('\n\n');
+      // Build context including previous conversation
+      // Using a structured format that models understand better
+      const contextParts = formattedMessages.map(m => {
+        const roleLabel = m.role === 'user' ? 'User' : m.role === 'assistant' ? 'Assistant' : 'System';
+        return `### ${roleLabel}:\n${m.content}`;
+      });
+      const contextPrompt = contextParts.join('\n\n');
+
       const resumeParams: CreateCodexSessionParams = {
         prompt: contextPrompt,
         gitUrl: session.gitUrl || '',
         model: session.model,
         branchPrefix: session.branch,
         title: session.title,
+        systemInstructions: 'This is a continuation of a previous conversation. The conversation history is provided above. Continue from where we left off.',
       };
 
       const result = await this.executeWithOpenAI(
@@ -508,7 +583,7 @@ export class CodexClient extends ACodexClient {
       session.status = 'completed';
       session.totalCost = (session.totalCost || 0) + (result.totalCost || 0);
       session.updatedAt = new Date().toISOString();
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
       await onEvent({
         uuid: randomUUID(),
@@ -537,7 +612,7 @@ export class CodexClient extends ACodexClient {
 
       session.status = 'failed';
       session.updatedAt = new Date().toISOString();
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
       await onEvent({
         uuid: randomUUID(),
@@ -557,7 +632,7 @@ export class CodexClient extends ACodexClient {
     if (session.status === 'running') {
       session.status = 'cancelled';
       session.updatedAt = new Date().toISOString();
-      sessionStore.set(sessionId, session);
+      this.updateSession(session);
 
       logger.info('Codex session cancelled', {
         component: 'CodexClient',

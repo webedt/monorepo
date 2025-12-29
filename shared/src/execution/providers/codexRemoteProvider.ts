@@ -5,7 +5,6 @@
  * This provider enables AI-assisted code generation using OpenAI models.
  */
 
-import { randomUUID } from 'crypto';
 import { CodexClient } from '../../codex/codexClient.js';
 import { logger } from '../../utils/logging/logger.js';
 import type { CodexAuth } from '../../auth/codexAuth.js';
@@ -87,15 +86,25 @@ function convertCodexEvent(event: CodexEvent, source: string): ExecutionEvent {
         model: event.model,
       };
 
-    case 'tool_use':
+    case 'tool_use': {
+      let toolInput: Record<string, unknown> = {};
+      if (event.toolCall) {
+        try {
+          toolInput = JSON.parse(event.toolCall.function.arguments || '{}');
+        } catch {
+          // If arguments are not valid JSON, use empty object
+          toolInput = {};
+        }
+      }
       return {
         ...baseEvent,
         type: 'tool_use',
         tool_use: event.toolCall ? {
           name: event.toolCall.function.name,
-          input: JSON.parse(event.toolCall.function.arguments || '{}'),
+          input: toolInput,
         } : undefined,
       };
+    }
 
     case 'result':
       return {
