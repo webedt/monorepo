@@ -14,7 +14,6 @@ import { logger } from '../../utils/logging/logger.js';
 import { GEMINI_API_BASE_URL, GEMINI_DEFAULT_MODEL } from '../../config/env.js';
 
 import type { GeminiAuth } from '../../auth/lucia.js';
-import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import type { GeminiSessionEvent } from '../../gemini/types.js';
 import type { Content } from '../../gemini/types.js';
 import type {
@@ -28,18 +27,10 @@ import type {
 } from './types.js';
 
 /**
- * Extended ExecuteParams with Gemini auth
+ * Extended ResumeParams with conversation history for Gemini
  */
-export interface GeminiExecuteParams extends Omit<ExecuteParams, 'claudeAuth'> {
-  geminiAuth: GeminiAuth;
-}
-
-/**
- * Extended ResumeParams with Gemini auth
- */
-export interface GeminiResumeParams extends Omit<ResumeParams, 'claudeAuth'> {
-  geminiAuth: GeminiAuth;
-  /** Conversation history for context */
+export interface GeminiResumeParams extends ResumeParams {
+  /** Conversation history for context (Gemini doesn't have persistent sessions) */
   history?: Content[];
 }
 
@@ -123,22 +114,16 @@ export class GeminiProvider implements ExecutionProvider {
 
   /**
    * Execute a new AI request
-   *
-   * Note: This method accepts claudeAuth for interface compatibility,
-   * but actual implementations should use GeminiExecuteParams with geminiAuth.
    */
   async execute(
     params: ExecuteParams,
     onEvent: ExecutionEventCallback
   ): Promise<ExecutionResult> {
-    // Cast to access geminiAuth - the actual caller should pass GeminiExecuteParams
-    const geminiParams = params as unknown as GeminiExecuteParams;
-    const { chatSessionId, prompt, model, abortSignal } = params;
-    const geminiAuth = geminiParams.geminiAuth;
+    const { chatSessionId, prompt, model, geminiAuth, abortSignal } = params;
     const source = this.name;
 
     if (!geminiAuth) {
-      throw new Error('Gemini authentication required');
+      throw new Error('Gemini authentication required for GeminiProvider');
     }
 
     logger.info('Starting Gemini execution', {
@@ -221,15 +206,13 @@ export class GeminiProvider implements ExecutionProvider {
     params: ResumeParams,
     onEvent: ExecutionEventCallback
   ): Promise<ExecutionResult> {
-    // Cast to access geminiAuth and history
-    const geminiParams = params as unknown as GeminiResumeParams;
-    const { chatSessionId, remoteSessionId, prompt, abortSignal } = params;
-    const geminiAuth = geminiParams.geminiAuth;
-    const history = geminiParams.history || [];
+    const { chatSessionId, remoteSessionId, prompt, geminiAuth, abortSignal } = params;
+    // Cast to access history if provided
+    const history = (params as GeminiResumeParams).history || [];
     const source = this.name;
 
     if (!geminiAuth) {
-      throw new Error('Gemini authentication required');
+      throw new Error('Gemini authentication required for GeminiProvider');
     }
 
     logger.info('Resuming Gemini session', {
@@ -294,10 +277,10 @@ export class GeminiProvider implements ExecutionProvider {
    * Interrupt a running session
    *
    * Note: For Gemini, interruption is handled via the AbortSignal passed to the request.
-   * This method is a no-op since we can't interrupt remotely.
+   * This method is a no-op since Gemini doesn't have remote sessions to interrupt.
    */
-  async interrupt(remoteSessionId: string, claudeAuth: ClaudeAuth): Promise<void> {
-    logger.info('Gemini interrupt requested (no-op for Gemini)', {
+  async interrupt(remoteSessionId: string): Promise<void> {
+    logger.info('Gemini interrupt requested (no-op - use AbortSignal instead)', {
       component: 'GeminiProvider',
       remoteSessionId,
     });

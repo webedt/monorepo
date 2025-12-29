@@ -90,7 +90,7 @@ export class GeminiClient extends AGeminiClient {
       timestamp: new Date().toISOString(),
       message: {
         role: 'user',
-        content: typeof params.prompt === 'string' ? params.prompt : params.prompt,
+        content: params.prompt,
       },
     });
 
@@ -230,7 +230,7 @@ export class GeminiClient extends AGeminiClient {
       timestamp: new Date().toISOString(),
       message: {
         role: 'user',
-        content: typeof params.prompt === 'string' ? params.prompt : params.prompt,
+        content: params.prompt,
       },
     });
 

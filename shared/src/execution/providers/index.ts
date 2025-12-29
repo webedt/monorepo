@@ -17,7 +17,7 @@ export type {
   ExecutionEventCallback,
 } from './types.js';
 export type { SelfHostedWorkerConfig } from './selfHostedWorkerProvider.js';
-export type { GeminiExecuteParams, GeminiResumeParams } from './geminiProvider.js';
+export type { GeminiResumeParams } from './geminiProvider.js';
 
 import { ClaudeRemoteProvider } from './claudeRemoteProvider.js';
 import { SelfHostedWorkerProvider } from './selfHostedWorkerProvider.js';

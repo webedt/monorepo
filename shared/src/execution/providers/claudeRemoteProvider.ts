@@ -84,6 +84,10 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     const { chatSessionId, prompt, gitUrl, model, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
+    if (!claudeAuth) {
+      throw new Error('Claude authentication required for ClaudeRemoteProvider');
+    }
+
     logger.info('Starting Claude Remote execution', {
       component: 'ClaudeRemoteProvider',
       chatSessionId,
@@ -220,6 +224,10 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     const { chatSessionId, remoteSessionId, prompt, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
+    if (!claudeAuth) {
+      throw new Error('Claude authentication required for ClaudeRemoteProvider');
+    }
+
     logger.info('Resuming Claude Remote session', {
       component: 'ClaudeRemoteProvider',
       chatSessionId,
@@ -285,13 +293,17 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
   /**
    * Interrupt a running session
    */
-  async interrupt(remoteSessionId: string, claudeAuth: ClaudeAuth): Promise<void> {
+  async interrupt(remoteSessionId: string, auth?: ClaudeAuth): Promise<void> {
+    if (!auth) {
+      throw new Error('Claude authentication required for ClaudeRemoteProvider interrupt');
+    }
+
     logger.info('Interrupting Claude Remote session', {
       component: 'ClaudeRemoteProvider',
       remoteSessionId,
     });
 
-    const client = this.getClient(claudeAuth);
+    const client = this.getClient(auth);
     await client.interruptSession(remoteSessionId);
 
     logger.info('Claude Remote session interrupted', {

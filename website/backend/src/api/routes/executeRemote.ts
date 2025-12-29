@@ -598,12 +598,6 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     try {
       let result;
 
-      // Build auth params based on provider type
-      // For Gemini, we pass geminiAuth; for Claude, we pass claudeAuth
-      const authParams = providerType === 'gemini'
-        ? { geminiAuth: geminiAuth! }
-        : { claudeAuth: claudeAuth! };
-
       if (chatSession.remoteSessionId) {
         // Resume existing session
         // Pass full userRequest (may include images as content blocks)
@@ -613,10 +607,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             chatSessionId,
             remoteSessionId: chatSession.remoteSessionId,
             prompt: userRequest,
-            claudeAuth: claudeAuth!, // Required by interface, but Gemini uses geminiAuth
+            claudeAuth,
+            geminiAuth,
             environmentId,
             abortSignal: abortController.signal,
-            ...authParams,
           },
           sendEvent
         );
@@ -629,10 +623,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             chatSessionId,
             prompt: userRequest,
             gitUrl: repoUrl,
-            claudeAuth: claudeAuth!, // Required by interface, but Gemini uses geminiAuth
+            claudeAuth,
+            geminiAuth,
             environmentId,
             abortSignal: abortController.signal,
-            ...authParams,
           },
           sendEvent
         );
