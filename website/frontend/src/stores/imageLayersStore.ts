@@ -4,6 +4,10 @@
  */
 
 import { Store } from '../lib/store';
+import { exportToOra } from '../lib/export/oraExporter';
+import { exportToPsd } from '../lib/export/psdExporter';
+
+import type { ExportFormat } from '../lib/export';
 
 /**
  * Blend mode for layer compositing
@@ -603,6 +607,104 @@ function createImageLayersStore() {
           quality
         );
       });
+    },
+
+    /**
+     * Export image in the specified format
+     * Supports: png, jpg, ora (OpenRaster), psd (Photoshop)
+     */
+    async exportAs(format: ExportFormat, quality?: number): Promise<Blob | null> {
+      const state = store.getState();
+
+      // Create composite canvas for merged image
+      const compositeCanvas = createLayerCanvas(state.width, state.height);
+      this.compositeToCanvas(compositeCanvas);
+
+      let result: Blob | null = null;
+
+      try {
+        switch (format) {
+          case 'png':
+            result = await this.getCompositeBlob('image/png');
+            break;
+
+          case 'jpg':
+            result = await this.getCompositeBlob('image/jpeg', quality ?? 0.92);
+            break;
+
+          case 'ora':
+            result = await exportToOra(
+              state.layers,
+              state.width,
+              state.height,
+              compositeCanvas
+            );
+            break;
+
+          case 'psd':
+            result = exportToPsd(
+              state.layers,
+              state.width,
+              state.height,
+              compositeCanvas
+            );
+            break;
+
+          default:
+            console.warn(`Unknown export format: ${format}`);
+            result = await this.getCompositeBlob('image/png');
+        }
+      } finally {
+        // Clean up composite canvas
+        compositeCanvas.width = 0;
+        compositeCanvas.height = 0;
+      }
+
+      return result;
+    },
+
+    /**
+     * Export as ORA (OpenRaster) format
+     * Preserves layers, opacity, blend modes, and visibility
+     */
+    async exportAsOra(): Promise<Blob> {
+      const state = store.getState();
+      const compositeCanvas = createLayerCanvas(state.width, state.height);
+      this.compositeToCanvas(compositeCanvas);
+
+      try {
+        return await exportToOra(
+          state.layers,
+          state.width,
+          state.height,
+          compositeCanvas
+        );
+      } finally {
+        compositeCanvas.width = 0;
+        compositeCanvas.height = 0;
+      }
+    },
+
+    /**
+     * Export as PSD (Photoshop) format
+     * Preserves layers, opacity, blend modes, and visibility
+     */
+    exportAsPsd(): Blob {
+      const state = store.getState();
+      const compositeCanvas = createLayerCanvas(state.width, state.height);
+      this.compositeToCanvas(compositeCanvas);
+
+      try {
+        return exportToPsd(
+          state.layers,
+          state.width,
+          state.height,
+          compositeCanvas
+        );
+      } finally {
+        compositeCanvas.width = 0;
+        compositeCanvas.height = 0;
+      }
     },
   };
 }
