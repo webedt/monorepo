@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 import {
   encryptedText,
@@ -1217,14 +1217,14 @@ export const shareTokenAccessLog = pgTable('share_token_access_log', {
   success: boolean('success').notNull().default(true), // Whether access was granted
   failureReason: text('failure_reason'), // If !success: 'expired' | 'invalid' | 'rate_limited'
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => ({
+}, (table) => [
   // Index for efficient session-based queries (getAccessLogs, getAccessStats)
-  sessionIdIdx: { name: 'share_token_access_log_session_id_idx', columns: [table.sessionId] },
+  index('share_token_access_log_session_id_idx').on(table.sessionId),
   // Index for token-based lookups
-  shareTokenIdx: { name: 'share_token_access_log_share_token_idx', columns: [table.shareToken] },
+  index('share_token_access_log_share_token_idx').on(table.shareToken),
   // Index for time-based cleanup and range queries
-  createdAtIdx: { name: 'share_token_access_log_created_at_idx', columns: [table.createdAt] },
-}));
+  index('share_token_access_log_created_at_idx').on(table.createdAt),
+]);
 
 // Type exports for Share Token Access Log
 export type ShareTokenAccessLog = typeof shareTokenAccessLog.$inferSelect;
