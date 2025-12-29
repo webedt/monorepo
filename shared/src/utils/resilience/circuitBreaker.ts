@@ -1,17 +1,19 @@
 import { ACircuitBreaker, ACircuitBreakerRegistry } from './ACircuitBreaker.js';
+import { logger } from '../logging/logger.js';
+import { CIRCUIT_BREAKER } from '../../config/constants.js';
+
 import type { CircuitState } from './ACircuitBreaker.js';
 import type { CircuitBreakerConfig } from './ACircuitBreaker.js';
 import type { CircuitBreakerStats } from './ACircuitBreaker.js';
 import type { CircuitBreakerResult } from './ACircuitBreaker.js';
-import { logger } from '../logging/logger.js';
 
 export type { CircuitState, CircuitBreakerConfig, CircuitBreakerStats, CircuitBreakerResult } from './ACircuitBreaker.js';
 
 const DEFAULT_CONFIG: CircuitBreakerConfig = {
-  failureThreshold: 5,
-  successThreshold: 3,
-  resetTimeoutMs: 30000,
-  halfOpenMaxAttempts: 3,
+  failureThreshold: CIRCUIT_BREAKER.DEFAULT.FAILURE_THRESHOLD,
+  successThreshold: CIRCUIT_BREAKER.DEFAULT.SUCCESS_THRESHOLD,
+  resetTimeoutMs: CIRCUIT_BREAKER.DEFAULT.RESET_TIMEOUT_MS,
+  halfOpenMaxAttempts: CIRCUIT_BREAKER.DEFAULT.HALF_OPEN_MAX_ATTEMPTS,
   name: 'default',
 };
 

@@ -144,26 +144,55 @@ export function createStore<T extends object, A extends object>(
   return Object.assign(store, boundActions);
 }
 
+export interface PersistOptions<T> {
+  include?: (keyof T)[];
+  exclude?: (keyof T)[];
+  version?: number;
+  migrate?: (data: unknown, oldVersion: number) => Partial<T>;
+}
+
 /**
- * Persist store state to localStorage
+ * Persist store state to localStorage with versioning and migration support
  */
 export function persist<T extends object>(
   store: Store<T>,
   key: string,
-  options?: {
-    include?: (keyof T)[];
-    exclude?: (keyof T)[];
-  }
+  options?: PersistOptions<T>
 ): void {
+  const version = options?.version ?? 1;
+
   // Load persisted state
   try {
     const persisted = localStorage.getItem(key);
     if (persisted) {
       const parsed = JSON.parse(persisted);
-      store.setState(parsed);
+
+      // Handle versioned format
+      if (parsed && typeof parsed === 'object' && 'version' in parsed && 'data' in parsed) {
+        const storedVersion = parsed.version as number;
+        let data = parsed.data;
+
+        // Run migration if needed
+        if (storedVersion < version && options?.migrate) {
+          data = options.migrate(data, storedVersion);
+        }
+
+        if (data && typeof data === 'object') {
+          store.setState(data as Partial<T>);
+        }
+      } else {
+        // Legacy unversioned data - run migration from version 0
+        let data = parsed;
+        if (options?.migrate) {
+          data = options.migrate(parsed, 0);
+        }
+        if (data && typeof data === 'object') {
+          store.setState(data as Partial<T>);
+        }
+      }
     }
-  } catch {
-    // Ignore parse errors
+  } catch (error) {
+    console.warn(`persist: Failed to load state for ${key}:`, error);
   }
 
   // Save state on changes
@@ -183,9 +212,13 @@ export function persist<T extends object>(
     }
 
     try {
-      localStorage.setItem(key, JSON.stringify(toSave));
-    } catch {
-      // Ignore storage errors
+      // Save with version wrapper
+      localStorage.setItem(key, JSON.stringify({
+        version,
+        data: toSave,
+      }));
+    } catch (error) {
+      console.warn(`persist: Failed to save state for ${key}:`, error);
     }
   });
 }
