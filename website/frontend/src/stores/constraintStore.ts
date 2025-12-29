@@ -15,7 +15,6 @@ import type {
 } from '../lib/constraints/types.js';
 import {
   createPinConstraint,
-  createSizeConstraint,
   createMarginConstraint,
 } from '../lib/constraints/types.js';
 import { solveConstraints } from '../lib/constraints/resolver.js';
@@ -273,12 +272,10 @@ export const constraintStore = createStore<
         constraintsToAdd.push(createMarginConstraint(objectId, parent, { top: 0, bottom: 0 }));
         break;
       case 'center-horizontal':
-        constraintsToAdd.push(createPinConstraint(objectId, 'center', parent, 'center', 0, 0));
-        constraintsToAdd.push(createSizeConstraint(objectId, 'width', 'fixed', 100));
+        constraintsToAdd.push(createPinConstraint(objectId, 'center-left', parent, 'center-left', 0, 0));
         break;
       case 'center-vertical':
-        constraintsToAdd.push(createPinConstraint(objectId, 'center', parent, 'center', 0, 0));
-        constraintsToAdd.push(createSizeConstraint(objectId, 'height', 'fixed', 100));
+        constraintsToAdd.push(createPinConstraint(objectId, 'top-center', parent, 'top-center', 0, 0));
         break;
       case 'center-both':
         constraintsToAdd.push(createPinConstraint(objectId, 'center', parent, 'center', 0, 0));
@@ -412,7 +409,7 @@ export const constraintStore = createStore<
     for (const constraint of sourceConstraints) {
       const duplicated = {
         ...constraint,
-        id: `${constraint.type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        id: `${constraint.type}-${crypto.randomUUID()}`,
         objectId: targetObjectId,
       } as Constraint;
 

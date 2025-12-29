@@ -43,15 +43,6 @@ export type SizeMode =
   | 'aspect';      // Maintain aspect ratio
 
 /**
- * Position constraint mode
- */
-export type PositionMode =
-  | 'absolute'     // Absolute position
-  | 'relative'     // Relative to anchor
-  | 'center'       // Centered in parent
-  | 'stretch';     // Stretch between two anchors
-
-/**
  * Base constraint interface
  */
 export interface BaseConstraint {
@@ -247,6 +238,13 @@ export type ConstraintPreset =
   | 'center-both';
 
 /**
+ * Generate a unique constraint ID using crypto.randomUUID
+ */
+function generateConstraintId(type: string): string {
+  return `${type}-${crypto.randomUUID()}`;
+}
+
+/**
  * Factory functions for creating constraints
  */
 export function createPinConstraint(
@@ -258,7 +256,7 @@ export function createPinConstraint(
   offsetY = 0
 ): PinConstraint {
   return {
-    id: `pin-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('pin'),
     objectId,
     enabled: true,
     priority: 1,
@@ -278,7 +276,7 @@ export function createSizeConstraint(
   value: number
 ): SizeConstraint {
   return {
-    id: `size-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('size'),
     objectId,
     enabled: true,
     priority: 1,
@@ -295,7 +293,7 @@ export function createMarginConstraint(
   margins: { top?: number; right?: number; bottom?: number; left?: number }
 ): MarginConstraint {
   return {
-    id: `margin-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('margin'),
     objectId,
     enabled: true,
     priority: 1,
@@ -312,7 +310,7 @@ export function createDistanceConstraint(
   distance: number
 ): DistanceConstraint {
   return {
-    id: `distance-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('distance'),
     objectId,
     enabled: true,
     priority: 1,
@@ -329,7 +327,7 @@ export function createAlignConstraint(
   alignment: AlignConstraint['alignment']
 ): AlignConstraint {
   return {
-    id: `align-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('align'),
     objectId,
     enabled: true,
     priority: 1,
@@ -345,7 +343,7 @@ export function createAspectRatioConstraint(
   lockToSource = false
 ): AspectRatioConstraint {
   return {
-    id: `aspect-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('aspect'),
     objectId,
     enabled: true,
     priority: 1,
@@ -363,7 +361,7 @@ export function createChainConstraint(
 ): ChainConstraint {
   const primaryObjectId = objectIds[0] || '';
   return {
-    id: `chain-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: generateConstraintId('chain'),
     objectId: primaryObjectId,
     enabled: true,
     priority: 1,

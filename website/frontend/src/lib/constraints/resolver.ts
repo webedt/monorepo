@@ -355,14 +355,11 @@ export class ConstraintResolver {
       y: objectBounds.y + objectBounds.height / 2,
     };
 
-    // Calculate current distance
+    // Calculate current distance based on axis
     const dx = objectCenter.x - targetCenter.x;
     const dy = objectCenter.y - targetCenter.y;
-    const currentDistance = Math.sqrt(dx * dx + dy * dy);
 
-    if (currentDistance < 0.001) return; // Avoid division by zero
-
-    // Calculate desired distance
+    // Calculate desired distance with min/max constraints
     let desiredDistance = constraint.distance;
     if (constraint.minDistance !== undefined) {
       desiredDistance = Math.max(desiredDistance, constraint.minDistance);
@@ -371,15 +368,26 @@ export class ConstraintResolver {
       desiredDistance = Math.min(desiredDistance, constraint.maxDistance);
     }
 
-    // Calculate new position
-    const scale = desiredDistance / currentDistance;
     let newX = layout.x;
     let newY = layout.y;
 
-    if (constraint.axis === 'horizontal' || constraint.axis === 'both') {
+    // Use axis-aligned distance for single-axis constraints
+    if (constraint.axis === 'horizontal') {
+      const currentDist = Math.abs(dx);
+      if (currentDist < 0.001) return;
+      const direction = dx >= 0 ? 1 : -1;
+      newX = targetCenter.x + direction * desiredDistance - layout.width / 2;
+    } else if (constraint.axis === 'vertical') {
+      const currentDist = Math.abs(dy);
+      if (currentDist < 0.001) return;
+      const direction = dy >= 0 ? 1 : -1;
+      newY = targetCenter.y + direction * desiredDistance - layout.height / 2;
+    } else {
+      // 'both' - use 2D Euclidean distance
+      const currentDistance = Math.sqrt(dx * dx + dy * dy);
+      if (currentDistance < 0.001) return;
+      const scale = desiredDistance / currentDistance;
       newX = targetCenter.x + dx * scale - layout.width / 2;
-    }
-    if (constraint.axis === 'vertical' || constraint.axis === 'both') {
       newY = targetCenter.y + dy * scale - layout.height / 2;
     }
 

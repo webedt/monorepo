@@ -31,9 +31,22 @@ import { constraintStore } from '../../stores/constraintStore.js';
 
 import './constraint-editor.css';
 
+/**
+ * Escape HTML entities to prevent XSS
+ */
+function escapeHtml(str: string): string {
+  const htmlEscapes: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  };
+  return str.replace(/[&<>"']/g, char => htmlEscapes[char]);
+}
+
 export interface ConstraintEditorOptions extends ComponentOptions {
   objectId: string;
-  objectIds?: string[];
   compact?: boolean;
   showPresets?: boolean;
   onChange?: (constraints: Constraint[]) => void;
@@ -77,6 +90,9 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
   private objectId: string;
   private options: ConstraintEditorOptions;
   private unsubscribe: (() => void) | null = null;
+  private prevConstraintIds: string[] = [];
+  private prevShowConstraints: boolean = true;
+  private prevSelectedId: string | null = null;
 
   constructor(options: ConstraintEditorOptions) {
     super('div', { className: 'constraint-editor' });
@@ -97,10 +113,44 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
   }
 
   private subscribeToStore(): void {
+    // Track previous state to avoid unnecessary re-renders
+    const state = constraintStore.getState();
+    this.prevConstraintIds = this.getConstraintIds(state);
+    this.prevShowConstraints = state.showConstraints;
+    this.prevSelectedId = state.selectedConstraintId;
+
     this.unsubscribe = constraintStore.subscribe(() => {
-      this.render();
-      this.notifyChange();
+      const newState = constraintStore.getState();
+      const newConstraintIds = this.getConstraintIds(newState);
+
+      // Only re-render if relevant state changed
+      const constraintsChanged = !this.arraysEqual(this.prevConstraintIds, newConstraintIds);
+      const showChanged = this.prevShowConstraints !== newState.showConstraints;
+      const selectionChanged = this.prevSelectedId !== newState.selectedConstraintId;
+
+      if (constraintsChanged || showChanged || selectionChanged) {
+        this.prevConstraintIds = newConstraintIds;
+        this.prevShowConstraints = newState.showConstraints;
+        this.prevSelectedId = newState.selectedConstraintId;
+        this.render();
+        if (constraintsChanged) {
+          this.notifyChange();
+        }
+      }
     });
+  }
+
+  private getConstraintIds(state: ReturnType<typeof constraintStore.getState>): string[] {
+    const constraints = state.objectConstraints[this.objectId]?.constraints || [];
+    return constraints.map(c => `${c.id}:${c.enabled}`);
+  }
+
+  private arraysEqual(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
   }
 
   protected onUnmount(): void {
@@ -178,14 +228,15 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
 
   private renderConstraint(constraint: Constraint): string {
     const isSelected = constraintStore.getState().selectedConstraintId === constraint.id;
+    const escapedId = escapeHtml(constraint.id);
 
     return `
       <div class="constraint-editor__item ${isSelected ? 'selected' : ''}"
-           data-constraint-id="${constraint.id}">
+           data-constraint-id="${escapedId}">
         <div class="constraint-editor__item-header">
           <button class="constraint-editor__enable-btn ${constraint.enabled ? 'active' : ''}"
                   data-action="toggle-enable"
-                  data-id="${constraint.id}"
+                  data-id="${escapedId}"
                   title="${constraint.enabled ? 'Disable' : 'Enable'}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               ${constraint.enabled
@@ -194,10 +245,10 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
               }
             </svg>
           </button>
-          <span class="constraint-editor__item-type">${this.getConstraintLabel(constraint)}</span>
+          <span class="constraint-editor__item-type">${escapeHtml(this.getConstraintLabel(constraint))}</span>
           <button class="constraint-editor__delete-btn"
                   data-action="delete"
-                  data-id="${constraint.id}"
+                  data-id="${escapedId}"
                   title="Delete constraint">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"/>
@@ -253,11 +304,12 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
   }
 
   private renderPinFields(constraint: PinConstraint): string {
+    const escapedId = escapeHtml(constraint.id);
     return `
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Source</label>
-          <select data-field="sourceAnchor" data-id="${constraint.id}">
+          <select data-field="sourceAnchor" data-id="${escapedId}">
             ${ANCHOR_POINTS.map(
               a => `<option value="${a}" ${a === constraint.sourceAnchor ? 'selected' : ''}>${a}</option>`
             ).join('')}
@@ -265,7 +317,7 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
         </div>
         <div class="constraint-editor__field">
           <label>Target</label>
-          <select data-field="targetAnchor" data-id="${constraint.id}">
+          <select data-field="targetAnchor" data-id="${escapedId}">
             ${ANCHOR_POINTS.map(
               a => `<option value="${a}" ${a === constraint.targetAnchor ? 'selected' : ''}>${a}</option>`
             ).join('')}
@@ -275,22 +327,23 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Offset X</label>
-          <input type="number" value="${constraint.offsetX}" data-field="offsetX" data-id="${constraint.id}" step="1">
+          <input type="number" value="${constraint.offsetX}" data-field="offsetX" data-id="${escapedId}" step="1">
         </div>
         <div class="constraint-editor__field">
           <label>Offset Y</label>
-          <input type="number" value="${constraint.offsetY}" data-field="offsetY" data-id="${constraint.id}" step="1">
+          <input type="number" value="${constraint.offsetY}" data-field="offsetY" data-id="${escapedId}" step="1">
         </div>
       </div>
     `;
   }
 
   private renderSizeFields(constraint: SizeConstraint): string {
+    const escapedId = escapeHtml(constraint.id);
     return `
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Axis</label>
-          <select data-field="axis" data-id="${constraint.id}">
+          <select data-field="axis" data-id="${escapedId}">
             <option value="width" ${constraint.axis === 'width' ? 'selected' : ''}>Width</option>
             <option value="height" ${constraint.axis === 'height' ? 'selected' : ''}>Height</option>
             <option value="both" ${constraint.axis === 'both' ? 'selected' : ''}>Both</option>
@@ -298,7 +351,7 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
         </div>
         <div class="constraint-editor__field">
           <label>Mode</label>
-          <select data-field="mode" data-id="${constraint.id}">
+          <select data-field="mode" data-id="${escapedId}">
             ${SIZE_MODES.map(
               m => `<option value="${m.value}" ${m.value === constraint.mode ? 'selected' : ''}>${m.label}</option>`
             ).join('')}
@@ -308,30 +361,31 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Value</label>
-          <input type="number" value="${constraint.value}" data-field="value" data-id="${constraint.id}" step="1" min="0">
+          <input type="number" value="${constraint.value}" data-field="value" data-id="${escapedId}" step="1" min="0">
         </div>
       </div>
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Min</label>
-          <input type="number" value="${constraint.minValue ?? ''}" data-field="minValue" data-id="${constraint.id}" step="1" min="0" placeholder="None">
+          <input type="number" value="${constraint.minValue ?? ''}" data-field="minValue" data-id="${escapedId}" step="1" min="0" placeholder="None">
         </div>
         <div class="constraint-editor__field">
           <label>Max</label>
-          <input type="number" value="${constraint.maxValue ?? ''}" data-field="maxValue" data-id="${constraint.id}" step="1" min="0" placeholder="None">
+          <input type="number" value="${constraint.maxValue ?? ''}" data-field="maxValue" data-id="${escapedId}" step="1" min="0" placeholder="None">
         </div>
       </div>
     `;
   }
 
   private renderMarginFields(constraint: MarginConstraint): string {
+    const escapedId = escapeHtml(constraint.id);
     return `
       <div class="constraint-editor__margin-grid">
         <div class="constraint-editor__margin-top">
-          <input type="number" value="${constraint.top ?? ''}" data-field="top" data-id="${constraint.id}" placeholder="—" step="1">
+          <input type="number" value="${constraint.top ?? ''}" data-field="top" data-id="${escapedId}" placeholder="—" step="1">
         </div>
         <div class="constraint-editor__margin-left">
-          <input type="number" value="${constraint.left ?? ''}" data-field="left" data-id="${constraint.id}" placeholder="—" step="1">
+          <input type="number" value="${constraint.left ?? ''}" data-field="left" data-id="${escapedId}" placeholder="—" step="1">
         </div>
         <div class="constraint-editor__margin-center">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -339,21 +393,22 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
           </svg>
         </div>
         <div class="constraint-editor__margin-right">
-          <input type="number" value="${constraint.right ?? ''}" data-field="right" data-id="${constraint.id}" placeholder="—" step="1">
+          <input type="number" value="${constraint.right ?? ''}" data-field="right" data-id="${escapedId}" placeholder="—" step="1">
         </div>
         <div class="constraint-editor__margin-bottom">
-          <input type="number" value="${constraint.bottom ?? ''}" data-field="bottom" data-id="${constraint.id}" placeholder="—" step="1">
+          <input type="number" value="${constraint.bottom ?? ''}" data-field="bottom" data-id="${escapedId}" placeholder="—" step="1">
         </div>
       </div>
     `;
   }
 
   private renderDistanceFields(constraint: DistanceConstraint): string {
+    const escapedId = escapeHtml(constraint.id);
     return `
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Axis</label>
-          <select data-field="axis" data-id="${constraint.id}">
+          <select data-field="axis" data-id="${escapedId}">
             <option value="horizontal" ${constraint.axis === 'horizontal' ? 'selected' : ''}>Horizontal</option>
             <option value="vertical" ${constraint.axis === 'vertical' ? 'selected' : ''}>Vertical</option>
             <option value="both" ${constraint.axis === 'both' ? 'selected' : ''}>Both</option>
@@ -361,28 +416,29 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
         </div>
         <div class="constraint-editor__field">
           <label>Distance</label>
-          <input type="number" value="${constraint.distance}" data-field="distance" data-id="${constraint.id}" step="1">
+          <input type="number" value="${constraint.distance}" data-field="distance" data-id="${escapedId}" step="1">
         </div>
       </div>
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Min</label>
-          <input type="number" value="${constraint.minDistance ?? ''}" data-field="minDistance" data-id="${constraint.id}" step="1" placeholder="None">
+          <input type="number" value="${constraint.minDistance ?? ''}" data-field="minDistance" data-id="${escapedId}" step="1" placeholder="None">
         </div>
         <div class="constraint-editor__field">
           <label>Max</label>
-          <input type="number" value="${constraint.maxDistance ?? ''}" data-field="maxDistance" data-id="${constraint.id}" step="1" placeholder="None">
+          <input type="number" value="${constraint.maxDistance ?? ''}" data-field="maxDistance" data-id="${escapedId}" step="1" placeholder="None">
         </div>
       </div>
     `;
   }
 
   private renderAlignFields(constraint: AlignConstraint): string {
+    const escapedId = escapeHtml(constraint.id);
     return `
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field constraint-editor__field--full">
           <label>Alignment</label>
-          <select data-field="alignment" data-id="${constraint.id}">
+          <select data-field="alignment" data-id="${escapedId}">
             <option value="left" ${constraint.alignment === 'left' ? 'selected' : ''}>Left</option>
             <option value="center" ${constraint.alignment === 'center' ? 'selected' : ''}>Center</option>
             <option value="right" ${constraint.alignment === 'right' ? 'selected' : ''}>Right</option>
@@ -397,24 +453,25 @@ export class ConstraintEditor extends Component<HTMLDivElement> {
   }
 
   private renderAspectRatioFields(constraint: AspectRatioConstraint): string {
+    const escapedId = escapeHtml(constraint.id);
     return `
       <div class="constraint-editor__field-group">
         <div class="constraint-editor__field">
           <label>Ratio (W/H)</label>
-          <input type="number" value="${constraint.ratio}" data-field="ratio" data-id="${constraint.id}" step="0.01" min="0.01">
+          <input type="number" value="${constraint.ratio}" data-field="ratio" data-id="${escapedId}" step="0.01" min="0.01">
         </div>
         <div class="constraint-editor__field constraint-editor__field--checkbox">
           <label>
-            <input type="checkbox" ${constraint.lockToSource ? 'checked' : ''} data-field="lockToSource" data-id="${constraint.id}">
+            <input type="checkbox" ${constraint.lockToSource ? 'checked' : ''} data-field="lockToSource" data-id="${escapedId}">
             Lock to source
           </label>
         </div>
       </div>
       <div class="constraint-editor__ratio-presets">
-        <button data-ratio="1" data-id="${constraint.id}">1:1</button>
-        <button data-ratio="1.333" data-id="${constraint.id}">4:3</button>
-        <button data-ratio="1.778" data-id="${constraint.id}">16:9</button>
-        <button data-ratio="0.5625" data-id="${constraint.id}">9:16</button>
+        <button data-ratio="1" data-id="${escapedId}">1:1</button>
+        <button data-ratio="1.333" data-id="${escapedId}">4:3</button>
+        <button data-ratio="1.778" data-id="${escapedId}">16:9</button>
+        <button data-ratio="0.5625" data-id="${escapedId}">9:16</button>
       </div>
     `;
   }
