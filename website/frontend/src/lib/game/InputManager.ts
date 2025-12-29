@@ -31,8 +31,6 @@ export class InputManager {
   private canvas: HTMLCanvasElement;
   private screenToWorld: (screenX: number, screenY: number) => { x: number; y: number };
   private state: InputState;
-  private previousKeys: Map<string, boolean> = new Map();
-  private previousMouseButtons: Map<number, boolean> = new Map();
   private previousGamepadButtons: Map<number, boolean> = new Map();
   private enabled = false;
 
@@ -123,8 +121,6 @@ export class InputManager {
     this.state.mouse.buttons.clear();
     this.state.mouse.wheelDelta = 0;
     this.state.gamepad.buttons.clear();
-    this.previousKeys.clear();
-    this.previousMouseButtons.clear();
     this.previousGamepadButtons.clear();
   }
 

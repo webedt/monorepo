@@ -70,6 +70,8 @@ export class ScenePage extends Page<ScenePageOptions> {
   private gameRuntime: GameRuntime | null = null;
   private isPlayMode = false;
   private playModeTimeScale = 1.0;
+  private static readonly PLAY_MODE_MOVE_SPEED = 200; // pixels per second
+  private boundPlayModeKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   // Event listener references for cleanup
   private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
@@ -623,7 +625,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     // Keyboard shortcuts for play mode
-    window.addEventListener('keydown', (e) => {
+    this.boundPlayModeKeyHandler = (e: KeyboardEvent) => {
       if (e.key === 'F5') {
         e.preventDefault();
         if (this.isPlayMode) {
@@ -635,7 +637,8 @@ export class ScenePage extends Page<ScenePageOptions> {
         e.preventDefault();
         this.stopPlayMode();
       }
-    });
+    };
+    window.addEventListener('keydown', this.boundPlayModeKeyHandler);
   }
 
   private setupCanvas(): void {
@@ -2883,7 +2886,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Initialize game runtime
     this.gameRuntime = new GameRuntime({
       canvas: this.sceneCanvas,
-      ctx: this.ctx,
       screenToWorld: (screenX, screenY) => this.viewport!.screenToWorld(screenX, screenY),
       onRender: (runtime) => this.renderPlayMode(runtime),
       targetFps: 60,
@@ -3072,10 +3074,11 @@ export class ScenePage extends Page<ScenePageOptions> {
       case 'shape':
         this.ctx.fillStyle = obj.color || '#e74c3c';
         if (obj.shapeType === 'rectangle') {
-          this.ctx.fillRect(0, -80, 100, 80);
+          this.ctx.fillRect(0, -dims.height, dims.width, dims.height);
         } else if (obj.shapeType === 'circle') {
+          const radius = Math.min(dims.width, dims.height) / 2;
           this.ctx.beginPath();
-          this.ctx.arc(50, -50, 50, 0, Math.PI * 2);
+          this.ctx.arc(radius, -radius, radius, 0, Math.PI * 2);
           this.ctx.fill();
         }
         break;
@@ -3143,28 +3146,31 @@ export class ScenePage extends Page<ScenePageOptions> {
   private handlePlayModeInput(runtime: GameRuntime): void {
     const input = runtime.input;
 
-    // Example: Move objects with arrow keys/WASD
+    // Move objects with arrow keys/WASD
     const horizontal = input.getHorizontalAxis();
     const vertical = input.getVerticalAxis();
-    const moveSpeed = 200; // pixels per second
 
     // Find player-controlled object (first sprite or object with data.isPlayer)
     for (const obj of runtime.objects.values()) {
       if (obj.original.type === 'sprite' || obj.data.isPlayer) {
-        obj.velocityX = horizontal * moveSpeed;
-        obj.velocityY = vertical * moveSpeed;
+        obj.velocityX = horizontal * ScenePage.PLAY_MODE_MOVE_SPEED;
+        obj.velocityY = vertical * ScenePage.PLAY_MODE_MOVE_SPEED;
         break; // Only control one object
       }
     }
 
-    // Handle clicks on UI buttons
+    // Handle clicks on UI elements
     if (input.isMouseButtonPressed(0)) {
       const mouseWorld = input.getMouseWorldPosition();
       const clickedObj = runtime.findObjectAtPoint(mouseWorld.x, mouseWorld.y);
 
-      if (clickedObj && clickedObj.original.type === 'ui-button') {
-        // Toggle checkbox or trigger button click feedback
-        console.log('Button clicked:', clickedObj.original.name);
+      if (clickedObj) {
+        // Handle UI checkbox toggle
+        if (clickedObj.original.type === 'ui-checkbox') {
+          clickedObj.data.checked = !clickedObj.data.checked;
+        }
+        // Store click state for visual feedback (can be used by custom game logic)
+        clickedObj.data.wasClicked = true;
       }
     }
   }
@@ -3221,6 +3227,12 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.sceneTabs) {
       this.sceneTabs.unmount();
       this.sceneTabs = null;
+    }
+
+    // Cleanup play mode keyboard handler
+    if (this.boundPlayModeKeyHandler) {
+      window.removeEventListener('keydown', this.boundPlayModeKeyHandler);
+      this.boundPlayModeKeyHandler = null;
     }
 
     // Cleanup game runtime

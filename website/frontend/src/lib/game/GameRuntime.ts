@@ -11,7 +11,6 @@ export type PlayState = 'stopped' | 'playing' | 'paused';
 
 export interface GameRuntimeConfig {
   canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
   screenToWorld: (screenX: number, screenY: number) => { x: number; y: number };
   onRender: (runtime: GameRuntime) => void;
   targetFps?: number;
@@ -240,6 +239,7 @@ export class GameRuntime {
 
   /**
    * Check if a point is inside an object (for click detection)
+   * Handles rotation by transforming the point into object-local space
    */
   isPointInObject(obj: RuntimeObject, worldX: number, worldY: number): boolean {
     const original = obj.original;
@@ -266,13 +266,33 @@ export class GameRuntime {
     const pivotX = original.transform.pivotX ?? 0.5;
     const pivotY = original.transform.pivotY ?? 0.5;
 
-    // Calculate bounds considering transform
-    const left = obj.x - width * pivotX * obj.scaleX;
-    const right = obj.x + width * (1 - pivotX) * obj.scaleX;
-    const bottom = obj.y - height * pivotY * obj.scaleY;
-    const top = obj.y + height * (1 - pivotY) * obj.scaleY;
+    // Transform world point to object-local space
+    // 1. Translate relative to object position
+    let localX = worldX - obj.x;
+    let localY = worldY - obj.y;
 
-    return worldX >= left && worldX <= right && worldY >= bottom && worldY <= top;
+    // 2. Apply inverse rotation if rotated
+    if (obj.rotation !== 0) {
+      const radians = -(obj.rotation * Math.PI) / 180;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      const rotatedX = localX * cos - localY * sin;
+      const rotatedY = localX * sin + localY * cos;
+      localX = rotatedX;
+      localY = rotatedY;
+    }
+
+    // 3. Apply inverse scale
+    localX /= obj.scaleX;
+    localY /= obj.scaleY;
+
+    // 4. Check bounds in local space (centered on pivot)
+    const left = -width * pivotX;
+    const right = width * (1 - pivotX);
+    const bottom = -height * pivotY;
+    const top = height * (1 - pivotY);
+
+    return localX >= left && localX <= right && localY >= bottom && localY <= top;
   }
 
   /**
