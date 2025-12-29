@@ -321,6 +321,11 @@ class MetricsRegistry extends AMetricsRegistry {
     'Operations that succeeded after retry'
   );
 
+  readonly rateLimitHitsTotal = new Counter(
+    'api_rate_limit_hits_total',
+    'Total number of rate limit hits'
+  );
+
   recordHttpRequest(
     method: string,
     path: string,
@@ -384,6 +389,10 @@ class MetricsRegistry extends AMetricsRegistry {
     if (success && attempt > 1) {
       this.retrySuccessAfterRetry.inc({ operation });
     }
+  }
+
+  recordRateLimitHit(tier: string, path: string): void {
+    this.rateLimitHitsTotal.inc({ tier, path });
   }
 
   updateHealthStatus(healthy: boolean): void {
@@ -454,6 +463,9 @@ class MetricsRegistry extends AMetricsRegistry {
         attempts: this.retryAttemptsTotal.getAll(),
         successAfterRetry: this.retrySuccessAfterRetry.getAll(),
       },
+      rateLimit: {
+        hits: this.rateLimitHitsTotal.getAll(),
+      },
       timestamp: new Date().toISOString(),
     };
   }
@@ -496,6 +508,7 @@ class MetricsRegistry extends AMetricsRegistry {
     this.errorsTotal.reset();
     this.retryAttemptsTotal.reset();
     this.retrySuccessAfterRetry.reset();
+    this.rateLimitHitsTotal.reset();
     this.startTime = new Date();
 
     logger.info('Metrics reset', { component: 'Metrics' });

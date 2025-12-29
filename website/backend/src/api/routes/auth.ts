@@ -22,6 +22,7 @@ import {
   validateRequest,
   ApiErrorCode,
 } from '@webedt/shared';
+import { authRateLimiter } from '../middleware/rateLimit.js';
 
 // Validation schemas
 const registerSchema = {
@@ -102,11 +103,13 @@ const router = Router();
  *               $ref: '#/components/schemas/ErrorResponse'
  *       422:
  *         $ref: '#/components/responses/ValidationError'
+ *       429:
+ *         description: Too many requests - rate limited
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-// Register
-router.post('/register', validateRequest(registerSchema), async (req: Request, res: Response) => {
+// Register - strict rate limiting to prevent brute-force attacks
+router.post('/register', authRateLimiter, validateRequest(registerSchema), async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -235,11 +238,13 @@ router.post('/register', validateRequest(registerSchema), async (req: Request, r
  *               $ref: '#/components/schemas/ErrorResponse'
  *       422:
  *         $ref: '#/components/responses/ValidationError'
+ *       429:
+ *         description: Too many requests - rate limited
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-// Login
-router.post('/login', validateRequest(loginSchema), async (req: Request, res: Response) => {
+// Login - strict rate limiting to prevent brute-force attacks
+router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req: Request, res: Response) => {
   try {
     const { email, password, rememberMe } = req.body;
 

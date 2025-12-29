@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -68,6 +69,7 @@ import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionSt
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';
 import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
+import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -198,6 +200,78 @@ app.use(
     credentials: true,
   })
 );
+
+// Security headers with helmet
+// Configure Content-Security-Policy and other security headers
+app.use(
+  helmet({
+    // Content Security Policy
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          // Allow inline scripts for SPA hydration and dynamic content
+          "'unsafe-inline'",
+          // Allow eval for development tools (remove in hardened production)
+          ...(NODE_ENV === 'development' ? ["'unsafe-eval'"] : []),
+        ],
+        styleSrc: [
+          "'self'",
+          // Allow inline styles for dynamic styling and CSS-in-JS
+          "'unsafe-inline'",
+        ],
+        imgSrc: [
+          "'self'",
+          'data:',
+          'blob:',
+          // Allow external images (avatars, external content)
+          'https:',
+        ],
+        fontSrc: ["'self'", 'data:'],
+        connectSrc: [
+          "'self'",
+          // Allow WebSocket connections for SSE and real-time features
+          'wss:',
+          'ws:',
+        ],
+        mediaSrc: ["'self'", 'blob:'],
+        objectSrc: ["'none'"],
+        // Prevent clickjacking by restricting frame embedding
+        frameAncestors: ["'none'"],
+        frameSrc: ["'self'"],
+        workerSrc: ["'self'", 'blob:'],
+        childSrc: ["'self'", 'blob:'],
+        formAction: ["'self'"],
+        baseUri: ["'self'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    // X-Frame-Options: DENY - prevent clickjacking
+    // Note: frameAncestors in CSP provides the same protection but is more flexible
+    frameguard: { action: 'deny' },
+    // X-Content-Type-Options: nosniff - prevent MIME type sniffing
+    noSniff: true,
+    // Strict-Transport-Security (HSTS) - enforce HTTPS
+    // max-age: 1 year, includeSubDomains, preload-ready
+    strictTransportSecurity: {
+      maxAge: 31536000, // 1 year in seconds
+      includeSubDomains: true,
+      preload: true,
+    },
+    // X-XSS-Protection - legacy XSS filter (disabled as CSP is preferred)
+    xssFilter: true,
+    // Referrer-Policy - control referrer information
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    // X-DNS-Prefetch-Control - control DNS prefetching
+    dnsPrefetchControl: { allow: false },
+    // X-Download-Options - prevent IE from executing downloads
+    ieNoOpen: true,
+    // X-Permitted-Cross-Domain-Policies - restrict Adobe Flash/Acrobat
+    permittedCrossDomainPolicies: { permittedPolicies: 'none' },
+  })
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -207,6 +281,11 @@ app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 
 
 // Add auth middleware
 app.use(authMiddleware);
+
+// Apply standard rate limiting to all API routes
+// This provides defense-in-depth alongside infrastructure-level limits
+// Note: Auth and public share endpoints have stricter limits applied at the route level
+app.use('/api', standardRateLimiter);
 
 // Initialize health monitoring with database health check
 healthMonitor.registerCheck('database', createDatabaseHealthCheck(async () => {
@@ -415,6 +494,9 @@ async function startServer() {
 
   // Log environment configuration
   logEnvConfig();
+
+  // Log rate limit configuration
+  logRateLimitConfig();
 
   console.log('');
   console.log('Available endpoints:');
