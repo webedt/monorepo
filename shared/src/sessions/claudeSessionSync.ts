@@ -922,3 +922,6 @@ export async function triggerSync(): Promise<void> {
 
 // Export cleanup function for use in execute routes
 export { cleanupRedundantSessions };
+
+// Export sync function for use in backend routes
+export { syncUserSessions };
