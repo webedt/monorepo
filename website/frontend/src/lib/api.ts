@@ -365,6 +365,36 @@ export const userApi = {
       method: 'POST',
       body: settings,
     }),
+
+  getSpendingLimits: () =>
+    fetchApi<ApiResponse<{
+      enabled: boolean;
+      monthlyBudgetCents: string;
+      perTransactionLimitCents: string;
+      resetDay: number;
+      currentMonthSpentCents: string;
+      remainingBudgetCents: string;
+      usagePercent: number;
+      limitAction: string;
+      lastResetAt: string | null;
+    }>>('/api/user/spending-limits').then(r => r.data),
+
+  updateSpendingLimits: (config: {
+    enabled?: boolean;
+    monthlyBudgetCents?: number;
+    perTransactionLimitCents?: number;
+    resetDay?: number;
+    limitAction?: 'warn' | 'block';
+  }) =>
+    fetchApi('/api/user/spending-limits', {
+      method: 'POST',
+      body: config,
+    }),
+
+  resetMonthlySpending: () =>
+    fetchApi('/api/user/spending-limits/reset', {
+      method: 'POST',
+    }),
 };
 
 // ============================================================================

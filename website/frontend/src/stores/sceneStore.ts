@@ -7,6 +7,7 @@ import { createStore } from '../lib/store';
 
 import type { Transform } from '../components';
 import type { CustomComponentPropertyValues } from '../types';
+import type { Constraint } from '../lib/constraints/types';
 
 export type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
 export type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
@@ -65,12 +66,21 @@ export interface SceneObject {
   uiPlaceholder?: string; // For input fields
   uiImageUrl?: string;    // For UI images
   uiPadding?: number;
+  // Constraint-based layout properties
+  constraints?: Constraint[];
+  constraintsEnabled?: boolean;
+  horizontalBias?: number; // 0-1, used when constraints conflict
+  verticalBias?: number;   // 0-1, used when constraints conflict
+  parentId?: string;       // Reference to parent object for constraint solving
 }
 
 export interface SceneSettings {
   showGrid: boolean;
   gridSize: number;
   snapToGrid: boolean;
+  // Constraint layout settings
+  showConstraints: boolean;
+  liveConstraintPreview: boolean;
 }
 
 export interface Scene {
@@ -95,6 +105,8 @@ const DEFAULT_SETTINGS: SceneSettings = {
   showGrid: true,
   gridSize: 32,
   snapToGrid: true,
+  showConstraints: true,
+  liveConstraintPreview: true,
 };
 
 function generateSceneId(): string {

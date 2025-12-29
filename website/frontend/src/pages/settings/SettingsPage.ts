@@ -6,6 +6,7 @@ import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Input, toast } from '../../components';
 import { authStore } from '../../stores/authStore';
 import { editorSettingsStore } from '../../stores/editorSettingsStore';
+import { debugStore } from '../../stores/debugStore';
 import { githubApi, userApi, billingApi } from '../../lib/api';
 import { router } from '../../lib/router';
 import type { ClaudeAuth } from '../../types';
@@ -28,6 +29,17 @@ export class SettingsPage extends Page<PageOptions> {
     usedFormatted: string;
     quotaFormatted: string;
   } | null = null;
+  private spendingLimitsData: {
+    enabled: boolean;
+    monthlyBudgetCents: string;
+    perTransactionLimitCents: string;
+    resetDay: number;
+    currentMonthSpentCents: string;
+    remainingBudgetCents: string;
+    usagePercent: number;
+    limitAction: string;
+    lastResetAt: string | null;
+  } | null = null;
 
   protected render(): string {
     return `
@@ -49,8 +61,18 @@ export class SettingsPage extends Page<PageOptions> {
           </section>
 
           <section class="settings-section">
+            <h2 class="section-title">Spending Limits</h2>
+            <div class="section-card spending-limits-card"></div>
+          </section>
+
+          <section class="settings-section">
             <h2 class="section-title">Editor</h2>
             <div class="section-card editor-card"></div>
+          </section>
+
+          <section class="settings-section">
+            <h2 class="section-title">Debug</h2>
+            <div class="section-card debug-card"></div>
           </section>
 
           <section class="settings-section">
@@ -68,6 +90,7 @@ export class SettingsPage extends Page<PageOptions> {
   }
 
   async load(): Promise<void> {
+    // Load billing data
     try {
       const billing = await billingApi.getCurrentPlan();
       this.billingData = {
@@ -89,14 +112,47 @@ export class SettingsPage extends Page<PageOptions> {
         quotaFormatted: '5 GB',
       };
     }
+
+    // Load spending limits data
+    try {
+      const spendingLimits = await userApi.getSpendingLimits();
+      this.spendingLimitsData = spendingLimits || {
+        enabled: false,
+        monthlyBudgetCents: '0',
+        perTransactionLimitCents: '0',
+        resetDay: 1,
+        currentMonthSpentCents: '0',
+        remainingBudgetCents: '0',
+        usagePercent: 0,
+        limitAction: 'warn',
+        lastResetAt: null,
+      };
+    } catch (error) {
+      console.error('Failed to load spending limits:', error);
+      this.spendingLimitsData = {
+        enabled: false,
+        monthlyBudgetCents: '0',
+        perTransactionLimitCents: '0',
+        resetDay: 1,
+        currentMonthSpentCents: '0',
+        remainingBudgetCents: '0',
+        usagePercent: 0,
+        limitAction: 'warn',
+        lastResetAt: null,
+      };
+    }
+
     this.renderBillingSection();
+    this.renderSpendingLimitsSection();
   }
 
   protected onMount(): void {
     super.onMount();
     this.renderAccountSection();
     this.renderBillingSection();
+    this.renderSpendingLimitsSection();
     this.renderEditorSection();
+    this.renderDebugSection();
     this.renderConnectionsSection();
     this.renderDangerSection();
   }
@@ -234,6 +290,173 @@ export class SettingsPage extends Page<PageOptions> {
     return labels[tier] || tier;
   }
 
+  private formatCentsAsDollars(cents: string | number): string {
+    const centsNum = Number(cents) || 0;
+    return (centsNum / 100).toFixed(2);
+  }
+
+  private renderSpendingLimitsSection(): void {
+    const container = this.$('.spending-limits-card') as HTMLElement;
+    if (!container) return;
+
+    // Clear existing content
+    container.innerHTML = '';
+
+    const data = this.spendingLimitsData;
+    const isEnabled = data?.enabled || false;
+    const monthlyBudget = this.formatCentsAsDollars(data?.monthlyBudgetCents || '0');
+    const perTransactionLimit = this.formatCentsAsDollars(data?.perTransactionLimitCents || '0');
+    const currentSpent = this.formatCentsAsDollars(data?.currentMonthSpentCents || '0');
+    const remainingBudget = this.formatCentsAsDollars(data?.remainingBudgetCents || '0');
+    const usagePercent = data?.usagePercent || 0;
+    const resetDay = data?.resetDay || 1;
+    const limitAction = data?.limitAction || 'warn';
+
+    const content = document.createElement('div');
+    content.className = 'spending-limits-content';
+    content.innerHTML = `
+      <div class="spending-limits-toggle">
+        <div class="setting-info">
+          <span class="setting-name">Enable Spending Limits</span>
+          <span class="setting-description">Set monthly and per-transaction spending limits</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="spending-limits-enabled" ${isEnabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="spending-limits-settings ${isEnabled ? '' : 'disabled'}">
+        <div class="spending-overview">
+          <div class="spending-status">
+            <div class="spending-header">
+              <span class="spending-label">Current Month Spending</span>
+              <span class="spending-value">$${currentSpent} / $${monthlyBudget}</span>
+            </div>
+            <div class="usage-bar">
+              <div class="usage-fill ${usagePercent >= 90 ? 'warning' : ''} ${usagePercent >= 100 ? 'exceeded' : ''}" style="width: ${Math.min(usagePercent, 100)}%"></div>
+            </div>
+            <div class="spending-footer">
+              <span class="usage-percent">${usagePercent.toFixed(1)}% used</span>
+              <span class="remaining">$${remainingBudget} remaining</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="spending-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Monthly Budget ($)</label>
+              <input type="number" id="monthly-budget" class="form-input" value="${monthlyBudget}" min="0" step="0.01" placeholder="0.00">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Per-Transaction Limit ($)</label>
+              <input type="number" id="per-transaction-limit" class="form-input" value="${perTransactionLimit}" min="0" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Reset Day of Month</label>
+              <select id="reset-day" class="setting-select">
+                ${Array.from({ length: 31 }, (_, i) => i + 1).map(day =>
+                  `<option value="${day}" ${day === resetDay ? 'selected' : ''}>${day}${this.getDaySuffix(day)}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">When Limit Reached</label>
+              <select id="limit-action" class="setting-select">
+                <option value="warn" ${limitAction === 'warn' ? 'selected' : ''}>Warn Only</option>
+                <option value="block" ${limitAction === 'block' ? 'selected' : ''}>Block Transactions</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="spending-actions">
+          <div class="save-spending-btn"></div>
+        </div>
+      </div>
+    `;
+
+    // Add event listener for toggle
+    const toggleCheckbox = content.querySelector('#spending-limits-enabled') as HTMLInputElement;
+    const settingsSection = content.querySelector('.spending-limits-settings') as HTMLElement;
+    if (toggleCheckbox && settingsSection) {
+      toggleCheckbox.addEventListener('change', async () => {
+        const enabled = toggleCheckbox.checked;
+        settingsSection.classList.toggle('disabled', !enabled);
+        try {
+          await userApi.updateSpendingLimits({ enabled });
+          toast.success(enabled ? 'Spending limits enabled' : 'Spending limits disabled');
+        } catch (error) {
+          toast.error('Failed to update spending limits');
+          toggleCheckbox.checked = !enabled;
+          settingsSection.classList.toggle('disabled', enabled);
+        }
+      });
+    }
+
+    // Create save button
+    const saveBtn = new Button('Save Limits', {
+      variant: 'primary',
+      onClick: () => this.handleSaveSpendingLimits(),
+    });
+    const saveBtnContainer = content.querySelector('.save-spending-btn') as HTMLElement;
+    if (saveBtnContainer) {
+      saveBtn.mount(saveBtnContainer);
+      this.buttons.push(saveBtn);
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
+  }
+
+  private getDaySuffix(day: number): string {
+    if (day >= 11 && day <= 13) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  }
+
+  private async handleSaveSpendingLimits(): Promise<void> {
+    const monthlyBudgetInput = this.$('#monthly-budget') as HTMLInputElement;
+    const perTransactionInput = this.$('#per-transaction-limit') as HTMLInputElement;
+    const resetDaySelect = this.$('#reset-day') as HTMLSelectElement;
+    const limitActionSelect = this.$('#limit-action') as HTMLSelectElement;
+
+    const monthlyBudgetCents = Math.round(parseFloat(monthlyBudgetInput?.value || '0') * 100);
+    const perTransactionLimitCents = Math.round(parseFloat(perTransactionInput?.value || '0') * 100);
+    const resetDay = parseInt(resetDaySelect?.value || '1', 10);
+    const limitAction = (limitActionSelect?.value || 'warn') as 'warn' | 'block';
+
+    try {
+      await userApi.updateSpendingLimits({
+        monthlyBudgetCents,
+        perTransactionLimitCents,
+        resetDay,
+        limitAction,
+      });
+      toast.success('Spending limits saved');
+
+      // Reload the spending limits data
+      const spendingLimits = await userApi.getSpendingLimits();
+      if (spendingLimits) {
+        this.spendingLimitsData = spendingLimits;
+        this.renderSpendingLimitsSection();
+      }
+    } catch (error) {
+      toast.error('Failed to save spending limits');
+    }
+  }
+
   private renderEditorSection(): void {
     const container = this.$('.editor-card') as HTMLElement;
     if (!container) return;
@@ -308,6 +531,101 @@ export class SettingsPage extends Page<PageOptions> {
         editorSettingsStore.setUseTabs(useTabsCheckbox.checked);
         toast.success('Editor settings saved');
       });
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
+  }
+
+  private renderDebugSection(): void {
+    const container = this.$('.debug-card') as HTMLElement;
+    if (!container) return;
+
+    const debugState = debugStore.getState();
+
+    const content = document.createElement('div');
+    content.className = 'debug-content';
+    content.innerHTML = `
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Verbose Mode</span>
+          <span class="setting-description">Maximum detail output for debugging</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="verbose-mode" ${debugState.verboseMode ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Debug Panel</span>
+          <span class="setting-description">Show browser console output in debug panel</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="debug-panel-open" ${debugState.isOpen ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Max Log Entries</span>
+          <span class="setting-description">Maximum number of log entries to store</span>
+        </div>
+        <select id="max-log-entries" class="setting-select">
+          <option value="100" ${debugState.maxEntries === 100 ? 'selected' : ''}>100</option>
+          <option value="500" ${debugState.maxEntries === 500 ? 'selected' : ''}>500</option>
+          <option value="1000" ${debugState.maxEntries === 1000 ? 'selected' : ''}>1000</option>
+          <option value="5000" ${debugState.maxEntries === 5000 ? 'selected' : ''}>5000</option>
+        </select>
+      </div>
+      <div class="debug-actions">
+        <div class="clear-logs-btn"></div>
+      </div>
+    `;
+
+    // Add event listeners
+    const verboseModeCheckbox = content.querySelector('#verbose-mode') as HTMLInputElement;
+    if (verboseModeCheckbox) {
+      verboseModeCheckbox.addEventListener('change', () => {
+        debugStore.setVerboseMode(verboseModeCheckbox.checked);
+        toast.success(verboseModeCheckbox.checked ? 'Verbose mode enabled' : 'Verbose mode disabled');
+      });
+    }
+
+    const debugPanelCheckbox = content.querySelector('#debug-panel-open') as HTMLInputElement;
+    if (debugPanelCheckbox) {
+      debugPanelCheckbox.addEventListener('change', () => {
+        if (debugPanelCheckbox.checked) {
+          debugStore.open();
+        } else {
+          debugStore.close();
+        }
+      });
+    }
+
+    const maxEntriesSelect = content.querySelector('#max-log-entries') as HTMLSelectElement;
+    if (maxEntriesSelect) {
+      maxEntriesSelect.addEventListener('change', () => {
+        debugStore.setState({ maxEntries: parseInt(maxEntriesSelect.value, 10) });
+        toast.success('Debug settings saved');
+      });
+    }
+
+    // Create clear logs button
+    const clearLogsBtn = new Button('Clear Logs', {
+      variant: 'secondary',
+      onClick: () => {
+        debugStore.clear();
+        toast.success('Debug logs cleared');
+      },
+    });
+    const clearLogsBtnContainer = content.querySelector('.clear-logs-btn') as HTMLElement;
+    if (clearLogsBtnContainer) {
+      clearLogsBtn.mount(clearLogsBtnContainer);
+      this.buttons.push(clearLogsBtn);
     }
 
     const card = new Card();

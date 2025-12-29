@@ -24,6 +24,7 @@ export interface DebugState {
   searchQuery: string;
   maxEntries: number;
   isCapturing: boolean;
+  verboseMode: boolean;
 }
 
 // Store original console methods at module load time.
@@ -49,6 +50,7 @@ class DebugStore extends Store<DebugState> {
       searchQuery: '',
       maxEntries: 1000,
       isCapturing: false,
+      verboseMode: false,
     });
   }
 
@@ -272,10 +274,52 @@ class DebugStore extends Store<DebugState> {
       return false;
     }
   }
+
+  /**
+   * Toggle verbose mode
+   */
+  toggleVerboseMode(): void {
+    const newValue = !this.getState().verboseMode;
+    this.setState({ verboseMode: newValue });
+    if (newValue) {
+      console.info('[DEBUG] Verbose mode enabled - showing maximum detail');
+    } else {
+      console.info('[DEBUG] Verbose mode disabled');
+    }
+  }
+
+  /**
+   * Set verbose mode
+   */
+  setVerboseMode(enabled: boolean): void {
+    this.setState({ verboseMode: enabled });
+    if (enabled) {
+      console.info('[DEBUG] Verbose mode enabled - showing maximum detail');
+    }
+  }
+
+  /**
+   * Check if verbose mode is enabled
+   */
+  isVerbose(): boolean {
+    return this.getState().verboseMode;
+  }
+
+  /**
+   * Log a verbose message (only when verbose mode is enabled)
+   */
+  verbose(message: string, data?: unknown): void {
+    if (!this.getState().verboseMode) return;
+    if (data !== undefined) {
+      console.debug(`[VERBOSE] ${message}`, data);
+    } else {
+      console.debug(`[VERBOSE] ${message}`);
+    }
+  }
 }
 
 // Export singleton instance
 export const debugStore = new DebugStore();
 
-// Persist open state
-persist(debugStore, 'debug-panel-state', { include: ['isOpen', 'filter'] });
+// Persist open state and verbose mode
+persist(debugStore, 'debug-panel-state', { include: ['isOpen', 'filter', 'verboseMode'] });
