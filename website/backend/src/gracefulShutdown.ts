@@ -5,10 +5,16 @@
  * 1. Stop accepting new connections (503 during drain)
  * 2. Stop health monitoring and background sync
  * 3. Notify SSE clients of shutdown
- * 4. Wait for in-flight requests to complete (with timeout)
- * 5. Close database connections
+ * 4. Cleanup caches and resources
+ * 5. Wait for load balancer to detect unhealthy status
+ * 6. Close HTTP server to new connections
+ * 7. Wait for in-flight requests to complete (with timeout)
+ * 8. Close database connections (must be last, after requests drain)
  *
  * Uses the centralized ShutdownManager for service coordination.
+ * Note: Database is NOT managed by ShutdownManager to ensure it remains
+ * available until all in-flight requests complete.
+ *
  * Configurable shutdown timeout (default 30s)
  */
 
@@ -188,14 +194,9 @@ export function registerBackgroundServices(): void {
     )
   );
 
-  // Priority 900: Close database (must be last)
-  shutdownManager.register(
-    createShutdownHandler(
-      'database',
-      async () => closeDatabase(),
-      ShutdownPriority.CLOSE_DATABASE
-    )
-  );
+  // NOTE: Database is NOT registered here - it must close AFTER HTTP connections drain
+  // to allow in-flight requests to complete. Database shutdown is handled explicitly
+  // in gracefulShutdown() after waitForDrain().
 
   logger.info('Background services registered with ShutdownManager', {
     component: 'GracefulShutdown',
@@ -298,6 +299,10 @@ export async function gracefulShutdown(
         activeConnections: finalStats.activeConnections,
       });
     }
+
+    // Phase 5: Close database connections (must be after connection draining)
+    logger.info('Closing database connections', { component: 'GracefulShutdown' });
+    await closeDatabase();
 
     // Calculate shutdown duration
     const duration = Date.now() - (state.shutdownStartTime || Date.now());

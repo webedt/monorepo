@@ -22,7 +22,12 @@ export enum ShutdownPriority {
   DRAIN_REQUESTS = 500,
   /** Cleanup caches and temporary resources */
   CLEANUP = 600,
-  /** Close database connections (must be last) */
+  /**
+   * Close database connections.
+   * Note: Only use this for services where database can be closed with other handlers.
+   * For HTTP servers with in-flight requests, close database AFTER connection draining
+   * to allow requests to complete.
+   */
   CLOSE_DATABASE = 900,
 }
 
@@ -128,8 +133,9 @@ export interface IShutdownManagerDocumentation {
    * Services are shut down in priority order (lowest first).
    *
    * @param handler - The shutdown handler to register
+   * @returns true if handler was registered, false if registration failed (e.g., during shutdown)
    */
-  register(handler: IShutdownHandler): void;
+  register(handler: IShutdownHandler): boolean;
 
   /**
    * Unregister a service from shutdown handling.

@@ -28,13 +28,13 @@ class ShutdownManager extends AShutdownManager {
   private shuttingDown = false;
   private shutdownStartTime: Date | null = null;
 
-  register(handler: IShutdownHandler): void {
+  register(handler: IShutdownHandler): boolean {
     if (this.shuttingDown) {
       logger.warn('Cannot register handler during shutdown', {
         component: 'ShutdownManager',
         handlerName: handler.name,
       });
-      return;
+      return false;
     }
 
     if (this.handlers.has(handler.name)) {
@@ -52,6 +52,8 @@ class ShutdownManager extends AShutdownManager {
       priority: handler.priority ?? ShutdownPriority.CLEANUP,
       totalHandlers: this.handlers.size,
     });
+
+    return true;
   }
 
   unregister(name: string): boolean {

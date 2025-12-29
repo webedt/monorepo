@@ -15,7 +15,7 @@ export type {
 export { ShutdownPriority } from './shutdownManager.doc.js';
 
 export abstract class AShutdownManager implements IShutdownManagerDocumentation {
-  abstract register(handler: IShutdownHandler): void;
+  abstract register(handler: IShutdownHandler): boolean;
 
   abstract unregister(name: string): boolean;
 
