@@ -6,6 +6,7 @@ import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Input, toast } from '../../components';
 import { authStore } from '../../stores/authStore';
 import { editorSettingsStore } from '../../stores/editorSettingsStore';
+import { debugStore } from '../../stores/debugStore';
 import { githubApi, userApi, billingApi } from '../../lib/api';
 import { router } from '../../lib/router';
 import type { ClaudeAuth } from '../../types';
@@ -54,6 +55,11 @@ export class SettingsPage extends Page<PageOptions> {
           </section>
 
           <section class="settings-section">
+            <h2 class="section-title">Debug</h2>
+            <div class="section-card debug-card"></div>
+          </section>
+
+          <section class="settings-section">
             <h2 class="section-title">Connections</h2>
             <div class="section-card connections-card"></div>
           </section>
@@ -97,6 +103,7 @@ export class SettingsPage extends Page<PageOptions> {
     this.renderAccountSection();
     this.renderBillingSection();
     this.renderEditorSection();
+    this.renderDebugSection();
     this.renderConnectionsSection();
     this.renderDangerSection();
   }
@@ -308,6 +315,101 @@ export class SettingsPage extends Page<PageOptions> {
         editorSettingsStore.setUseTabs(useTabsCheckbox.checked);
         toast.success('Editor settings saved');
       });
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
+  }
+
+  private renderDebugSection(): void {
+    const container = this.$('.debug-card') as HTMLElement;
+    if (!container) return;
+
+    const debugState = debugStore.getState();
+
+    const content = document.createElement('div');
+    content.className = 'debug-content';
+    content.innerHTML = `
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Verbose Mode</span>
+          <span class="setting-description">Maximum detail output for debugging</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="verbose-mode" ${debugState.verboseMode ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Debug Panel</span>
+          <span class="setting-description">Show browser console output in debug panel</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="debug-panel-open" ${debugState.isOpen ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Max Log Entries</span>
+          <span class="setting-description">Maximum number of log entries to store</span>
+        </div>
+        <select id="max-log-entries" class="setting-select">
+          <option value="100" ${debugState.maxEntries === 100 ? 'selected' : ''}>100</option>
+          <option value="500" ${debugState.maxEntries === 500 ? 'selected' : ''}>500</option>
+          <option value="1000" ${debugState.maxEntries === 1000 ? 'selected' : ''}>1000</option>
+          <option value="5000" ${debugState.maxEntries === 5000 ? 'selected' : ''}>5000</option>
+        </select>
+      </div>
+      <div class="debug-actions">
+        <div class="clear-logs-btn"></div>
+      </div>
+    `;
+
+    // Add event listeners
+    const verboseModeCheckbox = content.querySelector('#verbose-mode') as HTMLInputElement;
+    if (verboseModeCheckbox) {
+      verboseModeCheckbox.addEventListener('change', () => {
+        debugStore.setVerboseMode(verboseModeCheckbox.checked);
+        toast.success(verboseModeCheckbox.checked ? 'Verbose mode enabled' : 'Verbose mode disabled');
+      });
+    }
+
+    const debugPanelCheckbox = content.querySelector('#debug-panel-open') as HTMLInputElement;
+    if (debugPanelCheckbox) {
+      debugPanelCheckbox.addEventListener('change', () => {
+        if (debugPanelCheckbox.checked) {
+          debugStore.open();
+        } else {
+          debugStore.close();
+        }
+      });
+    }
+
+    const maxEntriesSelect = content.querySelector('#max-log-entries') as HTMLSelectElement;
+    if (maxEntriesSelect) {
+      maxEntriesSelect.addEventListener('change', () => {
+        debugStore.setState({ maxEntries: parseInt(maxEntriesSelect.value, 10) });
+        toast.success('Debug settings saved');
+      });
+    }
+
+    // Create clear logs button
+    const clearLogsBtn = new Button('Clear Logs', {
+      variant: 'secondary',
+      onClick: () => {
+        debugStore.clear();
+        toast.success('Debug logs cleared');
+      },
+    });
+    const clearLogsBtnContainer = content.querySelector('.clear-logs-btn') as HTMLElement;
+    if (clearLogsBtnContainer) {
+      clearLogsBtn.mount(clearLogsBtnContainer);
+      this.buttons.push(clearLogsBtn);
     }
 
     const card = new Card();

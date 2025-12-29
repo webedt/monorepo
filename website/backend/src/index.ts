@@ -64,6 +64,7 @@ import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionSt
 
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';
+import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -196,6 +197,10 @@ app.use(
 );
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Verbose logging middleware (enabled via VERBOSE_MODE or VERBOSE_HTTP env vars)
+app.use(verboseLoggingMiddleware);
+app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 seconds
 
 // Add auth middleware
 app.use(authMiddleware);

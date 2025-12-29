@@ -43,6 +43,28 @@ export const SESSION_SECRET = process.env.SESSION_SECRET || 'development-secret-
 // Feature flags
 export const USE_NEW_ARCHITECTURE = process.env.USE_NEW_ARCHITECTURE === 'true';
 
+// Verbose/Debug mode configuration
+// VERBOSE_MODE enables maximum detail output for debugging
+// Levels: 'off' (default), 'on' (verbose logging), 'debug' (verbose + debug logs)
+export const VERBOSE_MODE = process.env.VERBOSE_MODE || 'off';
+export const LOG_LEVEL = process.env.LOG_LEVEL || (VERBOSE_MODE === 'debug' ? 'debug' : 'info');
+export const VERBOSE_HTTP = process.env.VERBOSE_HTTP === 'true' || VERBOSE_MODE !== 'off';
+export const VERBOSE_TIMING = process.env.VERBOSE_TIMING === 'true' || VERBOSE_MODE !== 'off';
+
+/**
+ * Check if verbose mode is enabled
+ */
+export function isVerbose(): boolean {
+  return VERBOSE_MODE !== 'off';
+}
+
+/**
+ * Check if debug level logging is enabled
+ */
+export function isDebugLevel(): boolean {
+  return VERBOSE_MODE === 'debug' || LOG_LEVEL === 'debug';
+}
+
 // Claude Remote Sessions configuration
 export const CLAUDE_ENVIRONMENT_ID = process.env.CLAUDE_ENVIRONMENT_ID || '';
 export const CLAUDE_API_BASE_URL = process.env.CLAUDE_API_BASE_URL || 'https://api.anthropic.com';
@@ -117,6 +139,10 @@ export function logEnvConfig(): void {
   console.log(`  WORKSPACE_DIR=${WORKSPACE_DIR}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
   console.log(`  USE_NEW_ARCHITECTURE=${USE_NEW_ARCHITECTURE}`);
+  console.log(`  VERBOSE_MODE=${VERBOSE_MODE}`);
+  console.log(`  LOG_LEVEL=${LOG_LEVEL}`);
+  console.log(`  VERBOSE_HTTP=${VERBOSE_HTTP}`);
+  console.log(`  VERBOSE_TIMING=${VERBOSE_TIMING}`);
   console.log(`  CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID || 'not set'}`);
   console.log(`  CLAUDE_API_BASE_URL=${CLAUDE_API_BASE_URL}`);
   console.log(`  CLAUDE_DEFAULT_MODEL=${CLAUDE_DEFAULT_MODEL}`);
