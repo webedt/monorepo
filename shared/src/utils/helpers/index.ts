@@ -6,6 +6,17 @@
 // Emoji Mapper
 export { getEventEmoji, applyEmoji } from './emojiMapper.js';
 
+// Git URL Security Helper
+export {
+  parseGitUrl,
+  validateBranchName,
+  sanitizeBranchName,
+  extractRepoOwner,
+  extractRepoName,
+  validateGitUrl,
+} from './gitUrlHelper.js';
+export type { ParsedGitUrl, ParsedGitUrlError } from './gitUrlHelper.js';
+
 // Session Path Helper
 export {
   parseRepoUrl,
