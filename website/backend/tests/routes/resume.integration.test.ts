@@ -1,7 +1,11 @@
 /**
- * Integration Tests for Resume Routes
+ * Service-Layer Tests for Resume Routes
  *
- * Tests the session event replay and live streaming endpoints.
+ * Tests the mock service implementations for session event replay
+ * and live streaming. These tests verify the behavior of the event
+ * storage and broadcaster services.
+ *
+ * For actual HTTP endpoint tests, use supertest with the actual routes.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -16,7 +20,7 @@ import {
   createMockSessionEventBroadcaster,
 } from '../helpers/mockServices.js';
 
-describe('Resume Routes - Integration Tests', () => {
+describe('Resume Service Layer Tests', () => {
   let mockDb: MockDb;
 
   beforeEach(() => {

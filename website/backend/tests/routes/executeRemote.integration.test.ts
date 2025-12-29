@@ -1,8 +1,11 @@
 /**
- * Integration Tests for Execute Remote Routes
+ * Validation Logic Tests for Execute Remote Routes
  *
- * Tests the AI execution endpoints including validation, authentication,
- * SSE streaming setup, and event handling.
+ * Tests the validation logic and helper functions that simulate
+ * AI execution request handling, including input validation,
+ * authentication checks, and SSE streaming setup.
+ *
+ * For actual HTTP endpoint tests, use supertest with the actual routes.
  */
 
 import { describe, it, beforeEach } from 'node:test';
@@ -11,7 +14,7 @@ import { createMockRequest, createMockResponse, createMockUser, createMockSessio
 import { createMockChatSession } from '../helpers/testApp.js';
 import { MockDb, createMockDb } from '../helpers/mockDb.js';
 
-describe('Execute Remote Routes - Integration Tests', () => {
+describe('Execute Remote Validation Logic Tests', () => {
   let mockDb: MockDb;
 
   beforeEach(() => {

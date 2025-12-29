@@ -1,15 +1,18 @@
 /**
- * Integration Tests for GitHub Routes
+ * Validation Logic Tests for GitHub Routes
  *
- * Tests GitHub OAuth flow, repository operations, branch management,
+ * Tests the validation logic and helper functions that simulate
+ * GitHub OAuth flow, repository operations, branch management,
  * pull requests, and file operations.
+ *
+ * For actual HTTP endpoint tests, see github.http.test.ts which uses supertest.
  */
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { createMockRequest, createMockResponse, createMockUser, createMockSession } from '../helpers/mockExpress.js';
 
-describe('GitHub Routes - Integration Tests', () => {
+describe('GitHub Validation Logic Tests', () => {
   describe('OAuth Flow', () => {
     describe('GET /oauth - Initiate OAuth', () => {
       it('should require authentication', () => {
@@ -695,7 +698,7 @@ function validateListPRs(query: Record<string, unknown>): {
 }
 
 function validateMergePR(body: Record<string, unknown>): {
-  valid?: boolean;
+  valid: boolean;
   merge_method: string;
 } {
   const method = body.merge_method as string;
@@ -705,7 +708,7 @@ function validateMergePR(body: Record<string, unknown>): {
     return { valid: false, merge_method: method };
   }
 
-  return { merge_method: method || 'merge' };
+  return { valid: true, merge_method: method || 'merge' };
 }
 
 function validateGeneratePRContent(body: Record<string, unknown>): { valid: boolean } {

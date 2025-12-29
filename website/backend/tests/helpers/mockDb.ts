@@ -85,8 +85,9 @@ export class MockDb {
     const session = this.state.sessions.get(id);
     if (!session) return false;
 
-    // Soft delete
-    session.deletedAt = new Date();
+    // Soft delete using immutable update
+    const updated = { ...session, deletedAt: new Date() };
+    this.state.sessions.set(id, updated);
     return true;
   }
 

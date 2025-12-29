@@ -1,13 +1,15 @@
 /**
- * Integration Tests for Sessions Routes
+ * Service-Layer Tests for Sessions
  *
- * Tests the session endpoints including HTTP layer, middleware,
- * authentication, and database interactions using mocked dependencies.
+ * Tests the business logic and mock service implementations for session operations.
+ * These tests verify the behavior of mock services (query, authorization, events)
+ * that simulate the session route handlers' data layer.
+ *
+ * For actual HTTP endpoint tests, see sessions.http.test.ts which uses supertest.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import express, { Express, Request, Response, NextFunction } from 'express';
 import { createMockRequest, createMockResponse, createMockUser, createMockSession } from '../helpers/mockExpress.js';
 import { createMockChatSession, createMockEvent } from '../helpers/testApp.js';
 import { MockDb, createMockDb } from '../helpers/mockDb.js';
@@ -17,7 +19,7 @@ import {
   createMockEventStorageService,
 } from '../helpers/mockServices.js';
 
-describe('Sessions Routes - Integration Tests', () => {
+describe('Sessions Service Layer Tests', () => {
   let mockDb: MockDb;
 
   beforeEach(() => {

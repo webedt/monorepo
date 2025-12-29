@@ -7,6 +7,7 @@
 
 import express, { Express, Request, Response, NextFunction } from 'express';
 import type { User, Session } from 'lucia';
+import { createMockUser, createMockSession } from './mockExpress.js';
 
 export interface TestAppOptions {
   /**
@@ -57,42 +58,8 @@ export function createTestApp(options: TestAppOptions = {}): Express {
   return app;
 }
 
-/**
- * Creates a mock user for testing.
- */
-export function createMockUser(overrides: Partial<User> = {}): User {
-  return {
-    id: 'test-user-id',
-    email: 'test@example.com',
-    displayName: null,
-    passwordHash: '$2b$10$testhashedpassword',
-    isAdmin: false,
-    createdAt: new Date(),
-    githubId: null,
-    githubAccessToken: null,
-    claudeAuth: null,
-    codexAuth: null,
-    geminiAuth: null,
-    preferredProvider: 'claude',
-    imageResizeMaxDimension: null,
-    voiceCommandKeywords: [],
-    defaultLandingPage: 'store',
-    preferredModel: null,
-    ...overrides,
-  } as User;
-}
-
-/**
- * Creates a mock session for testing.
- */
-export function createMockSession(userId: string = 'test-user-id'): Session {
-  return {
-    id: 'test-session-id',
-    userId,
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-    fresh: false,
-  };
-}
+// Re-export createMockUser and createMockSession from mockExpress
+export { createMockUser, createMockSession };
 
 /**
  * Creates a mock chat session for testing.
