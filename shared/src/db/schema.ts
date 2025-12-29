@@ -215,6 +215,14 @@ export const organizations = pgTable('organizations', {
 // Organization membership roles
 export type OrganizationRole = 'owner' | 'admin' | 'member';
 
+/** Valid organization role values */
+export const ORGANIZATION_ROLES: readonly OrganizationRole[] = ['owner', 'admin', 'member'] as const;
+
+/** Type guard to check if a string is a valid OrganizationRole */
+export function isOrganizationRole(value: unknown): value is OrganizationRole {
+  return typeof value === 'string' && ORGANIZATION_ROLES.includes(value as OrganizationRole);
+}
+
 // Organization members - junction table for users and organizations
 export const organizationMembers = pgTable('organization_members', {
   id: text('id').primaryKey(), // UUID

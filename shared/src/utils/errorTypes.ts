@@ -29,59 +29,87 @@ export interface NetworkError extends Error {
 }
 
 /**
- * Type guard to check if an error has NetworkError properties
+ * Type guard to check if an error has NetworkError properties.
+ * Checks for the presence of at least one NetworkError-specific property
+ * (code, status, statusCode, response, or isRetryable).
  */
 export function isNetworkError(error: unknown): error is NetworkError {
-  return error instanceof Error;
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  // Check for at least one NetworkError-specific property
+  return (
+    'code' in error ||
+    'status' in error ||
+    'statusCode' in error ||
+    'response' in error ||
+    'isRetryable' in error
+  );
 }
 
 /**
- * Get the error code from an error, if available
+ * Cast an Error to NetworkError for property access.
+ * Use this when you need to access potential NetworkError properties
+ * without asserting that they definitely exist.
+ */
+export function asNetworkError(error: Error): NetworkError {
+  return error as NetworkError;
+}
+
+/**
+ * Get the error code from an error, if available.
+ * Works with any Error that may have a 'code' property.
  */
 export function getErrorCode(error: unknown): string | undefined {
-  if (isNetworkError(error)) {
-    return error.code;
+  if (!(error instanceof Error)) {
+    return undefined;
   }
-  return undefined;
+  const networkErr = asNetworkError(error);
+  return networkErr.code;
 }
 
 /**
- * Get the HTTP status code from an error, if available
+ * Get the HTTP status code from an error, if available.
+ * Checks multiple common properties where status codes are stored.
  */
 export function getStatusCode(error: unknown): number | undefined {
-  if (isNetworkError(error)) {
-    return error.status ?? error.statusCode ?? error.response?.status ?? error.response?.statusCode;
+  if (!(error instanceof Error)) {
+    return undefined;
   }
-  return undefined;
+  const networkErr = asNetworkError(error);
+  return networkErr.status ?? networkErr.statusCode ?? networkErr.response?.status ?? networkErr.response?.statusCode;
 }
 
 /**
- * Get the retry-after header value from an error response, if available
+ * Get the retry-after header value from an error response, if available.
  */
 export function getRetryAfterHeader(error: unknown): string | undefined {
-  if (isNetworkError(error)) {
-    const headers = error.response?.headers;
-    return headers?.['retry-after'] || headers?.['Retry-After'];
+  if (!(error instanceof Error)) {
+    return undefined;
   }
-  return undefined;
+  const networkErr = asNetworkError(error);
+  const headers = networkErr.response?.headers;
+  return headers?.['retry-after'] || headers?.['Retry-After'];
 }
 
 /**
  * Check if an error is retryable based on error code or status
  */
 export function isRetryableError(error: unknown): boolean {
-  if (!isNetworkError(error)) {
+  if (!(error instanceof Error)) {
     return false;
   }
 
+  const networkErr = asNetworkError(error);
+
   // Check explicit retryable flag
-  if (typeof error.isRetryable === 'boolean') {
-    return error.isRetryable;
+  if (typeof networkErr.isRetryable === 'boolean') {
+    return networkErr.isRetryable;
   }
 
   // Check error codes
   const retryableCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'EHOSTUNREACH'];
-  if (error.code && retryableCodes.includes(error.code)) {
+  if (networkErr.code && retryableCodes.includes(networkErr.code)) {
     return true;
   }
 

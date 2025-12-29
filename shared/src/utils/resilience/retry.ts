@@ -1,6 +1,5 @@
 import { logger } from '../logging/logger.js';
-import type { NetworkError } from '../errorTypes.js';
-import { getErrorCode, getStatusCode } from '../errorTypes.js';
+import { getErrorCode, getStatusCode, asNetworkError } from '../errorTypes.js';
 
 export interface RetryConfig {
   maxRetries: number;
@@ -247,9 +246,17 @@ export const RETRY_CONFIGS = {
   } satisfies Partial<RetryConfig>,
 };
 
-export function extractRetryAfterMs(error: NetworkError | unknown): number | null {
-  const networkErr = error as NetworkError;
-  const headers = networkErr?.response?.headers;
+/**
+ * Extract the retry-after delay from an error's response headers.
+ * Supports both numeric (seconds) and date string formats.
+ */
+export function extractRetryAfterMs(error: unknown): number | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const networkErr = asNetworkError(error);
+  const headers = networkErr.response?.headers;
   if (!headers) return null;
 
   const retryAfter = headers['retry-after'] || headers['Retry-After'];
