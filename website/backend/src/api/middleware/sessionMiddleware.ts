@@ -261,3 +261,10 @@ export function sendBadRequest(res: Response, message: string): void {
 export function sendForbidden(res: Response, message = 'Access denied'): void {
   sendError(res, 403, message);
 }
+
+/**
+ * Send a standardized unauthorized error
+ */
+export function sendUnauthorized(res: Response, message = 'Unauthorized'): void {
+  sendError(res, 401, message);
+}
