@@ -23,7 +23,7 @@ import {
   sendUnauthorized,
 } from '../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../middleware/sessionMiddleware.js';
-import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, type ClaudeWebClientConfig } from '@webedt/shared';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, ACacheService, type ClaudeWebClientConfig, type CachedSessionList } from '@webedt/shared';
 import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -527,6 +527,10 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       branch,
     });
 
+    // Invalidate session list cache for user
+    const cacheService = ServiceProvider.get(ACacheService);
+    await cacheService.invalidateUserSessions(authReq.user!.id);
+
     // Broadcast session list update
     sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, session);
 
@@ -574,10 +578,35 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const userId = authReq.user!.id;
+
+    // Try to get from cache first
+    const cacheService = ServiceProvider.get(ACacheService);
+    const cachedResult = await cacheService.getSessionList(userId) as { hit: boolean; value?: CachedSessionList };
+
+    if (cachedResult.hit && cachedResult.value) {
+      // Add cache header to indicate cache hit
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+      res.json({
+        success: true,
+        data: {
+          sessions: cachedResult.value.sessions,
+          total: cachedResult.value.total,
+        },
+      });
+      return;
+    }
+
+    // Cache miss - fetch from database
     const queryService = ServiceProvider.get(ASessionQueryService);
+    const sessions = await queryService.listActive(userId);
 
-    const sessions = await queryService.listActive(authReq.user!.id);
+    // Cache the result
+    await cacheService.setSessionList(userId, sessions);
 
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     res.json({
       success: true,
       data: {
@@ -1052,6 +1081,11 @@ router.post('/:id/favorite', requireAuth, validateSessionId, requireSessionOwner
     .where(eq(chatSessions.id, sessionId))
     .returning();
 
+  // Invalidate session cache for user
+  const cacheService = ServiceProvider.get(ACacheService);
+  await cacheService.invalidateUserSessions(authReq.user!.id);
+  await cacheService.invalidateSession(sessionId);
+
   // Notify subscribers of session update
   sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, updatedSession);
 
@@ -1446,6 +1480,10 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       context: { operation: 'bulkSoftDelete', userId: authReq.user!.id, sessionCount: ids.length },
     });
 
+    // Invalidate session cache for user
+    const cacheService = ServiceProvider.get(ACacheService);
+    await cacheService.invalidateUserSessions(authReq.user!.id);
+
     logger.info(`Bulk soft-deleted ${ids.length} sessions`, {
       component: 'Sessions',
       userId: authReq.user!.id,
@@ -1514,6 +1552,10 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
     }, {
       context: { operation: 'bulkRestore', userId: authReq.user!.id, sessionCount: ids.length },
     });
+
+    // Invalidate session cache for user
+    const cacheService = ServiceProvider.get(ACacheService);
+    await cacheService.invalidateUserSessions(authReq.user!.id);
 
     logger.info(`Bulk restored ${ids.length} sessions`, {
       component: 'Sessions',
@@ -1641,6 +1683,10 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
 
     const archivedCount = archiveResults.filter(r => r.archived).length;
     const remoteCount = archiveResults.filter(r => r.remoteSessionId).length;
+
+    // Invalidate session cache for user
+    const cacheService = ServiceProvider.get(ACacheService);
+    await cacheService.invalidateUserSessions(authReq.user!.id);
 
     logger.info(`Bulk permanently deleted ${ids.length} sessions`, {
       component: 'Sessions',
@@ -1839,6 +1885,11 @@ router.delete('/:id', requireAuth, validateSessionId, asyncHandler(async (req: R
     .set({ deletedAt: new Date() })
     .where(eq(chatSessions.id, sessionId));
 
+  // Invalidate session cache for user
+  const cacheService = ServiceProvider.get(ACacheService);
+  await cacheService.invalidateUserSessions(authReq.user!.id);
+  await cacheService.invalidateSession(sessionId);
+
   // Notify subscribers of session deletion
   sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
 
@@ -1880,6 +1931,10 @@ router.post('/:id/restore', requireAuth, validateSessionId, asyncHandler(async (
     .update(chatSessions)
     .set({ deletedAt: null })
     .where(eq(chatSessions.id, sessionId));
+
+  // Invalidate session cache for user
+  const cacheService = ServiceProvider.get(ACacheService);
+  await cacheService.invalidateUserSessions(authReq.user!.id);
 
   sendData(res, { message: 'Session restored' });
 }, { errorMessage: 'Failed to restore session' }));

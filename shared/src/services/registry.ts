@@ -231,6 +231,7 @@ export {
   AEventFormatter,
   ASseHelper,
   ACodeAnalyzer,
+  ACacheService,
   // Types
   type LogContext,
   type CapturedLog,
@@ -260,6 +261,12 @@ export {
   type CodeAnalysisParams,
   type CodeAnalysisResult,
   type CodeAnalyzerConfig,
+  type CacheConfig,
+  type CacheStats,
+  type CacheResult,
+  type CacheSetOptions,
+  type InvalidationPattern,
+  type CacheHealth,
 } from './abstracts/index.js';
 
 // =============================================================================

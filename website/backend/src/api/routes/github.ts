@@ -8,7 +8,7 @@ import { Octokit } from '@octokit/rest';
 import { db, users, chatSessions, events, eq, and, isNull } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
+import { logger, ServiceProvider, AClaudeWebClient, ACacheService, type CachedGitHubRepos, type CachedGitHubBranches } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
 import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
@@ -259,12 +259,25 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
 router.get('/repos', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const userId = authReq.user!.id;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
       return;
     }
 
+    // Try to get from cache first
+    const cacheService = ServiceProvider.get(ACacheService);
+    const cachedResult = await cacheService.getGitHubRepos(userId) as { hit: boolean; value?: CachedGitHubRepos };
+
+    if (cachedResult.hit && cachedResult.value) {
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
+      res.json({ success: true, data: cachedResult.value.repos });
+      return;
+    }
+
+    // Cache miss - fetch from GitHub API
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
     const { data: repos } = await octokit.repos.listForAuthenticatedUser({
       sort: 'updated',
@@ -283,6 +296,11 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
       default_branch: repo.default_branch,
     }));
 
+    // Cache the result
+    await cacheService.setGitHubRepos(userId, formattedRepos);
+
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
     res.json({ success: true, data: formattedRepos });
   } catch (error) {
     logger.error('GitHub repos error', error as Error, { component: 'GitHub' });
@@ -336,12 +354,25 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
+    const userId = authReq.user!.id;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
       return;
     }
 
+    // Try to get from cache first
+    const cacheService = ServiceProvider.get(ACacheService);
+    const cachedResult = await cacheService.getGitHubBranches(userId, owner, repo) as { hit: boolean; value?: CachedGitHubBranches };
+
+    if (cachedResult.hit && cachedResult.value) {
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=180');
+      res.json({ success: true, data: cachedResult.value.branches });
+      return;
+    }
+
+    // Cache miss - fetch from GitHub API
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
     const { data: branches } = await octokit.repos.listBranches({
       owner,
@@ -358,6 +389,11 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
       },
     }));
 
+    // Cache the result
+    await cacheService.setGitHubBranches(userId, owner, repo, formattedBranches);
+
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=180');
     res.json({ success: true, data: formattedBranches });
   } catch (error) {
     logger.error('GitHub branches error', error as Error, { component: 'GitHub' });
@@ -461,6 +497,10 @@ router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, re
       ref: `refs/heads/${branchName}`,
       sha: baseBranchData.commit.sha,
     });
+
+    // Invalidate branch cache for this repo
+    const cacheService = ServiceProvider.get(ACacheService);
+    await cacheService.invalidateRepoBranches(authReq.user!.id, owner, repo);
 
     logger.info(`Created branch ${branchName} from ${base} in ${owner}/${repo}`, { component: 'GitHub' });
 
@@ -652,6 +692,10 @@ router.delete('/repos/:owner/:repo/branches/*', requireAuth, async (req: Request
       repo,
       ref: `heads/${branch}`,
     });
+
+    // Invalidate branch cache for this repo
+    const cacheService = ServiceProvider.get(ACacheService);
+    await cacheService.invalidateRepoBranches(authReq.user!.id, owner, repo);
 
     logger.info(`Deleted branch ${owner}/${repo}/${branch}`, { component: 'GitHub' });
     res.json({ success: true, data: { message: 'Branch deleted' } });
