@@ -16,6 +16,7 @@ export type {
   ExecutionEvent,
   ExecutionEventType,
   ExecutionEventCallback,
+  ProviderCapabilities,
   // Discriminated union types for type-safe event handling
   TypedExecutionEvent,
   ConnectedEvent,
@@ -40,6 +41,9 @@ export type {
   MessageDeltaEvent,
   MessageCompleteEvent,
 } from './types.js';
+
+// Export abstract base class for providers
+export { AExecutionProvider } from './types.js';
 
 // Export type guard and exhaustive check helpers
 export { isEventType, assertNeverEventType } from './types.js';
