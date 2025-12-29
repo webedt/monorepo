@@ -6,7 +6,10 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, NewSessionModal, CollectionsPanel } from '../../components';
 import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
+import { lastRepoStorage } from '../../lib/storageInstances';
+
 import type { Session, Repository, Branch } from '../../types';
+
 import './agents.css';
 
 type FilterMode = 'all' | 'active' | 'favorites';
@@ -314,7 +317,7 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private async autoSelectLastRepo(): Promise<void> {
-    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+    const lastUsedRepo = lastRepoStorage.get();
     if (lastUsedRepo && this.repos.length > 0) {
       const [owner, name] = lastUsedRepo.split('/');
       const lastRepo = this.repos.find(r => r.owner.login === owner && r.name === name);
@@ -432,8 +435,8 @@ export class AgentsPage extends Page<PageOptions> {
         title: initialRequest || undefined,
       });
 
-      // Save the selected repository to localStorage for next time
-      localStorage.setItem('webedt_last_repo', `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
+      // Save the selected repository for next time
+      lastRepoStorage.set(`${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
 
       // Clear the input
       this.requestTextArea?.clear();

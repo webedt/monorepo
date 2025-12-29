@@ -3,6 +3,11 @@
  * Manages editor preferences including format-on-save
  */
 
+import { z } from 'zod';
+
+import { STORE_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
+
 export interface EditorSettings {
   formatOnSave: boolean;
   tabSize: number;
@@ -11,7 +16,11 @@ export interface EditorSettings {
 
 type EditorSettingsListener = (settings: EditorSettings) => void;
 
-const STORAGE_KEY = 'webedt_editor_settings';
+const EditorSettingsSchema = z.object({
+  formatOnSave: z.boolean().default(true),
+  tabSize: z.number().min(1).max(8).default(2),
+  useTabs: z.boolean().default(false),
+});
 
 const DEFAULT_SETTINGS: EditorSettings = {
   formatOnSave: true,
@@ -19,33 +28,23 @@ const DEFAULT_SETTINGS: EditorSettings = {
   useTabs: false,
 };
 
+const editorSettingsStorage = new TypedStorage({
+  key: STORE_KEYS.EDITOR_SETTINGS,
+  schema: EditorSettingsSchema,
+  defaultValue: DEFAULT_SETTINGS,
+  version: 1,
+});
+
 class EditorSettingsStore {
   private settings: EditorSettings;
   private listeners: Set<EditorSettingsListener> = new Set();
 
   constructor() {
-    this.settings = this.loadFromStorage();
-  }
-
-  private loadFromStorage(): EditorSettings {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return { ...DEFAULT_SETTINGS, ...parsed };
-      }
-    } catch (error) {
-      console.error('Failed to load editor settings:', error);
-    }
-    return { ...DEFAULT_SETTINGS };
+    this.settings = editorSettingsStorage.get();
   }
 
   private saveToStorage(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
-    } catch (error) {
-      console.error('Failed to save editor settings:', error);
-    }
+    editorSettingsStorage.set(this.settings);
   }
 
   private notifyListeners(): void {
