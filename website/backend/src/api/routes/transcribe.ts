@@ -7,6 +7,7 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
+import { logger } from '@webedt/shared';
 
 const router = express.Router();
 
@@ -78,7 +79,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI API error:', errorText);
+      logger.error('OpenAI API error', new Error(errorText), { component: 'transcribe', operation: 'whisperApi' });
       res.status(response.status).json({
         success: false,
         error: `OpenAI API error: ${response.statusText}`,
@@ -97,7 +98,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       },
     });
   } catch (error) {
-    console.error('Transcription error:', error);
+    logger.error('Transcription error', error, { component: 'transcribe', operation: 'transcribe' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to transcribe audio',

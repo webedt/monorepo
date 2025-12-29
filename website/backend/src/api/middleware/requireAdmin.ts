@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, logger } from '@webedt/shared';
 import type { AuthRequest } from './auth.js';
 
 /**
@@ -39,7 +39,7 @@ export async function requireAdmin(
 
     next();
   } catch (error) {
-    console.error('Admin check error:', error);
+    logger.error('Admin check error', error, { component: 'auth', operation: 'requireAdmin' });
     res.status(500).json({ success: false, error: 'Failed to verify admin status' });
   }
 }

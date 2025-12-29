@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { AutocompleteService } from '@webedt/shared';
+import { AutocompleteService, logger } from '@webedt/shared';
 
 import type { AutocompleteRequest } from '@webedt/shared';
 
@@ -82,7 +82,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       data: response,
     });
   } catch (error) {
-    console.error('[Autocomplete] Error:', error);
+    logger.error('Autocomplete error', error, { component: 'autocomplete', operation: 'complete' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error',

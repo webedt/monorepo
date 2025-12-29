@@ -372,10 +372,9 @@ app.use(
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorStack = err instanceof Error ? err.stack : undefined;
 
-    logger.error('Unhandled error:', err);
-    console.error('[GlobalErrorHandler] Error details:', {
-      message: errorMessage,
-      stack: errorStack,
+    logger.error('Global error handler caught error', err, {
+      component: 'server',
+      operation: 'globalErrorHandler',
       path: req.path,
       method: req.method
     });

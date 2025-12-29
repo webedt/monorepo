@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { lucia } from '@webedt/shared';
+import { lucia, logger } from '@webedt/shared';
 import type { User, Session } from 'lucia';
 
 // Extend Express Request type to include auth properties
@@ -56,7 +56,7 @@ export async function authMiddleware(
   } catch (error) {
     // Pass async errors to Express error handler
     // This is necessary because Express 4 doesn't automatically catch async errors
-    console.error('[AuthMiddleware] Error validating session:', error);
+    logger.error('Error validating session', error, { component: 'auth', operation: 'validateSession' });
     next(error);
   }
 }

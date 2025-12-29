@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { StorageService, calculateBase64Size, calculateJsonSize } from '@webedt/shared';
+import { StorageService, calculateBase64Size, calculateJsonSize, logger } from '@webedt/shared';
 import type { AuthRequest } from './auth.js';
 
 /**
@@ -91,7 +91,7 @@ export function requireStorageQuota(options: StorageQuotaOptions = {}) {
 
       next();
     } catch (error) {
-      console.error('Storage quota check error:', error);
+      logger.error('Storage quota check error', error, { component: 'storage', operation: 'checkQuota', userId: authReq.user?.id });
 
       if (blockOnError) {
         // Block request when quota system is unavailable
@@ -208,7 +208,7 @@ export function trackStorageUsage() {
       if (res.statusCode >= 200 && res.statusCode < 300 && size && size > 0 && authReq.user) {
         // Fire-and-forget but log errors for debugging
         StorageService.addUsage(authReq.user.id, size).catch((error) => {
-          console.error('Failed to track storage usage:', error);
+          logger.error('Failed to track storage usage', error, { component: 'storage', operation: 'trackUsage', userId: authReq.user.id });
           // Storage usage tracking failed - the cached value may drift
           // This will be corrected on next recalculateUsage call
         });

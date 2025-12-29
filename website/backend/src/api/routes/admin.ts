@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, logger } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -25,7 +25,7 @@ router.get('/users', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: allUsers });
   } catch (error) {
-    console.error('Error fetching users:', error);
+    logger.error('Error fetching users', error, { component: 'admin', operation: 'listUsers' });
     res.status(500).json({ success: false, error: 'Failed to fetch users' });
   }
 });
@@ -55,7 +55,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: user[0] });
   } catch (error) {
-    console.error('Error fetching user:', error);
+    logger.error('Error fetching user', error, { component: 'admin', operation: 'getUser' });
     res.status(500).json({ success: false, error: 'Failed to fetch user' });
   }
 });
@@ -100,7 +100,7 @@ router.post('/users', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: newUser[0] });
   } catch (error) {
-    console.error('Error creating user:', error);
+    logger.error('Error creating user', error, { component: 'admin', operation: 'createUser' });
     res.status(500).json({ success: false, error: 'Failed to create user' });
   }
 });
@@ -150,7 +150,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: updatedUser[0] });
   } catch (error) {
-    console.error('Error updating user:', error);
+    logger.error('Error updating user', error, { component: 'admin', operation: 'updateUser' });
     res.status(500).json({ success: false, error: 'Failed to update user' });
   }
 });
@@ -176,7 +176,7 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: { id: deletedUser[0].id } });
   } catch (error) {
-    console.error('Error deleting user:', error);
+    logger.error('Error deleting user', error, { component: 'admin', operation: 'deleteUser' });
     res.status(500).json({ success: false, error: 'Failed to delete user' });
   }
 });
@@ -218,7 +218,7 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error impersonating user:', error);
+    logger.error('Error impersonating user', error, { component: 'admin', operation: 'impersonate' });
     res.status(500).json({ success: false, error: 'Failed to impersonate user' });
   }
 });
@@ -239,7 +239,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching stats:', error);
+    logger.error('Error fetching stats', error, { component: 'admin', operation: 'getStats' });
     res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
   }
 });

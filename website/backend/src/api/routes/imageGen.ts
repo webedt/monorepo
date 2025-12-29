@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, logger } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -108,7 +108,7 @@ async function generateWithOpenAICompatible(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[ImageGen] API error:', response.status, errorText);
+      logger.error('ImageGen API error', new Error(errorText), { component: 'imageGen', operation: 'openaiCompatible', statusCode: response.status });
       return { success: false, error: `API error: ${response.status} - ${errorText}` };
     }
 
@@ -142,7 +142,7 @@ async function generateWithOpenAICompatible(
 
     return { success: false, error: 'No content in response' };
   } catch (error) {
-    console.error('[ImageGen] Error:', error);
+    logger.error('ImageGen error', error, { component: 'imageGen', operation: 'openaiCompatible' });
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
@@ -195,7 +195,7 @@ async function generateWithGoogle(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[ImageGen] Google API error:', response.status, errorText);
+      logger.error('ImageGen Google API error', new Error(errorText), { component: 'imageGen', operation: 'googleApi', statusCode: response.status });
       return { success: false, error: `Google API error: ${response.status} - ${errorText}` };
     }
 
@@ -222,7 +222,7 @@ async function generateWithGoogle(
 
     return { success: false, error: 'No image in response' };
   } catch (error) {
-    console.error('[ImageGen] Google API error:', error);
+    logger.error('ImageGen Google API error', error, { component: 'imageGen', operation: 'googleApi' });
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
@@ -307,7 +307,7 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
       });
     }
   } catch (error) {
-    console.error('[ImageGen] Unexpected error:', error);
+    logger.error('ImageGen unexpected error', error, { component: 'imageGen', operation: 'generate' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error',
