@@ -40,6 +40,7 @@ import {
   ATokenRefreshService,
   AEventFormatter,
   ASseHelper,
+  ACacheService,
 } from './abstracts/index.js';
 
 // Import concrete implementations
@@ -62,6 +63,7 @@ import { Llm } from '../llm/Llm.js';
 import { TokenRefreshService } from '../auth/TokenRefreshService.js';
 import { EventFormatter } from '../utils/formatters/EventFormatter.js';
 import { SseHelper } from '../utils/http/SseHelper.js';
+import { CacheService } from '../caching/CacheService.js';
 import type { ClaudeRemoteClientConfig } from '../claudeWeb/types.js';
 
 /**
@@ -117,6 +119,9 @@ export async function bootstrapServices(): Promise<void> {
 
   // Auth services
   ServiceProvider.register(ATokenRefreshService, wrapService(new TokenRefreshService(), -30));
+
+  // Caching services - initialized early but after logging
+  ServiceProvider.register(ACacheService, new CacheService());
 
   // Formatter services
   ServiceProvider.register(AEventFormatter, wrapService(new EventFormatter(), 0));

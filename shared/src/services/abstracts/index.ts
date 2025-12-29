@@ -137,3 +137,14 @@ export type {
   CodeAnalysisResult,
   CodeAnalyzerConfig,
 } from '../../codeAnalysis/types.js';
+
+// Caching services (from caching/)
+export { ACacheService } from '../../caching/ACacheService.js';
+export type {
+  CacheConfig,
+  CacheStats,
+  CacheResult,
+  CacheSetOptions,
+  InvalidationPattern,
+  CacheHealth,
+} from '../../caching/types.js';
