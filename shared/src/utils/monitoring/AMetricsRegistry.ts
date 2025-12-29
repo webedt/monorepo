@@ -43,5 +43,15 @@ export abstract class AMetricsRegistry extends AService implements IMetricsRegis
 
   abstract recordRateLimitHit(tier: string, path: string): void;
 
+  abstract recordSseSubscription(broadcasterType: string): void;
+
+  abstract recordSseUnsubscription(broadcasterType: string): void;
+
+  abstract recordSseEviction(broadcasterType: string, reason: string): void;
+
+  abstract updateSseSessionCount(broadcasterType: string, count: number): void;
+
+  abstract recordSseHeartbeat(broadcasterType: string, success: boolean): void;
+
   abstract reset(): void;
 }

@@ -43,3 +43,21 @@ export type {
   RecoveryOptions,
   DLQEntry,
 } from './recovery.js';
+
+// Request Deduplicator
+export {
+  ARequestDeduplicator,
+  ARequestDeduplicatorRegistry,
+  type RequestDeduplicatorConfig,
+  type RequestDeduplicatorStats,
+  type DeduplicateOptions,
+  type DeduplicateResult,
+} from './ARequestDeduplicator.js';
+
+export {
+  RequestDeduplicator,
+  createRequestDeduplicator,
+  requestDeduplicatorRegistry,
+  generateRequestKey,
+  simpleHash,
+} from './requestDeduplicator.js';

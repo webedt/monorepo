@@ -15,6 +15,13 @@ import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: GitHub
+ *     description: GitHub OAuth and repository operations
+ */
+
 // Initialize services for Auto PR
 const githubOperations = new GitHubOperations();
 
@@ -69,6 +76,20 @@ async function archiveClaudeRemoteSession(
   }
 }
 
+/**
+ * @openapi
+ * /github/oauth:
+ *   get:
+ *     tags:
+ *       - GitHub
+ *     summary: Initiate GitHub OAuth
+ *     description: Redirects user to GitHub for OAuth authorization. Returns user to the origin page after completion.
+ *     responses:
+ *       302:
+ *         description: Redirect to GitHub OAuth page
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 // Initiate GitHub OAuth
 router.get('/oauth', requireAuth, (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -204,6 +225,36 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /github/repos:
+ *   get:
+ *     tags:
+ *       - GitHub
+ *     summary: List user repositories
+ *     description: Returns all repositories accessible by the authenticated user's GitHub account.
+ *     responses:
+ *       200:
+ *         description: Repositories retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Repository'
+ *       400:
+ *         description: GitHub not connected
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get user's repositories
 router.get('/repos', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -239,6 +290,47 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /github/repos/{owner}/{repo}/branches:
+ *   get:
+ *     tags:
+ *       - GitHub
+ *     summary: List repository branches
+ *     description: Returns all branches for the specified repository.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Branches retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Branch'
+ *       400:
+ *         description: GitHub not connected
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get repository branches
 router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -273,6 +365,70 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
   }
 });
 
+/**
+ * @openapi
+ * /github/repos/{owner}/{repo}/branches:
+ *   post:
+ *     tags:
+ *       - GitHub
+ *     summary: Create a new branch
+ *     description: Creates a new branch in the specified repository from a base branch.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - branchName
+ *             properties:
+ *               branchName:
+ *                 type: string
+ *                 description: Name of the new branch
+ *               baseBranch:
+ *                 type: string
+ *                 description: Base branch to create from (default "main")
+ *                 default: main
+ *     responses:
+ *       200:
+ *         description: Branch created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     branchName:
+ *                       type: string
+ *                     baseBranch:
+ *                       type: string
+ *                     sha:
+ *                       type: string
+ *       400:
+ *         description: Branch name is required or GitHub not connected
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       422:
+ *         description: Branch already exists
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Create a new branch
 router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -511,6 +667,57 @@ router.delete('/repos/:owner/:repo/branches/*', requireAuth, async (req: Request
   }
 });
 
+/**
+ * @openapi
+ * /github/repos/{owner}/{repo}/pulls:
+ *   get:
+ *     tags:
+ *       - GitHub
+ *     summary: List pull requests
+ *     description: Returns pull requests for the specified repository with optional filtering.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: head
+ *         in: query
+ *         description: Filter by head branch
+ *         schema:
+ *           type: string
+ *       - name: base
+ *         in: query
+ *         description: Filter by base branch
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Pull requests retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PullRequest'
+ *       400:
+ *         description: GitHub not connected
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get pull requests
 router.get('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: Response) => {
   try {

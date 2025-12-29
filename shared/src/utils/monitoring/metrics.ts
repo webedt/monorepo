@@ -326,6 +326,36 @@ class MetricsRegistry extends AMetricsRegistry {
     'Total number of rate limit hits'
   );
 
+  readonly sseSubscribersActive = new Gauge(
+    'sse_subscribers_active',
+    'Number of currently active SSE subscribers'
+  );
+
+  readonly sseSubscribersTotal = new Counter(
+    'sse_subscribers_total',
+    'Total number of SSE subscriptions created'
+  );
+
+  readonly sseSubscribersEvicted = new Counter(
+    'sse_subscribers_evicted_total',
+    'Total number of stale SSE subscribers evicted'
+  );
+
+  readonly sseSessionsActive = new Gauge(
+    'sse_sessions_active',
+    'Number of sessions with active SSE subscribers'
+  );
+
+  readonly sseHeartbeatsSent = new Counter(
+    'sse_heartbeats_sent_total',
+    'Total number of SSE heartbeats sent'
+  );
+
+  readonly sseHeartbeatFailures = new Counter(
+    'sse_heartbeat_failures_total',
+    'Total number of SSE heartbeat failures'
+  );
+
   recordHttpRequest(
     method: string,
     path: string,
@@ -393,6 +423,32 @@ class MetricsRegistry extends AMetricsRegistry {
 
   recordRateLimitHit(tier: string, path: string): void {
     this.rateLimitHitsTotal.inc({ tier, path });
+  }
+
+  recordSseSubscription(broadcasterType: string): void {
+    this.sseSubscribersTotal.inc({ broadcaster: broadcasterType });
+    this.sseSubscribersActive.inc({ broadcaster: broadcasterType });
+  }
+
+  recordSseUnsubscription(broadcasterType: string): void {
+    this.sseSubscribersActive.dec({ broadcaster: broadcasterType });
+  }
+
+  recordSseEviction(broadcasterType: string, reason: string): void {
+    this.sseSubscribersEvicted.inc({ broadcaster: broadcasterType, reason });
+    this.sseSubscribersActive.dec({ broadcaster: broadcasterType });
+  }
+
+  updateSseSessionCount(broadcasterType: string, count: number): void {
+    this.sseSessionsActive.set({ broadcaster: broadcasterType }, count);
+  }
+
+  recordSseHeartbeat(broadcasterType: string, success: boolean): void {
+    if (success) {
+      this.sseHeartbeatsSent.inc({ broadcaster: broadcasterType });
+    } else {
+      this.sseHeartbeatFailures.inc({ broadcaster: broadcasterType });
+    }
   }
 
   updateHealthStatus(healthy: boolean): void {
@@ -466,6 +522,14 @@ class MetricsRegistry extends AMetricsRegistry {
       rateLimit: {
         hits: this.rateLimitHitsTotal.getAll(),
       },
+      sse: {
+        subscribersActive: this.sseSubscribersActive.getAll(),
+        subscribersTotal: this.sseSubscribersTotal.getAll(),
+        subscribersEvicted: this.sseSubscribersEvicted.getAll(),
+        sessionsActive: this.sseSessionsActive.getAll(),
+        heartbeatsSent: this.sseHeartbeatsSent.getAll(),
+        heartbeatFailures: this.sseHeartbeatFailures.getAll(),
+      },
       timestamp: new Date().toISOString(),
     };
   }
@@ -509,6 +573,12 @@ class MetricsRegistry extends AMetricsRegistry {
     this.retryAttemptsTotal.reset();
     this.retrySuccessAfterRetry.reset();
     this.rateLimitHitsTotal.reset();
+    this.sseSubscribersActive.reset();
+    this.sseSubscribersTotal.reset();
+    this.sseSubscribersEvicted.reset();
+    this.sseSessionsActive.reset();
+    this.sseHeartbeatsSent.reset();
+    this.sseHeartbeatFailures.reset();
     this.startTime = new Date();
 
     logger.info('Metrics reset', { component: 'Metrics' });

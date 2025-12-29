@@ -23,6 +23,7 @@ import {
   ApiErrorCode,
 } from '@webedt/shared';
 import { authRateLimiter } from '../middleware/rateLimit.js';
+import { getCsrfToken, CSRF_CONSTANTS } from '../middleware/csrf.js';
 
 // Validation schemas
 const registerSchema = {
@@ -42,6 +43,72 @@ const loginSchema = {
 
 const router = Router();
 
+/**
+ * @openapi
+ * /auth/register:
+ *   post:
+ *     tags:
+ *       - Auth
+ *     summary: Register a new user
+ *     description: Creates a new user account with email and password. Automatically logs in the user after successful registration.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *                 description: Password (minimum 8 characters)
+ *                 example: mySecurePassword123
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *         headers:
+ *           Set-Cookie:
+ *             description: Session cookie for authentication
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Email already in use
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       429:
+ *         description: Too many requests - rate limited
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Register - strict rate limiting to prevent brute-force attacks
 router.post('/register', authRateLimiter, validateRequest(registerSchema), async (req: Request, res: Response) => {
   try {
@@ -108,6 +175,75 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
   }
 });
 
+/**
+ * @openapi
+ * /auth/login:
+ *   post:
+ *     tags:
+ *       - Auth
+ *     summary: Login user
+ *     description: Authenticates a user with email and password. Returns a session cookie for subsequent authenticated requests.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 description: User's password
+ *                 example: mySecurePassword123
+ *               rememberMe:
+ *                 type: boolean
+ *                 description: Extend session duration (90 days vs 30 days)
+ *                 default: false
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         headers:
+ *           Set-Cookie:
+ *             description: Session cookie for authentication
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         description: Invalid email or password
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       429:
+ *         description: Too many requests - rate limited
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Login - strict rate limiting to prevent brute-force attacks
 router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req: Request, res: Response) => {
   try {
@@ -174,6 +310,44 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req:
   }
 });
 
+/**
+ * @openapi
+ * /auth/logout:
+ *   post:
+ *     tags:
+ *       - Auth
+ *     summary: Logout user
+ *     description: Invalidates the current session and clears the session cookie.
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ *         headers:
+ *           Set-Cookie:
+ *             description: Blank session cookie to clear authentication
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Logged out successfully
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Logout
 router.post('/logout', async (req: Request, res: Response) => {
   try {
@@ -195,6 +369,48 @@ router.post('/logout', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /auth/session:
+ *   get:
+ *     tags:
+ *       - Auth
+ *     summary: Get current session
+ *     description: Returns the current authenticated user's session information. Also refreshes OAuth tokens if needed.
+ *     responses:
+ *       200:
+ *         description: Session information retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                     session:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                         userId:
+ *                           type: string
+ *                         expiresAt:
+ *                           type: string
+ *                           format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get current session
 router.get('/session', async (req: Request, res: Response) => {
   try {
@@ -294,6 +510,54 @@ router.get('/session', async (req: Request, res: Response) => {
     console.error('Session error:', error);
     sendInternalError(res);
   }
+});
+
+/**
+ * @openapi
+ * /auth/csrf-token:
+ *   get:
+ *     tags:
+ *       - Auth
+ *     summary: Get CSRF token
+ *     description: Returns the current CSRF token. The token is also set in a cookie. Frontend should include this token in the X-CSRF-Token header for all state-changing requests (POST, PUT, DELETE, PATCH).
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: CSRF token retrieved successfully
+ *         headers:
+ *           Set-Cookie:
+ *             description: CSRF token cookie (if not already set)
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     csrfToken:
+ *                       type: string
+ *                       description: The CSRF token to include in X-CSRF-Token header
+ *                     headerName:
+ *                       type: string
+ *                       example: x-csrf-token
+ *                       description: The header name to use when sending the token
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ */
+// Get CSRF token - allows frontend to fetch token for state-changing requests
+router.get('/csrf-token', (req: Request, res: Response) => {
+  const token = getCsrfToken(req, res);
+  sendSuccess(res, {
+    csrfToken: token,
+    headerName: CSRF_CONSTANTS.HEADER_NAME,
+  });
 });
 
 export default router;

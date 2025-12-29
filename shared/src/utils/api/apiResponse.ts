@@ -5,6 +5,7 @@
  */
 
 import type { Response } from 'express';
+import { getCorrelationId } from '../logging/correlationContext.js';
 
 /**
  * Standard success response format
@@ -13,6 +14,8 @@ export interface ApiSuccessResponse<T = unknown> {
   success: true;
   data: T;
   timestamp: string;
+  /** Request correlation ID for tracing */
+  requestId?: string;
 }
 
 /**
@@ -26,6 +29,8 @@ export interface ApiErrorResponse {
     fields?: Record<string, string[]>;
   };
   timestamp: string;
+  /** Request correlation ID for tracing */
+  requestId?: string;
 }
 
 /**
@@ -52,24 +57,31 @@ export type ApiErrorCodeType = typeof ApiErrorCode[keyof typeof ApiErrorCode];
 
 /**
  * Create a standardized success response object
+ * Automatically includes correlation ID from async context if available
  * @param data - The response data
+ * @param requestId - Optional explicit request ID (auto-detected from context if not provided)
  * @returns Formatted success response
  */
-export function successResponse<T>(data: T): ApiSuccessResponse<T> {
+export function successResponse<T>(data: T, requestId?: string): ApiSuccessResponse<T> {
+  const correlationId = requestId || getCorrelationId();
   return {
     success: true,
     data,
     timestamp: new Date().toISOString(),
+    ...(correlationId && { requestId: correlationId }),
   };
 }
 
 /**
  * Create a standardized error response object
+ * Automatically includes correlation ID from async context if available
  * @param message - Error message
  * @param code - Optional error code
+ * @param requestId - Optional explicit request ID (auto-detected from context if not provided)
  * @returns Formatted error response
  */
-export function errorResponse(message: string, code?: string): ApiErrorResponse {
+export function errorResponse(message: string, code?: string, requestId?: string): ApiErrorResponse {
+  const correlationId = requestId || getCorrelationId();
   return {
     success: false,
     error: {
@@ -77,19 +89,24 @@ export function errorResponse(message: string, code?: string): ApiErrorResponse 
       ...(code && { code }),
     },
     timestamp: new Date().toISOString(),
+    ...(correlationId && { requestId: correlationId }),
   };
 }
 
 /**
  * Create a validation error response object
+ * Automatically includes correlation ID from async context if available
  * @param message - Error message
  * @param fields - Field-level error details
+ * @param requestId - Optional explicit request ID (auto-detected from context if not provided)
  * @returns Formatted validation error response
  */
 export function validationErrorResponse(
   message: string,
-  fields?: Record<string, string[]>
+  fields?: Record<string, string[]>,
+  requestId?: string
 ): ApiErrorResponse {
+  const correlationId = requestId || getCorrelationId();
   return {
     success: false,
     error: {
@@ -98,6 +115,7 @@ export function validationErrorResponse(
       ...(fields && { fields }),
     },
     timestamp: new Date().toISOString(),
+    ...(correlationId && { requestId: correlationId }),
   };
 }
 

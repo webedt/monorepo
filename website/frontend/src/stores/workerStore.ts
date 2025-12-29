@@ -12,7 +12,7 @@ interface WorkerState {
   lastHeartbeat: number | null;
 }
 
-class WorkerStore extends Store<WorkerState> {
+export class WorkerStore extends Store<WorkerState> {
   private heartbeatTimeout: number | null = null;
 
   constructor() {

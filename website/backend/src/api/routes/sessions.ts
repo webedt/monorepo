@@ -4,7 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql } from '@webedt/shared';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql, withTransactionOrThrow } from '@webedt/shared';
+import type { TransactionContext } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -22,8 +23,8 @@ import {
   sendUnauthorized,
 } from '../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../middleware/sessionMiddleware.js';
-import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
-import { publicShareRateLimiter } from '../middleware/rateLimit.js';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, type ClaudeWebClientConfig } from '@webedt/shared';
+import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
@@ -77,6 +78,15 @@ async function archiveClaudeRemoteSession(
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Sessions
+ *     description: AI coding session management
+ *   - name: Sessions-Public
+ *     description: Public session sharing endpoints (no auth required)
+ */
+
 // Log all incoming requests to sessions routes for debugging
 router.use((req: Request, res: Response, next) => {
   logger.info(`Sessions route request: ${req.method} ${req.path}`, {
@@ -100,10 +110,72 @@ router.use((req: Request, res: Response, next) => {
 // ============================================================================
 
 /**
- * GET /api/sessions/shared/:token
- * Public endpoint to access a shared session via share token
- * No authentication required - anyone with the link can view
- * Rate limited to prevent enumeration attacks
+ * @openapi
+ * /sessions/shared/{token}:
+ *   get:
+ *     tags:
+ *       - Sessions-Public
+ *     summary: Get shared session by token
+ *     description: Public endpoint to access a shared session via share token. No authentication required. Rate limited to prevent enumeration attacks.
+ *     security: []
+ *     parameters:
+ *       - name: token
+ *         in: path
+ *         required: true
+ *         description: Share token (UUID)
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Shared session retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 session:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       format: uuid
+ *                     userRequest:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                       enum: [pending, running, completed, error]
+ *                     repositoryOwner:
+ *                       type: string
+ *                     repositoryName:
+ *                       type: string
+ *                     branch:
+ *                       type: string
+ *                     provider:
+ *                       type: string
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                     completedAt:
+ *                       type: string
+ *                       format: date-time
+ *                     previewUrl:
+ *                       type: string
+ *                       nullable: true
+ *                     isShared:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Share token is required
+ *       404:
+ *         description: Session not found or share link expired
+ *       429:
+ *         description: Too many requests - rate limited
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/shared/:token', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
@@ -341,6 +413,65 @@ router.get('/shared/:token/events/stream', publicShareRateLimiter, async (req: R
 // END PUBLIC SHARE ROUTES
 // ============================================================================
 
+/**
+ * @openapi
+ * /sessions/create-code-session:
+ *   post:
+ *     tags:
+ *       - Sessions
+ *     summary: Create a new code session
+ *     description: Creates a new AI coding session with specified repository and branch.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - repositoryOwner
+ *               - repositoryName
+ *               - baseBranch
+ *               - branch
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Session title
+ *               repositoryOwner:
+ *                 type: string
+ *                 description: GitHub repository owner
+ *                 example: octocat
+ *               repositoryName:
+ *                 type: string
+ *                 description: GitHub repository name
+ *                 example: hello-world
+ *               baseBranch:
+ *                 type: string
+ *                 description: Base branch to fork from
+ *                 example: main
+ *               branch:
+ *                 type: string
+ *                 description: Feature branch name
+ *                 example: feature/add-readme
+ *     responses:
+ *       200:
+ *         description: Session created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 session:
+ *                   $ref: '#/components/schemas/ChatSession'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Create a new code session
 router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -406,6 +537,39 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
   }
 });
 
+/**
+ * @openapi
+ * /sessions:
+ *   get:
+ *     tags:
+ *       - Sessions
+ *     summary: List all sessions
+ *     description: Returns all active (non-deleted) chat sessions for the authenticated user.
+ *     responses:
+ *       200:
+ *         description: Sessions retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     sessions:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/ChatSession'
+ *                     total:
+ *                       type: integer
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get all chat sessions for user (excluding deleted ones)
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -427,6 +591,80 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /sessions/search:
+ *   get:
+ *     tags:
+ *       - Sessions
+ *     summary: Search sessions
+ *     description: Search sessions by query string with optional filters.
+ *     parameters:
+ *       - name: q
+ *         in: query
+ *         required: true
+ *         description: Search query string
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         description: Maximum number of results (max 100)
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         description: Number of results to skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - name: status
+ *         in: query
+ *         description: Filter by session status
+ *         schema:
+ *           type: string
+ *           enum: [pending, running, completed, error]
+ *       - name: favorite
+ *         in: query
+ *         description: Filter by favorite status
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       200:
+ *         description: Search results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     sessions:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/ChatSession'
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *                     query:
+ *                       type: string
+ *       400:
+ *         description: Search query is required or invalid status
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Search sessions by query string
 router.get('/search', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -601,6 +839,44 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /sessions/{id}:
+ *   get:
+ *     tags:
+ *       - Sessions
+ *     summary: Get session by ID
+ *     description: Returns a specific chat session with preview URL if applicable.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Session ID (UUID)
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Session retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 session:
+ *                   $ref: '#/components/schemas/ChatSession'
+ *       400:
+ *         description: Invalid session ID
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get specific chat session
 router.get('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -1117,6 +1393,13 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       remoteSessions: []
     };
 
+    // External cleanup operations (branch deletion, remote archiving) are performed BEFORE
+    // the database soft-delete. This ordering is intentional:
+    // - External API calls cannot be rolled back, so they're not part of the DB transaction
+    // - If external cleanup succeeds but DB update fails, branches are cleaned up (good)
+    //   and the operation can be retried - the retry will skip already-deleted branches
+    // - If we did DB first, a rollback would leave orphaned remote resources
+
     // Delete GitHub branches for all sessions that have branch info
     if (authReq.user?.githubAccessToken) {
       const branchDeletions = sessions
@@ -1147,16 +1430,29 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       cleanupResults.remoteSessions = await Promise.all(remoteSessionArchives);
     }
 
-    // Soft delete all sessions from database
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: new Date() })
-      .where(
-        and(
-          inArray(chatSessions.id, ids),
-          eq(chatSessions.userId, authReq.user!.id)
-        )
-      );
+    // Soft delete all sessions from database within a transaction
+    // This ensures atomicity - either all sessions are soft-deleted or none are
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .update(chatSessions)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            inArray(chatSessions.id, ids),
+            eq(chatSessions.userId, authReq.user!.id)
+          )
+        );
+    }, {
+      context: { operation: 'bulkSoftDelete', userId: authReq.user!.id, sessionCount: ids.length },
+    });
+
+    logger.info(`Bulk soft-deleted ${ids.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      sessionCount: ids.length,
+      branchesDeleted: cleanupResults.branches.filter(b => b.success).length,
+      remoteSessionsArchived: cleanupResults.remoteSessions.filter(r => r.success).length,
+    });
 
     res.json({
       success: true,
@@ -1203,16 +1499,27 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
       return;
     }
 
-    // Restore all sessions
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: null })
-      .where(
-        and(
-          inArray(chatSessions.id, ids),
-          eq(chatSessions.userId, authReq.user!.id)
-        )
-      );
+    // Restore all sessions within a transaction
+    // This ensures atomicity - either all sessions are restored or none are
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .update(chatSessions)
+        .set({ deletedAt: null })
+        .where(
+          and(
+            inArray(chatSessions.id, ids),
+            eq(chatSessions.userId, authReq.user!.id)
+          )
+        );
+    }, {
+      context: { operation: 'bulkRestore', userId: authReq.user!.id, sessionCount: ids.length },
+    });
+
+    logger.info(`Bulk restored ${ids.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      sessionCount: ids.length,
+    });
 
     res.json({
       success: true,
@@ -1258,7 +1565,9 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
       return;
     }
 
-    // Archive Claude Remote sessions before permanently deleting from local DB
+    // Archive Claude Remote sessions before permanently deleting from local DB.
+    // External archiving is done BEFORE the database delete (same rationale as bulk-delete):
+    // external API calls can't be rolled back, so archive first, then delete from DB.
     const archiveResults: { sessionId: string; remoteSessionId: string | null; archived: boolean; message: string }[] = [];
 
     for (const session of sessions) {
@@ -1301,21 +1610,45 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
       }
     }
 
-    // Permanently delete all sessions from database
-    await db
-      .delete(chatSessions)
-      .where(
-        and(
-          inArray(chatSessions.id, ids),
-          eq(chatSessions.userId, authReq.user!.id)
-        )
-      );
+    // Permanently delete all sessions from database within a transaction
+    // This ensures atomicity - either all sessions are permanently deleted or none are
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .delete(chatSessions)
+        .where(
+          and(
+            inArray(chatSessions.id, ids),
+            eq(chatSessions.userId, authReq.user!.id)
+          )
+        );
+    }, {
+      context: { operation: 'bulkPermanentDelete', userId: authReq.user!.id, sessionCount: ids.length },
+    });
 
     // Recalculate storage usage after permanent deletion
-    await StorageService.recalculateUsage(authReq.user!.id);
+    // Note: This is done outside the transaction as it's a best-effort update.
+    // If it fails, storage will be corrected on the next recalculation.
+    try {
+      await StorageService.recalculateUsage(authReq.user!.id);
+    } catch (storageError) {
+      logger.error('Failed to recalculate storage after permanent delete', storageError as Error, {
+        component: 'Sessions',
+        userId: authReq.user!.id,
+        sessionCount: ids.length,
+      });
+      // Continue - the delete succeeded, storage recalculation can be retried later
+    }
 
     const archivedCount = archiveResults.filter(r => r.archived).length;
     const remoteCount = archiveResults.filter(r => r.remoteSessionId).length;
+
+    logger.info(`Bulk permanently deleted ${ids.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      sessionCount: ids.length,
+      remoteArchived: archivedCount,
+      remoteTotal: remoteCount,
+    });
 
     res.json({
       success: true,
@@ -1332,6 +1665,67 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
   }
 });
 
+/**
+ * @openapi
+ * /sessions/{id}:
+ *   delete:
+ *     tags:
+ *       - Sessions
+ *     summary: Delete session
+ *     description: Soft deletes a session (moves to trash). Also archives the Claude Remote session and deletes the GitHub branch if applicable.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Session ID (UUID)
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Session deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Session deleted
+ *                     cleanup:
+ *                       type: object
+ *                       properties:
+ *                         branch:
+ *                           type: object
+ *                           properties:
+ *                             success:
+ *                               type: boolean
+ *                             message:
+ *                               type: string
+ *                         remoteSession:
+ *                           type: object
+ *                           properties:
+ *                             success:
+ *                               type: boolean
+ *                             message:
+ *                               type: string
+ *       400:
+ *         description: Invalid session ID
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a chat session (soft delete with branch cleanup)
 router.delete('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -2021,7 +2415,8 @@ router.get('/:id/stream', requireAuth, validateSessionId, requireSessionOwnershi
  * - stream: boolean (default: false) - Note: streaming should use /events/stream endpoint
  * - limit: number (default: 50) - Note: shared sync uses CLAUDE_SYNC_LIMIT from env
  */
-router.post('/sync', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent excessive sync requests to Claude Remote API (5/min per user)
+router.post('/sync', requireAuth, syncOperationRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.id;
 
@@ -2036,40 +2431,58 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
   const _shouldStream = req.query.stream === 'true';
   const _limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
-  logger.info('Starting session sync using shared syncUserSessions', {
-    component: 'SessionSync',
-    userId,
-    // Log query params for debugging, even though shared sync may not use them all
-    queryParams: { activeOnly: _activeOnly, shouldStream: _shouldStream, limit: _limit },
+  // Use request deduplicator to prevent duplicate concurrent sync requests
+  // This handles the case where users rapidly click the "Sync" button
+  const deduplicator = requestDeduplicatorRegistry.get('sessions-sync', {
+    defaultTtlMs: 30000, // 30 second TTL for sync operations
   });
 
-  try {
-    // Get user's Claude auth
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+  const requestKey = generateRequestKey(userId, 'sessions-sync');
 
-    if (!user?.claudeAuth) {
-      return res.status(400).json({
-        success: false,
-        error: 'Claude authentication not configured. Please connect your Claude account in settings.'
+  try {
+    const { data: result, wasDeduplicated } = await deduplicator.deduplicate(
+      requestKey,
+      async () => {
+        logger.info('Starting session sync using shared syncUserSessions', {
+          component: 'SessionSync',
+          userId,
+          queryParams: { activeOnly: _activeOnly, shouldStream: _shouldStream, limit: _limit },
+        });
+
+        // Get user's Claude auth
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+
+        if (!user?.claudeAuth) {
+          throw new Error('Claude authentication not configured. Please connect your Claude account in settings.');
+        }
+
+        // Use syncUserSessions from shared package
+        // This provides sophisticated duplicate prevention and session linking logic
+        const syncResult = await syncUserSessions(userId, user.claudeAuth);
+
+        logger.info('Session sync completed using shared syncUserSessions', {
+          component: 'SessionSync',
+          userId,
+          imported: syncResult.imported,
+          updated: syncResult.updated,
+          errors: syncResult.errors,
+          skipped: syncResult.skipped,
+        });
+
+        return syncResult;
+      }
+    );
+
+    if (wasDeduplicated) {
+      logger.info('Session sync request was deduplicated (concurrent request detected)', {
+        component: 'SessionSync',
+        userId,
       });
     }
-
-    // Use syncUserSessions from shared package
-    // This provides sophisticated duplicate prevention and session linking logic
-    const result = await syncUserSessions(userId, user.claudeAuth);
-
-    logger.info('Session sync completed using shared syncUserSessions', {
-      component: 'SessionSync',
-      userId,
-      imported: result.imported,
-      updated: result.updated,
-      errors: result.errors,
-      skipped: result.skipped,
-    });
 
     // Return response with both new fields and backward-compatible structure
     // Note: Some detailed fields from the old API are no longer available
@@ -2085,11 +2498,22 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
         // Backward-compatible fields (best-effort mapping)
         alreadyExists: result.skipped,
         runningSessions: result.updated,
+        // Indicate if this was a deduplicated response
+        wasDeduplicated,
       }
     });
 
   } catch (error) {
     logger.error('Session sync failed', error as Error, { component: 'SessionSync' });
+
+    // Handle auth configuration error specifically
+    if (error instanceof Error && error.message.includes('Claude authentication not configured')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to sync sessions'
@@ -2111,7 +2535,8 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
  * - Correct null/undefined normalization
  * - SessionPath generation
  */
-router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent excessive sync requests to Claude Remote API (5/min per user)
+router.post('/:id/sync-events', requireAuth, syncOperationRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.id;
   const sessionId = req.params.id;
@@ -2121,115 +2546,135 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     return;
   }
 
+  // Use request deduplicator to prevent duplicate concurrent event sync requests
+  const deduplicator = requestDeduplicatorRegistry.get('session-sync-events', {
+    defaultTtlMs: 30000, // 30 second TTL for sync operations
+  });
+
+  const requestKey = generateRequestKey(userId, sessionId, 'sync-events');
+
   try {
-    // Verify session belongs to user and is not deleted
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          eq(chatSessions.userId, userId),
-          isNull(chatSessions.deletedAt)
-        )
-      )
-      .limit(1);
+    const { data: responseData, wasDeduplicated } = await deduplicator.deduplicate(
+      requestKey,
+      async () => {
+        // Verify session belongs to user and is not deleted
+        const [session] = await db
+          .select()
+          .from(chatSessions)
+          .where(
+            and(
+              eq(chatSessions.id, sessionId),
+              eq(chatSessions.userId, userId),
+              isNull(chatSessions.deletedAt)
+            )
+          )
+          .limit(1);
 
-    if (!session) {
-      return res.status(404).json({ success: false, error: 'Session not found' });
-    }
+        if (!session) {
+          throw Object.assign(new Error('Session not found'), { statusCode: 404 });
+        }
 
-    if (!session.remoteSessionId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Session is not a Claude Remote session'
+        if (!session.remoteSessionId) {
+          throw Object.assign(new Error('Session is not a Claude Remote session'), { statusCode: 400 });
+        }
+
+        // Get user's Claude auth
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+
+        if (!user?.claudeAuth) {
+          throw Object.assign(new Error('Claude authentication not configured'), { statusCode: 400 });
+        }
+
+        // Count existing events before sync for backward-compatible response
+        // Use COUNT(*) instead of fetching all eventData for better performance
+        const [{ count: existingEventsCount }] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(events)
+          .where(eq(events.chatSessionId, sessionId));
+
+        // Use SessionService.sync() from shared package via ServiceProvider
+        // This provides proper event deduplication, transaction safety, and status mapping
+        const sessionService = ServiceProvider.get(ASession);
+        const syncResult = await sessionService.sync(sessionId, {
+          claudeAuth: user.claudeAuth,
+          environmentId: CLAUDE_ENVIRONMENT_ID,
+        });
+
+        // Count events after sync to calculate new events imported
+        // Use COUNT(*) instead of fetching all eventData for better performance
+        const [{ count: totalEventsCount }] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(events)
+          .where(eq(events.chatSessionId, sessionId));
+        const newEventsImported = totalEventsCount - existingEventsCount;
+
+        // Map local status back to remote status for backward compatibility
+        const statusToRemoteStatus: Record<string, string> = {
+          'completed': 'idle',
+          'running': 'running',
+          'error': 'failed',
+          'pending': 'idle',
+        };
+        const remoteStatus = statusToRemoteStatus[syncResult.status] || 'idle';
+
+        logger.info(`Synced session using SessionService.sync()`, {
+          component: 'SessionSync',
+          sessionId,
+          remoteSessionId: session.remoteSessionId,
+          existingEvents: existingEventsCount,
+          newEvents: newEventsImported,
+          status: syncResult.status,
+          remoteStatus,
+        });
+
+        return {
+          sessionId: syncResult.id,
+          remoteSessionId: syncResult.remoteSessionId,
+          existingEvents: existingEventsCount,
+          newEventsImported,
+          totalEvents: totalEventsCount,
+          remoteStatus,
+          localStatus: syncResult.status,
+          status: syncResult.status,
+          totalCost: syncResult.totalCost,
+          branch: syncResult.branch,
+          completedAt: syncResult.completedAt,
+        };
+      }
+    );
+
+    if (wasDeduplicated) {
+      logger.info('Session event sync request was deduplicated (concurrent request detected)', {
+        component: 'SessionSync',
+        sessionId,
+        userId,
       });
     }
-
-    // Get user's Claude auth
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    if (!user?.claudeAuth) {
-      return res.status(400).json({
-        success: false,
-        error: 'Claude authentication not configured'
-      });
-    }
-
-    // Count existing events before sync for backward-compatible response
-    // Use COUNT(*) instead of fetching all eventData for better performance
-    const [{ count: existingEventsCount }] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(events)
-      .where(eq(events.chatSessionId, sessionId));
-
-    // Use SessionService.sync() from shared package via ServiceProvider
-    // This provides proper event deduplication, transaction safety, and status mapping
-    const sessionService = ServiceProvider.get(ASession);
-    const syncResult = await sessionService.sync(sessionId, {
-      claudeAuth: user.claudeAuth,
-      environmentId: CLAUDE_ENVIRONMENT_ID,
-    });
-
-    // Count events after sync to calculate new events imported
-    // Use COUNT(*) instead of fetching all eventData for better performance
-    const [{ count: totalEventsCount }] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(events)
-      .where(eq(events.chatSessionId, sessionId));
-    const newEventsImported = totalEventsCount - existingEventsCount;
-
-    // Map local status back to remote status for backward compatibility
-    const statusToRemoteStatus: Record<string, string> = {
-      'completed': 'idle',
-      'running': 'running',
-      'error': 'failed',
-      'pending': 'idle',
-    };
-    const remoteStatus = statusToRemoteStatus[syncResult.status] || 'idle';
-
-    logger.info(`Synced session using SessionService.sync()`, {
-      component: 'SessionSync',
-      sessionId,
-      remoteSessionId: session.remoteSessionId,
-      existingEvents: existingEventsCount,
-      newEvents: newEventsImported,
-      status: syncResult.status,
-      remoteStatus,
-    });
 
     // Return response with both new fields and backward-compatible structure
     return res.json({
       success: true,
       data: {
-        sessionId: syncResult.id,
-        remoteSessionId: syncResult.remoteSessionId,
-        // Backward-compatible fields
-        existingEvents: existingEventsCount,
-        newEventsImported,
-        totalEvents: totalEventsCount,
-        remoteStatus,
-        localStatus: syncResult.status,
-        // New fields from sync result
-        status: syncResult.status,
-        totalCost: syncResult.totalCost,
-        branch: syncResult.branch,
-        completedAt: syncResult.completedAt,
+        ...responseData,
+        wasDeduplicated,
       }
     });
 
   } catch (error) {
-    logger.error('Event sync failed', error as Error, {
+    const err = error as Error & { statusCode?: number };
+    logger.error('Event sync failed', err, {
       component: 'SessionSync',
       sessionId
     });
-    return res.status(500).json({
+
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to sync events'
+      error: err.message || 'Failed to sync events'
     });
   }
 });

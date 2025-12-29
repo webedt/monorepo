@@ -67,6 +67,7 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
     }
 
     const session = existingSessions[0];
+    const correlationId = req.correlationId;
 
     logger.info('Session found', {
       component: 'ResumeRoute',
@@ -74,12 +75,13 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       status: session.status
     });
 
-    // Setup SSE response
+    // Setup SSE response with correlation ID header
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
+      'X-Accel-Buffering': 'no',
+      'X-Request-ID': correlationId,
     });
 
     // Send submission preview event immediately so user sees their request was received
@@ -97,6 +99,7 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       message: previewText,
       source: 'internal-api-server:/resume',
       timestamp: new Date().toISOString(),
+      requestId: correlationId,
       data: {
         sessionId: session.id,
         sessionName,
@@ -216,7 +219,8 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       userRequest: session.userRequest,
       createdAt: session.createdAt,
       completedAt: session.completedAt,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      requestId: correlationId,
     })}\n\n`);
 
     // For running sessions, subscribe to live events from the broadcaster
