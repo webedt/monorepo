@@ -28,8 +28,10 @@ import {
   isValidLanguage,
   isValidCategory,
 } from '@webedt/shared';
+import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { isDatabaseError, isUniqueConstraintError } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -470,7 +472,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     logger.error('Create snippet error', error as Error, { component: 'Snippets' });
 
     // Check for unique constraint violation
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A snippet with this title already exists' });
       return;
     }
@@ -611,7 +613,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Update snippet error', error as Error, { component: 'Snippets' });
 
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A snippet with this title already exists' });
       return;
     }
@@ -1024,7 +1026,7 @@ router.post('/collections', requireAuth, async (req: Request, res: Response) => 
   } catch (error) {
     logger.error('Create snippet collection error', error as Error, { component: 'Snippets' });
 
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A collection with this name already exists' });
       return;
     }
@@ -1130,7 +1132,7 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
   } catch (error) {
     logger.error('Update snippet collection error', error as Error, { component: 'Snippets' });
 
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A collection with this name already exists' });
       return;
     }

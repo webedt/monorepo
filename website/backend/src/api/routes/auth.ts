@@ -447,10 +447,10 @@ router.get('/session', async (req: Request, res: Response) => {
         const refreshedClaudeAuth = await ensureValidToken(claudeAuth as ClaudeAuth);
         if (refreshedClaudeAuth !== claudeAuth) {
           // Token was refreshed, update database (encrypted)
-          const encryptedAuth = encryptUserFields({ claudeAuth: refreshedClaudeAuth as any });
+          const encryptedAuth = encryptUserFields({ claudeAuth: refreshedClaudeAuth });
           await db
             .update(users)
-            .set(encryptedAuth as any)
+            .set(encryptedAuth as typeof users.$inferInsert)
             .where(eq(users.id, freshUser.id));
           claudeAuth = refreshedClaudeAuth as typeof claudeAuth;
           logger.info('Claude OAuth token refreshed during session check', {
@@ -475,10 +475,10 @@ router.get('/session', async (req: Request, res: Response) => {
         const refreshedCodexAuth = await ensureValidCodexToken(codexAuth as CodexAuth);
         if (refreshedCodexAuth !== codexAuth) {
           // Token was refreshed, update database (encrypted)
-          const encryptedCodexAuth = encryptUserFields({ codexAuth: refreshedCodexAuth as any });
+          const encryptedCodexAuth = encryptUserFields({ codexAuth: refreshedCodexAuth });
           await db
             .update(users)
-            .set(encryptedCodexAuth as any)
+            .set(encryptedCodexAuth as typeof users.$inferInsert)
             .where(eq(users.id, freshUser.id));
           codexAuth = refreshedCodexAuth as typeof codexAuth;
           logger.info('Codex OAuth token refreshed during session check', {

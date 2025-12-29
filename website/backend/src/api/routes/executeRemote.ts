@@ -430,7 +430,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as any).uuid;
+      const eventUuid = event.uuid;
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         // Skip duplicate event
         logger.debug('Skipping duplicate event', {
@@ -445,6 +445,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         // Mark as stored to prevent future duplicates
@@ -458,15 +459,15 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Save title and branch to database immediately when generated
       // This ensures they're saved even if user disconnects
       // Only save title for NEW sessions (not on resume/subsequent messages)
-      if (!websiteSessionId && event.type === 'session_name' && (event as any).sessionName) {
+      if (!websiteSessionId && event.type === 'session_name' && event.sessionName) {
         try {
           await db.update(chatSessions)
-            .set({ userRequest: (event as any).sessionName })
+            .set({ userRequest: event.sessionName })
             .where(eq(chatSessions.id, chatSessionId));
           logger.info('Session title saved to database', {
             component: 'ExecuteRemoteRoute',
             chatSessionId,
-            title: (event as any).sessionName,
+            title: event.sessionName,
           });
         } catch (err) {
           logger.error('Failed to save session title', err, {
@@ -478,9 +479,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       // Also capture title from title_generation events (success status)
       // Update title for any session that receives a title_generation event
-      if (event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
-        const newTitle = (event as any).title;
-        const newBranch = (event as any).branch_name;
+      if (event.type === 'title_generation' && event.status === 'success' && event.title) {
+        const newTitle = event.title;
+        const newBranch = event.branch_name;
 
         // Generate sessionPath when we have all the info needed
         // This prevents duplicate sessions by establishing the unique sessionPath early
@@ -521,18 +522,18 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       // CRITICAL: Save remoteSessionId immediately when session_created event is received
       // This prevents race conditions with background sync that could create duplicates
-      if (event.type === 'session_created' && (event as any).remoteSessionId) {
+      if (event.type === 'session_created' && event.remoteSessionId) {
         try {
           await db.update(chatSessions)
             .set({
-              remoteSessionId: (event as any).remoteSessionId,
-              remoteWebUrl: (event as any).remoteWebUrl,
+              remoteSessionId: event.remoteSessionId,
+              remoteWebUrl: event.remoteWebUrl,
             })
             .where(eq(chatSessions.id, chatSessionId));
           logger.info('Remote session ID saved to database immediately', {
             component: 'ExecuteRemoteRoute',
             chatSessionId,
-            remoteSessionId: (event as any).remoteSessionId,
+            remoteSessionId: event.remoteSessionId,
           });
 
           // Clean up any redundant pending sessions created around the same time

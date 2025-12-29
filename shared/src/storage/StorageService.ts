@@ -7,6 +7,22 @@
 
 import { db, users, eq, sql } from '../db/index.js';
 
+/**
+ * Type for raw SQL query result rows
+ * Used when executing raw SQL with aggregate functions
+ */
+interface StorageQueryRow {
+  content_size?: string;
+  images_size?: string;
+  events_size?: string;
+  tool_calls_size?: string;
+  payload_size?: string;
+}
+
+interface UserIdRow {
+  id: string;
+}
+
 // Storage tier definitions (in bytes)
 export const STORAGE_TIERS = {
   FREE: 1 * 1024 * 1024 * 1024,      // 1 GB
@@ -152,7 +168,8 @@ export class StorageService {
       INNER JOIN chat_sessions cs ON m.chat_session_id = cs.id
       WHERE cs.user_id = ${userId}
     `);
-    const messagesRow = (messagesResult.rows as any[])[0] || { content_size: '0', images_size: '0' };
+    const messagesRows = messagesResult.rows as StorageQueryRow[];
+    const messagesRow = messagesRows[0] || { content_size: '0', images_size: '0' };
     const messagesSize = BigInt(messagesRow.content_size || 0);
     // Images are stored as JSON, approximate size from serialized length
     const imagesFromMessages = BigInt(messagesRow.images_size || 0);
@@ -165,7 +182,8 @@ export class StorageService {
       INNER JOIN chat_sessions cs ON e.chat_session_id = cs.id
       WHERE cs.user_id = ${userId}
     `);
-    const eventsRow = (eventsResult.rows as any[])[0] || { events_size: '0' };
+    const eventsRows = eventsResult.rows as StorageQueryRow[];
+    const eventsRow = eventsRows[0] || { events_size: '0' };
     const eventsSize = BigInt(eventsRow.events_size || 0);
 
     // Calculate live chat messages storage
@@ -177,7 +195,8 @@ export class StorageService {
       FROM live_chat_messages
       WHERE user_id = ${userId}
     `);
-    const liveChatRow = (liveChatResult.rows as any[])[0] || { content_size: '0', images_size: '0', tool_calls_size: '0' };
+    const liveChatRows = liveChatResult.rows as StorageQueryRow[];
+    const liveChatRow = liveChatRows[0] || { content_size: '0', images_size: '0', tool_calls_size: '0' };
     const liveChatSize = BigInt(liveChatRow.content_size || 0) + BigInt(liveChatRow.tool_calls_size || 0);
     const imagesFromLiveChat = BigInt(liveChatRow.images_size || 0);
 
@@ -188,7 +207,8 @@ export class StorageService {
       FROM workspace_events
       WHERE user_id = ${userId}
     `);
-    const workspaceRow = (workspaceResult.rows as any[])[0] || { payload_size: '0' };
+    const workspaceRows = workspaceResult.rows as StorageQueryRow[];
+    const workspaceRow = workspaceRows[0] || { payload_size: '0' };
     const workspaceEventsSize = BigInt(workspaceRow.payload_size || 0);
 
     // Total images (from messages + live chat)
@@ -254,7 +274,8 @@ export class StorageService {
       RETURNING id
     `);
 
-    if ((result.rows as any[]).length === 0) {
+    const resultRows = result.rows as unknown as UserIdRow[];
+    if (resultRows.length === 0) {
       throw new Error(`User not found: ${userId}`);
     }
   }
@@ -274,7 +295,8 @@ export class StorageService {
       RETURNING id
     `);
 
-    if ((result.rows as any[]).length === 0) {
+    const resultRows = result.rows as unknown as UserIdRow[];
+    if (resultRows.length === 0) {
       throw new Error(`User not found: ${userId}`);
     }
   }

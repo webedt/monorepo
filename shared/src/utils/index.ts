@@ -14,3 +14,4 @@ export * from './math/index.js';
 export * from './api/index.js';
 export * from './encryption.js';
 export * from './validators/index.js';
+export * from './errorTypes.js';

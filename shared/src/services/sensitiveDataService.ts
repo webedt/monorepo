@@ -33,11 +33,13 @@ type UsersTable = typeof usersTable;
 
 /**
  * Claude authentication data structure
+ * Note: refreshToken and expiresAt are optional to match ClaudeAuth interface
+ * The code should check for their presence before use
  */
 export interface ClaudeAuthData {
   accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
+  refreshToken?: string;
+  expiresAt?: number;
   scopes?: string[];
   subscriptionType?: string;
   rateLimitTier?: string;

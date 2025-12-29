@@ -9,7 +9,7 @@ import { sessionsApi, userApi, createSessionExecuteEventSource } from '../../lib
 import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
-import type { Session, VerbosityLevel } from '../../types';
+import type { Session, VerbosityLevel, SessionStatus } from '../../types';
 import './chat.css';
 
 // View mode determines the level of detail shown
@@ -1298,9 +1298,9 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
-  private updateSessionStatus(status: string): void {
+  private updateSessionStatus(status: SessionStatus): void {
     if (this.session) {
-      this.session.status = status as any;
+      this.session.status = status;
       this.updateHeader();
       this.updateSendButton();
     }

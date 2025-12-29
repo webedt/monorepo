@@ -128,9 +128,13 @@ export const events = pgTable('events', {
   chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
-});
+}, (table) => [
+  // Index for efficient UUID-based deduplication queries
+  uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),
+]);
 
 // Live Chat messages - branch-based chat messages for workspace collaboration
 export const liveChatMessages = pgTable('live_chat_messages', {
@@ -214,6 +218,14 @@ export const organizations = pgTable('organizations', {
 
 // Organization membership roles
 export type OrganizationRole = 'owner' | 'admin' | 'member';
+
+/** Valid organization role values */
+export const ORGANIZATION_ROLES: readonly OrganizationRole[] = ['owner', 'admin', 'member'] as const;
+
+/** Type guard to check if a string is a valid OrganizationRole */
+export function isOrganizationRole(value: unknown): value is OrganizationRole {
+  return typeof value === 'string' && ORGANIZATION_ROLES.includes(value as OrganizationRole);
+}
 
 // Organization members - junction table for users and organizations
 export const organizationMembers = pgTable('organization_members', {

@@ -17,6 +17,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { shouldRefreshClaudeToken, refreshClaudeToken, type ClaudeAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
 import { encryptUserFields, decryptUserFields } from '@webedt/shared';
+import type { ImageAiKeysData } from '@webedt/shared';
 
 const router = Router();
 
@@ -75,7 +76,9 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
     const encryptedFields = encryptUserFields({ claudeAuth });
     await db
       .update(users)
-      .set(encryptedFields as any)
+      // Type assertion needed: encrypted fields may contain encrypted strings
+      // where the schema expects JSON objects (when encryption is enabled)
+      .set(encryptedFields as typeof users.$inferInsert)
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -183,10 +186,10 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
     const newClaudeAuth = await refreshClaudeToken(claudeAuth);
 
     // Update in database (encrypted)
-    const encryptedNewAuth = encryptUserFields({ claudeAuth: newClaudeAuth as any });
+    const encryptedNewAuth = encryptUserFields({ claudeAuth: newClaudeAuth });
     await db
       .update(users)
-      .set(encryptedNewAuth as any)
+      .set(encryptedNewAuth as typeof users.$inferInsert)
       .where(eq(users.id, authReq.user!.id));
 
     logger.info('Claude OAuth token refreshed and saved', {
@@ -263,10 +266,10 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
         wasRefreshed = true;
 
         // Update in database (encrypted)
-        const encryptedAuth = encryptUserFields({ claudeAuth: claudeAuth as any });
+        const encryptedAuth = encryptUserFields({ claudeAuth });
         await db
           .update(users)
-          .set(encryptedAuth as any)
+          .set(encryptedAuth as typeof users.$inferInsert)
           .where(eq(users.id, authReq.user!.id));
 
         logger.info('Token auto-refreshed and saved', { component: 'UserRoutes' });
@@ -341,7 +344,7 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
     const encryptedCodexFields = encryptUserFields({ codexAuth });
     await db
       .update(users)
-      .set(encryptedCodexFields as any)
+      .set(encryptedCodexFields as typeof users.$inferInsert)
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -458,7 +461,7 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
     const encryptedGeminiFields = encryptUserFields({ geminiAuth: normalizedAuth });
     await db
       .update(users)
-      .set(encryptedGeminiFields as any)
+      .set(encryptedGeminiFields as typeof users.$inferInsert)
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -1073,7 +1076,7 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
     const encryptedApiKeyFields = encryptUserFields({ openrouterApiKey: apiKey });
     await db
       .update(users)
-      .set(encryptedApiKeyFields as any)
+      .set(encryptedApiKeyFields as typeof users.$inferInsert)
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -1254,19 +1257,19 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
     }
 
     // Only allow known providers
-    const allowedProviders = ['openrouter', 'cometapi', 'google'];
-    const sanitizedKeys: Record<string, string> = {};
+    const allowedProviders = ['openrouter', 'cometapi', 'google'] as const;
+    const sanitizedKeys: ImageAiKeysData = {};
     for (const [provider, key] of Object.entries(imageAiKeys)) {
-      if (allowedProviders.includes(provider) && typeof key === 'string') {
-        sanitizedKeys[provider] = key;
+      if (allowedProviders.includes(provider as typeof allowedProviders[number]) && typeof key === 'string') {
+        sanitizedKeys[provider as keyof ImageAiKeysData] = key;
       }
     }
 
     // Encrypt the API keys before storing
-    const encryptedImageAiFields = encryptUserFields({ imageAiKeys: sanitizedKeys as any });
+    const encryptedImageAiFields = encryptUserFields({ imageAiKeys: sanitizedKeys });
     await db
       .update(users)
-      .set(encryptedImageAiFields as any)
+      .set(encryptedImageAiFields as typeof users.$inferInsert)
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
