@@ -223,6 +223,181 @@ export function createMockSessionService(): ASession {
   } as unknown as ASession;
 }
 
+/**
+ * Create a mock log capture service for testing.
+ */
+export function createMockLogCapture(): ALogCapture {
+  const logs: Array<{ level: string; message: string; context?: Record<string, unknown> }> = [];
+  return {
+    order: -90,
+    initialize: async () => {},
+    dispose: async () => {},
+    capture: (level: string, message: string, context?: Record<string, unknown>) => {
+      logs.push({ level, message, context });
+    },
+    getLogs: () => ({ logs: [], total: 0, filtered: 0 }),
+    clear: () => { logs.length = 0; },
+    setMaxLogs: () => {},
+    setEnabled: () => {},
+    getStatus: () => ({ enabled: true, maxLogs: 1000, currentCount: logs.length }),
+  } as unknown as ALogCapture;
+}
+
+/**
+ * Create a mock metrics registry for testing.
+ */
+export function createMockMetricsRegistry(): AMetricsRegistry {
+  const noOp = () => {};
+  return {
+    order: -50,
+    initialize: async () => {},
+    dispose: async () => {},
+    recordHttpRequest: noOp,
+    recordGitHubApiCall: noOp,
+    recordDbQuery: noOp,
+    recordCleanupCycle: noOp,
+    recordError: noOp,
+    recordRetryAttempt: noOp,
+    updateHealthStatus: noOp,
+    updateSystemMetrics: noOp,
+    updateDbConnections: noOp,
+    updateCircuitBreakerMetrics: noOp,
+    getMetricsJson: () => ({}),
+    getSummary: () => ({ requests: { total: 0, byStatus: {} }, errors: { total: 0, byType: {} } }),
+    recordRateLimitHit: noOp,
+    recordSseSubscription: noOp,
+    recordSseUnsubscription: noOp,
+    recordSseEviction: noOp,
+    updateSseSessionCount: noOp,
+    recordSseHeartbeat: noOp,
+    reset: noOp,
+  } as unknown as AMetricsRegistry;
+}
+
+/**
+ * Create a mock health monitor for testing.
+ */
+export function createMockHealthMonitor(): AHealthMonitor {
+  return {
+    order: 0,
+    initialize: async () => {},
+    dispose: async () => {},
+    registerCheck: () => {},
+    unregisterCheck: () => {},
+    runCheck: async () => ({ name: 'mock', healthy: true, message: 'OK' }),
+    runAllChecks: async () => [],
+    getHealthStatus: async () => ({ healthy: true, checks: [] }),
+    getDetailedHealthStatus: async () => ({ status: 'healthy', checks: [], uptime: 0 }),
+    startPeriodicChecks: () => {},
+    stopPeriodicChecks: () => {},
+    updateCleanupStatus: () => {},
+    setCleanupInterval: () => {},
+    getLastResult: () => undefined,
+    getAllLastResults: () => [],
+    isHealthy: () => true,
+    isReady: async () => true,
+  } as unknown as AHealthMonitor;
+}
+
+/**
+ * Create a mock circuit breaker registry for testing.
+ */
+export function createMockCircuitBreakerRegistry(): ACircuitBreakerRegistry {
+  return {
+    order: -40,
+    initialize: async () => {},
+    dispose: async () => {},
+    get: () => ({
+      order: 0,
+      initialize: async () => {},
+      dispose: async () => {},
+      onStateChange: () => {},
+      getStats: () => ({ state: 'closed', failures: 0, successes: 0 }),
+      canExecute: () => true,
+      execute: async <T>(op: () => Promise<T>) => ({ success: true, value: await op() }),
+      executeWithFallback: async <T>(op: () => Promise<T>) => ({ value: await op(), degraded: false }),
+      reset: () => {},
+      isOpen: () => false,
+      isClosed: () => true,
+      getState: () => 'closed',
+      getName: () => 'mock',
+    }),
+    getAllStats: () => ({}),
+    resetAll: () => {},
+    size: () => 0,
+  } as unknown as ACircuitBreakerRegistry;
+}
+
+/**
+ * Create a mock session event broadcaster for testing.
+ */
+export function createMockSessionEventBroadcaster(): ASessionEventBroadcaster {
+  return {
+    order: 0,
+    initialize: async () => {},
+    dispose: async () => {},
+    startSession: () => {},
+    endSession: () => {},
+    isSessionActive: () => false,
+    subscribe: () => () => {},
+    broadcast: () => {},
+    getActiveSessionCount: () => 0,
+    getSubscriberCount: () => 0,
+    getTotalSubscriberCount: () => 0,
+    shutdown: () => {},
+  } as unknown as ASessionEventBroadcaster;
+}
+
+/**
+ * Create a mock session list broadcaster for testing.
+ */
+export function createMockSessionListBroadcaster(): ASessionListBroadcaster {
+  return {
+    order: 0,
+    initialize: async () => {},
+    dispose: async () => {},
+    subscribe: () => () => {},
+    broadcast: () => {},
+    notifySessionCreated: () => {},
+    notifySessionUpdated: () => {},
+    notifyStatusChanged: () => {},
+    notifySessionDeleted: () => {},
+    getSubscriberCount: () => 0,
+    getTotalSubscriberCount: () => 0,
+    shutdown: () => {},
+  } as unknown as ASessionListBroadcaster;
+}
+
+/**
+ * Create a mock event storage service for testing.
+ */
+export function createMockEventStorageService(): AEventStorageService {
+  return {
+    order: 0,
+    initialize: async () => {},
+    dispose: async () => {},
+    storeEvent: async () => ({ stored: true, duplicate: false }),
+    storeEventWithDedup: async () => ({ stored: true, duplicate: false }),
+    batchStoreEvents: async () => ({ stored: 0, duplicates: 0 }),
+    getExistingEventUuids: async () => new Set<string>(),
+    createInputPreviewEvent: (content: string) => ({ type: 'input_preview', content }),
+  } as unknown as AEventStorageService;
+}
+
+/**
+ * Create a mock GitHub client for testing.
+ */
+export function createMockGitHubClient(): AGitHubClient {
+  return {
+    order: 0,
+    initialize: async () => {},
+    dispose: async () => {},
+    pullRepository: async () => ({ success: true, localPath: '/tmp/mock-repo' }),
+    extractRepoName: (url: string) => url.split('/').pop() || 'mock-repo',
+    extractOwner: (url: string) => url.split('/').slice(-2, -1)[0] || 'mock-owner',
+  } as unknown as AGitHubClient;
+}
+
 // =============================================================================
 // Test Container Factory
 // =============================================================================
@@ -257,23 +432,23 @@ export function createTestContainer(
 
   return {
     logger: overrides.logger ?? mockLogger,
-    logCapture: overrides.logCapture ?? ({} as ALogCapture),
-    metricsRegistry: overrides.metricsRegistry ?? ({} as AMetricsRegistry),
-    healthMonitor: overrides.healthMonitor ?? ({} as AHealthMonitor),
-    circuitBreakerRegistry: overrides.circuitBreakerRegistry ?? ({} as ACircuitBreakerRegistry),
+    logCapture: overrides.logCapture ?? createMockLogCapture(),
+    metricsRegistry: overrides.metricsRegistry ?? createMockMetricsRegistry(),
+    healthMonitor: overrides.healthMonitor ?? createMockHealthMonitor(),
+    circuitBreakerRegistry: overrides.circuitBreakerRegistry ?? createMockCircuitBreakerRegistry(),
     sessionService: overrides.sessionService ?? createMockSessionService(),
-    sessionEventBroadcaster: overrides.sessionEventBroadcaster ?? ({} as ASessionEventBroadcaster),
-    sessionListBroadcaster: overrides.sessionListBroadcaster ?? ({} as ASessionListBroadcaster),
+    sessionEventBroadcaster: overrides.sessionEventBroadcaster ?? createMockSessionEventBroadcaster(),
+    sessionListBroadcaster: overrides.sessionListBroadcaster ?? createMockSessionListBroadcaster(),
     sessionCleanupService: overrides.sessionCleanupService ?? createMockSessionCleanupService(),
-    eventStorageService: overrides.eventStorageService ?? ({} as AEventStorageService),
+    eventStorageService: overrides.eventStorageService ?? createMockEventStorageService(),
     sessionQueryService: overrides.sessionQueryService ?? createMockSessionQueryService(),
     sessionAuthorizationService: overrides.sessionAuthorizationService ?? createMockSessionAuthorizationService(),
     claudeWebClient: overrides.claudeWebClient ?? createMockClaudeWebClient(),
-    githubClient: overrides.githubClient ?? ({} as AGitHubClient),
+    githubClient: overrides.githubClient ?? createMockGitHubClient(),
     llm: overrides.llm ?? createMockLlm(),
     tokenRefreshService: overrides.tokenRefreshService ?? createMockTokenRefreshService(),
     eventFormatter: overrides.eventFormatter ?? createMockEventFormatter(),
-    sseHelper: overrides.sseHelper ?? (createMockSseHelper() as unknown as ASseHelper),
+    sseHelper: overrides.sseHelper ?? createMockSseHelper(),
   };
 }
 

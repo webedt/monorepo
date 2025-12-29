@@ -301,10 +301,12 @@ export function createLazyServiceContainer(): ServiceContainer {
  *
  * @example
  * ```typescript
+ * import { mock } from 'node:test';
+ *
  * const mockContainer = createMockServiceContainer({
  *   sessionQueryService: {
- *     listActive: jest.fn().mockResolvedValue([mockSession]),
- *     getById: jest.fn().mockResolvedValue(mockSession),
+ *     listActive: mock.fn(async () => [mockSession]),
+ *     getById: mock.fn(async () => mockSession),
  *   } as unknown as ASessionQueryService,
  * });
  *

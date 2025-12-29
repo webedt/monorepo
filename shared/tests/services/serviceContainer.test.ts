@@ -4,7 +4,7 @@
  * Tests the constructor injection pattern for route handlers and services.
  */
 
-import { describe, it, mock, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {

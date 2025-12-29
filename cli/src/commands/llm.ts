@@ -10,7 +10,6 @@ import { Command } from 'commander';
 import { createLazyServiceContainer } from '@webedt/shared';
 
 import type { LlmCliServices } from '@webedt/shared';
-import type { ALlm } from '@webedt/shared';
 
 // =============================================================================
 // Command Factory (Recommended Pattern)
@@ -101,6 +100,6 @@ export function createLlmCommand(services: LlmCliServices): Command {
  */
 const lazyContainer = createLazyServiceContainer();
 export const llmCommand = createLlmCommand({
-  llm: lazyContainer.llm as unknown as ALlm,
+  llm: lazyContainer.llm,
   logger: lazyContainer.logger,
 });

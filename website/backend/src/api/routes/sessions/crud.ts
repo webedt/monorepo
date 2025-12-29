@@ -31,7 +31,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractEventUuid } from '@webedt/shared';
 
 import type { SessionCrudServices, SessionMiddlewareServices } from '@webedt/shared';
-import type { ASessionQueryService } from '@webedt/shared';
 
 // =============================================================================
 // Route Factory (Recommended Pattern)
@@ -693,7 +692,7 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
  */
 const lazyContainer = createLazyServiceContainer();
 const router = createCrudRoutes({
-  sessionQueryService: lazyContainer.sessionQueryService as unknown as ASessionQueryService,
+  sessionQueryService: lazyContainer.sessionQueryService,
   logger: lazyContainer.logger,
 });
 
