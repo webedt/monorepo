@@ -158,6 +158,10 @@ async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions 
     const csrfToken = getCsrfTokenFromCookie();
     if (csrfToken) {
       headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      // Log warning - token should be set by server on first response
+      // If missing, the request may fail with 403 unless it's an exempt endpoint
+      console.warn(`[API] CSRF token missing for ${method} request to ${endpoint}. Request may fail.`);
     }
   }
 
@@ -904,6 +908,8 @@ export const storageWorkerApi = {
     const csrfToken = getCsrfTokenFromCookie();
     if (csrfToken) {
       headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      console.warn('[API] CSRF token missing for PUT request to storage. Request may fail.');
     }
     const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
       method: 'PUT',
@@ -922,6 +928,8 @@ export const storageWorkerApi = {
     const csrfToken = getCsrfTokenFromCookie();
     if (csrfToken) {
       headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      console.warn('[API] CSRF token missing for DELETE request to storage. Request may fail.');
     }
     const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
       method: 'DELETE',

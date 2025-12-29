@@ -13,7 +13,8 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { randomBytes } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
+import { logger } from '@webedt/shared';
 
 // Cookie options interface (subset of cookie package's CookieSerializeOptions)
 interface CookieSerializeOptions {
@@ -38,6 +39,7 @@ const PROTECTED_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 // - SSE streaming endpoints (use EventSource which doesn't support custom headers)
 // - Webhook callbacks from external services
 // - Health check endpoints
+// - Auth endpoints for initial login/register (no session to protect, rate-limited)
 const EXEMPT_PATH_PATTERNS: RegExp[] = [
   // SSE streaming endpoints
   /^\/api\/execute-remote$/,
@@ -48,9 +50,17 @@ const EXEMPT_PATH_PATTERNS: RegExp[] = [
   /^\/api\/workspace\/events\/.+\/stream$/,
   /^\/api\/workspace\/presence\/.+\/stream$/,
 
+  // Auth endpoints - exempt because:
+  // 1. No authenticated session exists yet to protect
+  // 2. These have strict rate limiting (5 req/min)
+  // 3. Double-submit cookie pattern doesn't add value for unauthenticated requests
+  /^\/api\/auth\/login$/,
+  /^\/api\/auth\/register$/,
+
   // Webhook callbacks (external services calling our API)
   /^\/api\/github\/callback$/,
-  /^\/api\/payments\/webhook/,
+  /^\/api\/payments\/webhook$/,
+  /^\/api\/payments\/webhook\/.+$/,
 
   // Health check and infrastructure endpoints
   /^\/health/,
@@ -187,7 +197,8 @@ export function csrfValidationMiddleware(req: Request, res: Response, next: Next
 
   // Validate tokens exist and match
   if (!cookieToken || !headerToken) {
-    console.warn('[CSRF] Missing CSRF token', {
+    logger.warn('CSRF token missing', {
+      component: 'CSRF',
       path: req.path,
       method: req.method,
       hasCookieToken: !!cookieToken,
@@ -201,9 +212,10 @@ export function csrfValidationMiddleware(req: Request, res: Response, next: Next
     return;
   }
 
-  // Constant-time comparison to prevent timing attacks
-  if (!constantTimeCompare(cookieToken, headerToken)) {
-    console.warn('[CSRF] CSRF token mismatch', {
+  // Constant-time comparison to prevent timing attacks using Node.js crypto module
+  if (!safeCompare(cookieToken, headerToken)) {
+    logger.warn('CSRF token mismatch', {
+      component: 'CSRF',
       path: req.path,
       method: req.method,
     });
@@ -219,19 +231,22 @@ export function csrfValidationMiddleware(req: Request, res: Response, next: Next
 }
 
 /**
- * Constant-time string comparison to prevent timing attacks
+ * Constant-time string comparison using Node.js crypto.timingSafeEqual
+ * Prevents timing attacks by ensuring comparison takes constant time
  */
-function constantTimeCompare(a: string, b: string): boolean {
+function safeCompare(a: string, b: string): boolean {
+  // timingSafeEqual requires buffers of equal length
+  // If lengths differ, we still need to do a comparison to avoid timing leaks
   if (a.length !== b.length) {
+    // Compare against itself to maintain constant time, then return false
+    const bufA = Buffer.from(a);
+    timingSafeEqual(bufA, bufA);
     return false;
   }
 
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-
-  return result === 0;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return timingSafeEqual(bufA, bufB);
 }
 
 /**
