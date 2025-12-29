@@ -214,6 +214,20 @@ export interface IMetricsRegistryDocumentation {
   getSummary(): MetricsSummary;
 
   /**
+   * Record a rate limit hit.
+   *
+   * @param tier - Rate limit tier (auth, public, standard)
+   * @param path - Request path that was rate limited
+   *
+   * @example
+   * ```typescript
+   * metrics.recordRateLimitHit('auth', '/api/auth/login');
+   * metrics.recordRateLimitHit('public', '/api/sessions/shared/abc123');
+   * ```
+   */
+  recordRateLimitHit(tier: string, path: string): void;
+
+  /**
    * Reset all metrics (useful for testing).
    */
   reset(): void;
