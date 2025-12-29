@@ -7,6 +7,7 @@
 
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import type { GeminiAuth } from '../../auth/lucia.js';
+import { logger } from '../../utils/logging/logger.js';
 
 /**
  * Event types emitted during execution.
@@ -537,8 +538,6 @@ export interface ExecutionProvider {
 // Abstract Base Class
 // ============================================================================
 
-import { logger } from '../../utils/logging/logger.js';
-
 /**
  * Abstract base class for execution providers.
  *
@@ -649,7 +648,9 @@ export abstract class AExecutionProvider implements ExecutionProvider {
         logger.info(message, logContext);
         break;
       case 'error':
-        logger.error(message, context.error, logContext);
+        // Extract error from context, defaulting to undefined if not provided
+        // logger.error signature: (message, error, context)
+        logger.error(message, context.error ?? undefined, logContext);
         break;
       case 'warn':
         logger.warn(message, logContext);

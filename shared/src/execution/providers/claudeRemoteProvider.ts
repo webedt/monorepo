@@ -138,7 +138,7 @@ export class ClaudeRemoteProvider extends AExecutionProvider {
 
     try {
       // Create session
-      const { sessionId, webUrl, title } = await client.createSession(createParams);
+      const { sessionId, webUrl } = await client.createSession(createParams);
 
       this.logExecution('info', 'Claude Remote session created', {
         chatSessionId,
