@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { db, games, users, chatSessions, communityPosts, eq, and, or, desc, sql, ilike } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import { searchRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -230,8 +231,9 @@ async function searchPosts(searchTerm: string): Promise<SearchResultItem[]> {
 /**
  * Universal search endpoint
  * Searches across games, users, sessions, and community posts
+ * Rate limited to prevent database-heavy search abuse (30/min per user)
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', searchRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const query = (req.query.q as string || '').trim();
@@ -311,8 +313,9 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * Get search suggestions based on game titles
+ * Rate limited to prevent abuse (30/min per user)
  */
-router.get('/suggestions', async (req: Request, res: Response) => {
+router.get('/suggestions', searchRateLimiter, async (req: Request, res: Response) => {
   try {
     const query = (req.query.q as string || '').trim();
     const limit = Math.min(parseInt(req.query.limit as string) || 5, 10);

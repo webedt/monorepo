@@ -22,7 +22,7 @@ import {
   bootstrapServices,
 } from '@webedt/shared';
 
-import { logger } from '@webedt/shared';
+import { logger, runWithCorrelation } from '@webedt/shared';
 
 // Import database (initializes on import)
 import { waitForDatabase } from '@webedt/shared';
@@ -60,13 +60,18 @@ import autocompleteRoutes from './api/routes/autocomplete.js';
 import snippetsRoutes from './api/routes/snippets.js';
 import diffsRoutes from './api/routes/diffs.js';
 
+// Import Swagger/OpenAPI
+import { swaggerSpec, swaggerUi, swaggerUiOptions } from './api/swagger/index.js';
+
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
 
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';
 import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
+import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
+import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -272,12 +277,31 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Correlation ID middleware - must be applied early for request tracing
+// Extracts X-Request-ID header or generates a new UUID
+app.use(correlationIdMiddleware);
+
+// Wrap all subsequent middleware in correlation context for async propagation
+// This enables automatic correlation ID inclusion in logs and database operations
+app.use((req, res, next) => {
+  runWithCorrelation(req.correlationId, () => {
+    next();
+  });
+});
+
 // Verbose logging middleware (enabled via VERBOSE_MODE or VERBOSE_HTTP env vars)
 app.use(verboseLoggingMiddleware);
 app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 seconds
 
 // Add auth middleware
 app.use(authMiddleware);
+
+// CSRF protection middleware
+// Token generation: Ensures a CSRF token cookie exists for all responses
+app.use(csrfTokenMiddleware);
+// Token validation: Validates CSRF tokens on state-changing requests (POST, PUT, DELETE, PATCH)
+// SSE endpoints, webhooks, and health checks are exempt
+app.use(csrfValidationMiddleware);
 
 // Apply standard rate limiting to all API routes
 // This provides defense-in-depth alongside infrastructure-level limits
@@ -310,6 +334,8 @@ healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
 healthMonitor.startPeriodicChecks(30000);
 
 // Basic health check endpoint (fast, for load balancers)
+// Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints
+// at the root level, not part of the /api namespace, so they are not included in OpenAPI docs.
 app.get('/health', (req, res) => {
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
@@ -398,6 +424,13 @@ app.get('/metrics', (req, res) => {
   });
 });
 
+// Swagger/OpenAPI Documentation
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+app.get('/api/openapi.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
+
 // Add API routes
 app.use('/api/execute-remote', executeRemoteRoutes);  // Claude Remote Sessions endpoint
 app.use('/api', resumeRoutes);
@@ -450,17 +483,27 @@ app.use(
   ) => {
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorStack = err instanceof Error ? err.stack : undefined;
+    const correlationId = req.correlationId;
 
-    logger.error('Unhandled error:', err);
+    logger.error('Unhandled error:', err, {
+      component: 'GlobalErrorHandler',
+      requestId: correlationId,
+    });
     console.error('[GlobalErrorHandler] Error details:', {
       message: errorMessage,
       stack: errorStack,
       path: req.path,
-      method: req.method
+      method: req.method,
+      correlationId,
     });
 
-    // Return more descriptive error message for debugging
-    res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
+    // Return error response with correlation ID for client-side debugging
+    res.status(500).json({
+      success: false,
+      error: errorMessage || 'Internal server error',
+      requestId: correlationId,
+      timestamp: new Date().toISOString(),
+    });
   }
 );
 
@@ -493,6 +536,9 @@ async function startServer() {
   console.log('  GET  /ready                            - Kubernetes readiness probe');
   console.log('  GET  /live                             - Kubernetes liveness probe');
   console.log('  GET  /metrics                          - Performance metrics (JSON)');
+  console.log('');
+  console.log('  GET  /api/docs                         - Swagger UI documentation');
+  console.log('  GET  /api/openapi.json                 - OpenAPI specification');
   console.log('');
   console.log('  POST /api/execute-remote               - Execute AI request (SSE)');
   console.log('  GET  /api/resume/:sessionId            - Resume session (SSE)');

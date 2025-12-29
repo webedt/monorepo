@@ -14,7 +14,7 @@ interface AuthState {
   error: string | null;
 }
 
-class AuthStore extends Store<AuthState> {
+export class AuthStore extends Store<AuthState> {
   constructor() {
     super({
       user: null,

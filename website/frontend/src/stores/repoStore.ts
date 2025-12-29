@@ -15,7 +15,7 @@ interface RepoState {
 const STORAGE_KEY = 'repoStore';
 const MAX_RECENT_REPOS = 10;
 
-class RepoStore extends Store<RepoState> {
+export class RepoStore extends Store<RepoState> {
   constructor() {
     super({
       selectedRepo: '',

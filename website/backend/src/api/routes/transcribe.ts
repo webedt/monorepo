@@ -7,6 +7,7 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
+import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ const upload = multer({
 /**
  * POST /api/transcribe
  * Transcribes audio using OpenAI Whisper API
+ * Rate limited to prevent abuse of expensive audio processing (10/min per user)
  *
  * Request body (multipart/form-data):
  * - audio: Audio file (webm, mp3, mp4, mpeg, mpga, m4a, wav, or webm)
@@ -30,7 +32,7 @@ const upload = multer({
  * - data: { text: string } - Transcribed text
  * - error: string (if failed)
  */
-router.post('/transcribe', upload.single('audio'), async (req: Request, res: Response) => {
+router.post('/transcribe', aiOperationRateLimiter, upload.single('audio'), async (req: Request, res: Response) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 

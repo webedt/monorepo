@@ -10,6 +10,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
 import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
@@ -389,14 +390,23 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // (e.g., during polling or reconnection), and we need to ensure each event is stored only once
     const storedEventUuids = new Set<string>();
 
+    // Get correlation ID from request for SSE events
+    const correlationId = req.correlationId;
+
     // Helper to send SSE events
     // Pass events through directly without modification - frontend handles all formatting
     // Use named SSE events so frontend can listen with addEventListener(eventType)
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
+      // Include correlation ID in event for client-side tracing
+      const eventWithCorrelation = {
+        ...event,
+        requestId: correlationId,
+      };
+
       // Send as named SSE event: "event: <type>\ndata: <json>\n\n"
-      const eventData = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+      const eventData = `event: ${event.type}\ndata: ${JSON.stringify(eventWithCorrelation)}\n\n`;
 
       // Log SSE event for debugging
       logger.info('SSE event', {
@@ -579,7 +589,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Send session-created event for new sessions (client needs this to track session ID)
     if (!websiteSessionId) {
-      const sessionCreatedData = { websiteSessionId: chatSessionId };
+      const sessionCreatedData = {
+        websiteSessionId: chatSessionId,
+        requestId: correlationId,
+      };
       logger.info('SSE event: session-created', {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
@@ -680,6 +693,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         totalCost: result.totalCost,
         remoteSessionId: result.remoteSessionId,
         remoteWebUrl: result.remoteWebUrl,
+        requestId: correlationId,
       };
       logger.info('SSE event: completed', {
         component: 'ExecuteRemoteRoute',
@@ -771,7 +785,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 // ============================================================================
 
 // Main execute endpoint (POST for new requests, GET for SSE reconnect)
-router.post('/', requireAuth, executeRemoteHandler);
-router.get('/', requireAuth, executeRemoteHandler);
+// Rate limited to prevent abuse of expensive AI operations (10/min per user)
+router.post('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
+router.get('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
 
 export default router;

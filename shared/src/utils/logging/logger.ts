@@ -1,6 +1,7 @@
 import { logCapture } from './logCapture.js';
 import { ALogger } from './ALogger.js';
 import { isVerbose, isDebugLevel, VERBOSE_TIMING, LOG_LEVEL } from '../../config/env.js';
+import { getCorrelationId } from './correlationContext.js';
 import type { LogContext } from './ALogger.js';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -15,6 +16,7 @@ export interface VerboseContext extends LogContext {
   durationMs?: number;
   requestId?: string;
   traceId?: string;
+  correlationId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -43,6 +45,38 @@ class Logger extends ALogger {
     return undefined;
   }
 
+  /**
+   * Enhance context with correlation ID from async context if not already present.
+   * Optimized to return the original context reference when no enrichment is needed,
+   * avoiding unnecessary object creation in hot paths.
+   */
+  private enrichContext(context?: LogContext | VerboseContext): LogContext | VerboseContext | undefined {
+    // Try to get correlation ID from async context
+    const asyncCorrelationId = getCorrelationId();
+
+    // Fast path: no correlation ID available, return context as-is
+    if (!asyncCorrelationId) {
+      return context;
+    }
+
+    // Fast path: no context provided, create minimal context with just the correlation ID
+    if (!context) {
+      return { requestId: asyncCorrelationId };
+    }
+
+    // Fast path: context already has requestId or correlationId, return as-is
+    const verboseCtx = context as VerboseContext;
+    if (verboseCtx.requestId || verboseCtx.correlationId) {
+      return context;
+    }
+
+    // Only create a new object when we actually need to add the correlation ID
+    return {
+      ...context,
+      requestId: asyncCorrelationId,
+    };
+  }
+
   private formatMessage(
     level: LogLevel,
     message: string,
@@ -51,26 +85,32 @@ class Logger extends ALogger {
     const timestamp = new Date().toISOString();
     const levelStr = level.toUpperCase().padEnd(5);
 
+    // Enrich context with correlation ID from async context
+    const enrichedContext = this.enrichContext(context);
+
     let contextStr = '';
-    if (context) {
+    if (enrichedContext) {
       const parts: string[] = [];
 
       // Standard context fields
-      if (context.component) parts.push(`component=${context.component}`);
-      if (context.sessionId) parts.push(`session=${String(context.sessionId).substring(0, 8)}`);
-      if (context.provider) parts.push(`provider=${context.provider}`);
+      if (enrichedContext.component) parts.push(`component=${enrichedContext.component}`);
+      if (enrichedContext.sessionId) parts.push(`session=${String(enrichedContext.sessionId).substring(0, 8)}`);
+      if (enrichedContext.provider) parts.push(`provider=${enrichedContext.provider}`);
 
       // Verbose-specific fields
-      const verboseCtx = context as VerboseContext;
+      const verboseCtx = enrichedContext as VerboseContext;
       if (verboseCtx.operation) parts.push(`op=${verboseCtx.operation}`);
       if (verboseCtx.durationMs !== undefined) parts.push(`duration=${verboseCtx.durationMs}ms`);
       if (verboseCtx.requestId) parts.push(`reqId=${verboseCtx.requestId.substring(0, 8)}`);
       if (verboseCtx.traceId) parts.push(`trace=${verboseCtx.traceId.substring(0, 8)}`);
+      if (verboseCtx.correlationId && !verboseCtx.requestId) {
+        parts.push(`corrId=${verboseCtx.correlationId.substring(0, 8)}`);
+      }
 
       // Other custom fields
-      Object.keys(context).forEach(key => {
-        if (!['component', 'sessionId', 'provider', 'operation', 'durationMs', 'requestId', 'traceId', 'metadata'].includes(key)) {
-          parts.push(`${key}=${String(context[key])}`);
+      Object.keys(enrichedContext).forEach(key => {
+        if (!['component', 'sessionId', 'provider', 'operation', 'durationMs', 'requestId', 'traceId', 'correlationId', 'metadata'].includes(key)) {
+          parts.push(`${key}=${String(enrichedContext[key])}`);
         }
       });
 

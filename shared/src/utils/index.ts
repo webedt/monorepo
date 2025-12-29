@@ -12,3 +12,4 @@ export * from './formatters/index.js';
 export * from './http/index.js';
 export * from './math/index.js';
 export * from './api/index.js';
+export * from './encryption.js';

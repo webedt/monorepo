@@ -9,6 +9,10 @@
  * - Strict: Auth endpoints (login/register) - prevents brute-force attacks
  * - Moderate: Public share endpoints - prevents enumeration attacks
  * - Standard: Authenticated API endpoints - general DoS protection
+ * - AI Operations: Expensive AI endpoints (execute, imageGen, transcribe) - prevents abuse
+ * - Sync Operations: Session sync with Claude Remote API - prevents excessive API calls
+ * - Search Operations: Database-heavy search queries - prevents resource exhaustion
+ * - Collaboration: Real-time workspace features - prevents spam
  */
 
 import rateLimit from 'express-rate-limit';
@@ -16,6 +20,11 @@ import type { Request, Response, NextFunction } from 'express';
 import { logger, metrics } from '@webedt/shared';
 
 import type { AuthRequest } from './auth.js';
+
+/**
+ * Rate limit tier types for metrics tracking
+ */
+export type RateLimitTier = 'auth' | 'public' | 'standard' | 'ai' | 'sync' | 'search' | 'collaboration';
 
 /**
  * Rate limit configuration from environment variables
@@ -33,6 +42,26 @@ const config = {
   standardWindowMs: parseInt(process.env.RATE_LIMIT_STANDARD_WINDOW_MS || '60000', 10),
   standardMaxRequests: parseInt(process.env.RATE_LIMIT_STANDARD_MAX || '100', 10),
 
+  // AI operation limits (default: 10 requests per minute)
+  // Applies to: execute-remote, imageGen, transcribe
+  aiWindowMs: parseInt(process.env.RATE_LIMIT_AI_WINDOW_MS || '60000', 10),
+  aiMaxRequests: parseInt(process.env.RATE_LIMIT_AI_MAX || '10', 10),
+
+  // Sync operation limits (default: 5 requests per minute)
+  // Applies to: sessions/sync, sessions/:id/sync-events
+  syncWindowMs: parseInt(process.env.RATE_LIMIT_SYNC_WINDOW_MS || '60000', 10),
+  syncMaxRequests: parseInt(process.env.RATE_LIMIT_SYNC_MAX || '5', 10),
+
+  // Search operation limits (default: 30 requests per minute)
+  // Applies to: universal search, autocomplete
+  searchWindowMs: parseInt(process.env.RATE_LIMIT_SEARCH_WINDOW_MS || '60000', 10),
+  searchMaxRequests: parseInt(process.env.RATE_LIMIT_SEARCH_MAX || '30', 10),
+
+  // Collaboration limits (default: 60 requests per minute)
+  // Applies to: workspace presence, events
+  collaborationWindowMs: parseInt(process.env.RATE_LIMIT_COLLABORATION_WINDOW_MS || '60000', 10),
+  collaborationMaxRequests: parseInt(process.env.RATE_LIMIT_COLLABORATION_MAX || '60', 10),
+
   // Whether to skip rate limiting (for testing/development)
   skipRateLimiting: process.env.SKIP_RATE_LIMITING === 'true',
 };
@@ -42,12 +71,9 @@ const config = {
  */
 interface RateLimitMetrics {
   totalHits: number;
-  hitsByTier: {
-    auth: number;
-    public: number;
-    standard: number;
-  };
+  hitsByTier: Record<RateLimitTier, number>;
   hitsByPath: Record<string, number>;
+  hitsByUser: Record<string, number>;
   lastReset: Date;
 }
 
@@ -57,8 +83,13 @@ const rateLimitMetrics: RateLimitMetrics = {
     auth: 0,
     public: 0,
     standard: 0,
+    ai: 0,
+    sync: 0,
+    search: 0,
+    collaboration: 0,
   },
   hitsByPath: {},
+  hitsByUser: {},
   lastReset: new Date(),
 };
 
@@ -74,19 +105,33 @@ export function getRateLimitMetrics(): RateLimitMetrics {
  */
 export function resetRateLimitMetrics(): void {
   rateLimitMetrics.totalHits = 0;
-  rateLimitMetrics.hitsByTier = { auth: 0, public: 0, standard: 0 };
+  rateLimitMetrics.hitsByTier = {
+    auth: 0,
+    public: 0,
+    standard: 0,
+    ai: 0,
+    sync: 0,
+    search: 0,
+    collaboration: 0,
+  };
   rateLimitMetrics.hitsByPath = {};
+  rateLimitMetrics.hitsByUser = {};
   rateLimitMetrics.lastReset = new Date();
 }
 
 /**
  * Record a rate limit hit
  */
-function recordRateLimitHit(tier: 'auth' | 'public' | 'standard', path: string, ip: string): void {
+function recordRateLimitHit(tier: RateLimitTier, path: string, ip: string, userId?: string): void {
   // Update local metrics
   rateLimitMetrics.totalHits++;
   rateLimitMetrics.hitsByTier[tier]++;
   rateLimitMetrics.hitsByPath[path] = (rateLimitMetrics.hitsByPath[path] || 0) + 1;
+
+  // Track per-user hits for authenticated tiers
+  if (userId) {
+    rateLimitMetrics.hitsByUser[userId] = (rateLimitMetrics.hitsByUser[userId] || 0) + 1;
+  }
 
   // Record to shared metrics for centralized monitoring
   metrics.recordRateLimitHit(tier, path);
@@ -96,6 +141,7 @@ function recordRateLimitHit(tier: 'auth' | 'public' | 'standard', path: string, 
     tier,
     path,
     ip,
+    userId: userId || 'anonymous',
     totalHits: rateLimitMetrics.totalHits,
   });
 }
@@ -104,10 +150,13 @@ function recordRateLimitHit(tier: 'auth' | 'public' | 'standard', path: string, 
  * Standard rate limit response handler
  * Returns proper 429 response with Retry-After header
  */
-function createRateLimitHandler(tier: 'auth' | 'public' | 'standard') {
+function createRateLimitHandler(tier: RateLimitTier) {
   return (req: Request, res: Response, _next: NextFunction, options: { windowMs: number }): void => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    recordRateLimitHit(tier, req.path, ip);
+    const authReq = req as AuthRequest;
+    const userId = authReq.user?.id;
+
+    recordRateLimitHit(tier, req.path, ip, userId);
 
     // Calculate retry-after in seconds
     const retryAfterSeconds = Math.ceil(options.windowMs / 1000);
@@ -117,6 +166,7 @@ function createRateLimitHandler(tier: 'auth' | 'public' | 'standard') {
       success: false,
       error: 'Too many requests. Please try again later.',
       retryAfter: retryAfterSeconds,
+      tier,
     });
   };
 }
@@ -229,6 +279,105 @@ export const standardRateLimiter = rateLimit({
 });
 
 /**
+ * AI operations rate limiter for expensive AI endpoints
+ *
+ * Applies to:
+ * - POST /api/execute-remote (AI execution - heavy compute)
+ * - POST /api/image-gen/generate (AI image generation - very expensive)
+ * - POST /api/transcribe (Audio processing via OpenAI Whisper)
+ *
+ * Default: 10 requests per minute per user
+ * Uses authenticated key generator for per-user tracking
+ */
+export const aiOperationRateLimiter = rateLimit({
+  windowMs: config.aiWindowMs,
+  max: config.aiMaxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: authenticatedKeyGenerator,
+  skip: skipRateLimiting,
+  handler: createRateLimitHandler('ai'),
+  message: {
+    success: false,
+    error: 'Too many AI requests. Please wait before submitting another request.',
+  },
+});
+
+/**
+ * Sync operations rate limiter for Claude Remote API sync
+ *
+ * Applies to:
+ * - POST /api/sessions/sync (Full sync with Claude Remote API)
+ * - POST /api/sessions/:id/sync-events (Event sync for specific session)
+ *
+ * Default: 5 requests per minute per user
+ * Uses authenticated key generator for per-user tracking
+ */
+export const syncOperationRateLimiter = rateLimit({
+  windowMs: config.syncWindowMs,
+  max: config.syncMaxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: authenticatedKeyGenerator,
+  skip: skipRateLimiting,
+  handler: createRateLimitHandler('sync'),
+  message: {
+    success: false,
+    error: 'Too many sync requests. Please wait before syncing again.',
+  },
+});
+
+/**
+ * Search operations rate limiter for database-heavy searches
+ *
+ * Applies to:
+ * - GET /api/search (Universal search across all fields)
+ * - GET /api/search/suggestions (Search suggestions)
+ * - GET /api/autocomplete (AI-powered code completion)
+ *
+ * Default: 30 requests per minute per user
+ * Uses authenticated key generator for per-user tracking
+ */
+export const searchRateLimiter = rateLimit({
+  windowMs: config.searchWindowMs,
+  max: config.searchMaxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: authenticatedKeyGenerator,
+  skip: skipRateLimiting,
+  handler: createRateLimitHandler('search'),
+  message: {
+    success: false,
+    error: 'Too many search requests. Please slow down.',
+  },
+});
+
+/**
+ * Collaboration rate limiter for real-time workspace features
+ *
+ * Applies to:
+ * - PUT /api/workspace/presence (Presence updates)
+ * - POST /api/workspace/events (Workspace event logging)
+ *
+ * Default: 60 requests per minute per user
+ * Higher limit to allow real-time updates
+ * Uses authenticated key generator for per-user tracking
+ */
+export const collaborationRateLimiter = rateLimit({
+  windowMs: config.collaborationWindowMs,
+  max: config.collaborationMaxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: authenticatedKeyGenerator,
+  skip: skipRateLimiting,
+  handler: createRateLimitHandler('collaboration'),
+  message: {
+    success: false,
+    error: 'Too many collaboration requests. Please slow down.',
+  },
+});
+
+/**
  * Create a custom rate limiter with specific settings
  *
  * @param windowMs - Time window in milliseconds
@@ -239,14 +388,17 @@ export const standardRateLimiter = rateLimit({
 export function createRateLimiter(
   windowMs: number,
   max: number,
-  tier: 'auth' | 'public' | 'standard' = 'standard'
+  tier: RateLimitTier = 'standard'
 ) {
+  // Use authenticated key generator for user-specific tiers
+  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration'].includes(tier);
+
   return rateLimit({
     windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: tier === 'standard' ? authenticatedKeyGenerator : keyGenerator,
+    keyGenerator: useAuthenticatedKey ? authenticatedKeyGenerator : keyGenerator,
     skip: skipRateLimiting,
     handler: createRateLimitHandler(tier),
     message: {
@@ -280,6 +432,26 @@ export function logRateLimitConfig(): void {
     standard: {
       windowMs: config.standardWindowMs,
       maxRequests: config.standardMaxRequests,
+    },
+    ai: {
+      windowMs: config.aiWindowMs,
+      maxRequests: config.aiMaxRequests,
+      description: 'AI execution, image gen, transcribe',
+    },
+    sync: {
+      windowMs: config.syncWindowMs,
+      maxRequests: config.syncMaxRequests,
+      description: 'Session sync with Claude Remote API',
+    },
+    search: {
+      windowMs: config.searchWindowMs,
+      maxRequests: config.searchMaxRequests,
+      description: 'Universal search, autocomplete',
+    },
+    collaboration: {
+      windowMs: config.collaborationWindowMs,
+      maxRequests: config.collaborationMaxRequests,
+      description: 'Workspace presence, events',
     },
   });
 }

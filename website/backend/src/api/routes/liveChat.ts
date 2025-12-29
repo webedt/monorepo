@@ -20,6 +20,9 @@ import {
   sendUnauthorized,
   sendInternalError,
   ApiErrorCode,
+  requestDeduplicatorRegistry,
+  generateRequestKey,
+  simpleHash,
 } from '@webedt/shared';
 import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 
@@ -122,6 +125,8 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
 /**
  * POST /api/live-chat/:owner/:repo/:branch/messages
  * Add a message to a branch-based live chat
+ *
+ * Uses request deduplication to prevent duplicate messages from rapid button clicks
  */
 router.post(
   '/:owner/:repo/:branch/messages',
@@ -143,24 +148,50 @@ router.post(
         return;
       }
 
-      // Decode branch name
-      const decodedBranch = decodeURIComponent(branch);
+      // Use request deduplicator to prevent duplicate message posting from rapid clicks
+      const deduplicator = requestDeduplicatorRegistry.get('live-chat-messages', {
+        defaultTtlMs: 5000, // 5 second TTL for message posting (short window)
+      });
 
-      const message = {
-        id: uuidv4(),
-        userId,
-        owner,
-        repo,
-        branch: decodedBranch,
-        role,
-        content,
-        images: images || null,
-        createdAt: new Date(),
-      };
+      // Key includes content hash to detect identical messages
+      const contentHash = simpleHash(content);
+      const requestKey = generateRequestKey(userId, owner, repo, branch, role, contentHash);
 
-      await db.insert(liveChatMessages).values(message);
+      const { data: message, wasDeduplicated } = await deduplicator.deduplicate(
+        requestKey,
+        async () => {
+          // Decode branch name
+          const decodedBranch = decodeURIComponent(branch);
 
-      sendSuccess(res, message);
+          const newMessage = {
+            id: uuidv4(),
+            userId,
+            owner,
+            repo,
+            branch: decodedBranch,
+            role,
+            content,
+            images: images || null,
+            createdAt: new Date(),
+          };
+
+          await db.insert(liveChatMessages).values(newMessage);
+
+          return newMessage;
+        }
+      );
+
+      if (wasDeduplicated) {
+        logger.info('Live chat message was deduplicated (duplicate request detected)', {
+          component: 'LiveChat',
+          userId,
+          owner,
+          repo,
+          branch,
+        });
+      }
+
+      sendSuccess(res, { ...message, wasDeduplicated });
     } catch (error) {
       logger.error('liveChat', 'Failed to add live chat message', { error });
       sendInternalError(res, 'Failed to add message');
