@@ -46,3 +46,23 @@ export {
 
 // Types specific to abstract classes (not duplicated elsewhere)
 export type { ClaudeWebClientConfig } from './abstracts/index.js';
+
+// Sensitive data encryption service
+export {
+  SensitiveDataService,
+  createSensitiveDataService,
+  encryptUserFields,
+  decryptUserFields,
+  decryptUser,
+  hasEncryptedFields,
+  hasUnencryptedSensitiveData,
+} from './sensitiveDataService.js';
+
+export type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+  SensitiveUserFields,
+  EncryptedUserFields,
+} from './sensitiveDataService.js';
