@@ -1402,6 +1402,13 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       remoteSessions: []
     };
 
+    // External cleanup operations (branch deletion, remote archiving) are performed BEFORE
+    // the database soft-delete. This ordering is intentional:
+    // - External API calls cannot be rolled back, so they're not part of the DB transaction
+    // - If external cleanup succeeds but DB update fails, branches are cleaned up (good)
+    //   and the operation can be retried - the retry will skip already-deleted branches
+    // - If we did DB first, a rollback would leave orphaned remote resources
+
     // Delete GitHub branches for all sessions that have branch info
     if (authReq.user?.githubAccessToken) {
       const branchDeletions = sessions
@@ -1567,7 +1574,9 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
       return;
     }
 
-    // Archive Claude Remote sessions before permanently deleting from local DB
+    // Archive Claude Remote sessions before permanently deleting from local DB.
+    // External archiving is done BEFORE the database delete (same rationale as bulk-delete):
+    // external API calls can't be rolled back, so archive first, then delete from DB.
     const archiveResults: { sessionId: string; remoteSessionId: string | null; archived: boolean; message: string }[] = [];
 
     for (const session of sessions) {
