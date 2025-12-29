@@ -130,5 +130,13 @@ class RepoStore extends Store<RepoState> {
   }
 }
 
-// Singleton instance
-export const repoStore = new RepoStore();
+// Singleton instance with HMR support
+export const repoStore = new RepoStore().enableHmr('repo');
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    repoStore.saveForHmr();
+  });
+}

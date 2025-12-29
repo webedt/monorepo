@@ -4,6 +4,7 @@
  */
 
 import { authStore } from '../../stores/authStore';
+import { registerPage, unregisterPage } from '../../lib/hmr';
 
 export interface PageOptions {
   params?: Record<string, string>;
@@ -14,6 +15,7 @@ export abstract class Page<T extends PageOptions = PageOptions> {
   protected element: HTMLElement;
   protected options: T;
   private eventListeners: Array<{ el: Element; type: string; handler: EventListener }> = [];
+  private hmrId: string;
 
   /** Route pattern (e.g., '/chat/:id') */
   abstract readonly route: string;
@@ -32,6 +34,7 @@ export abstract class Page<T extends PageOptions = PageOptions> {
     this.element = document.createElement('div');
     this.element.className = 'page';
     this.element.innerHTML = this.render();
+    this.hmrId = `page:${this.constructor.name}`;
   }
 
   /**
@@ -63,6 +66,9 @@ export abstract class Page<T extends PageOptions = PageOptions> {
   mount(container: HTMLElement): void {
     container.appendChild(this.element);
     this.onMount();
+
+    // Register for HMR page tracking
+    registerPage(this.hmrId, container, () => this.refreshForHmr());
   }
 
   /**
@@ -75,7 +81,36 @@ export abstract class Page<T extends PageOptions = PageOptions> {
       el.removeEventListener(type, handler);
     }
     this.eventListeners = [];
+
+    // Unregister from HMR
+    unregisterPage(this.hmrId);
+
     this.element.remove();
+  }
+
+  /**
+   * Refresh the page for HMR (re-render without full reload)
+   */
+  refreshForHmr(): void {
+    // Save scroll position
+    const scrollTop = this.element.scrollTop;
+    const scrollLeft = this.element.scrollLeft;
+
+    // Clean up event listeners
+    for (const { el, type, handler } of this.eventListeners) {
+      el.removeEventListener(type, handler);
+    }
+    this.eventListeners = [];
+
+    // Re-render
+    this.element.innerHTML = this.render();
+    this.onMount();
+
+    // Restore scroll position
+    this.element.scrollTop = scrollTop;
+    this.element.scrollLeft = scrollLeft;
+
+    console.log(`[HMR] Page refreshed: ${this.constructor.name}`);
   }
 
   /**
@@ -181,4 +216,9 @@ export abstract class Page<T extends PageOptions = PageOptions> {
     div.textContent = text;
     return div.innerHTML;
   }
+}
+
+// HMR setup for Page base class
+if (import.meta.hot) {
+  import.meta.hot.accept();
 }
