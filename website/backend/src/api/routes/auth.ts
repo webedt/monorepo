@@ -13,6 +13,7 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
+import { decryptUser, encryptUserFields, decryptUserFields } from '@webedt/shared';
 import {
   sendSuccess,
   sendError,
@@ -284,24 +285,27 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req:
       sessionCookie = lucia.createSessionCookie(session.id);
     }
 
+    // Decrypt sensitive fields before sending to client
+    const decryptedUser = decryptUser(user);
+
     res.appendHeader('Set-Cookie', sessionCookie.serialize());
     sendSuccess(res, {
       user: {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        githubId: user.githubId,
-        githubAccessToken: user.githubAccessToken,
-        claudeAuth: user.claudeAuth,
-        codexAuth: user.codexAuth,
-        geminiAuth: user.geminiAuth,
-        preferredProvider: user.preferredProvider || 'claude',
-        imageResizeMaxDimension: user.imageResizeMaxDimension,
-        voiceCommandKeywords: user.voiceCommandKeywords || [],
-        defaultLandingPage: user.defaultLandingPage || 'store',
-        preferredModel: user.preferredModel,
-        isAdmin: user.isAdmin,
-        createdAt: user.createdAt,
+        id: decryptedUser.id,
+        email: decryptedUser.email,
+        displayName: decryptedUser.displayName,
+        githubId: decryptedUser.githubId,
+        githubAccessToken: decryptedUser.githubAccessToken,
+        claudeAuth: decryptedUser.claudeAuth,
+        codexAuth: decryptedUser.codexAuth,
+        geminiAuth: decryptedUser.geminiAuth,
+        preferredProvider: decryptedUser.preferredProvider || 'claude',
+        imageResizeMaxDimension: decryptedUser.imageResizeMaxDimension,
+        voiceCommandKeywords: decryptedUser.voiceCommandKeywords || [],
+        defaultLandingPage: decryptedUser.defaultLandingPage || 'store',
+        preferredModel: decryptedUser.preferredModel,
+        isAdmin: decryptedUser.isAdmin,
+        createdAt: decryptedUser.createdAt,
       },
     });
   } catch (error) {
@@ -433,16 +437,20 @@ router.get('/session', async (req: Request, res: Response) => {
       return;
     }
 
+    // Decrypt sensitive fields from database
+    const decryptedFields = decryptUserFields(freshUser);
+
     // Check and refresh Claude OAuth token if needed
-    let claudeAuth = freshUser.claudeAuth;
+    let claudeAuth = decryptedFields.claudeAuth;
     if (claudeAuth && claudeAuth.accessToken && claudeAuth.refreshToken && claudeAuth.expiresAt) {
       try {
         const refreshedClaudeAuth = await ensureValidToken(claudeAuth as ClaudeAuth);
         if (refreshedClaudeAuth !== claudeAuth) {
-          // Token was refreshed, update database
+          // Token was refreshed, update database (encrypted)
+          const encryptedAuth = encryptUserFields({ claudeAuth: refreshedClaudeAuth as any });
           await db
             .update(users)
-            .set({ claudeAuth: refreshedClaudeAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
+            .set(encryptedAuth as any)
             .where(eq(users.id, freshUser.id));
           claudeAuth = refreshedClaudeAuth as typeof claudeAuth;
           logger.info('Claude OAuth token refreshed during session check', {
@@ -461,17 +469,18 @@ router.get('/session', async (req: Request, res: Response) => {
     }
 
     // Check and refresh Codex OAuth token if needed
-    let codexAuth = freshUser.codexAuth;
+    let codexAuth = decryptedFields.codexAuth;
     if (codexAuth && isValidCodexAuth(codexAuth) && codexAuth.accessToken && codexAuth.expiresAt) {
       try {
         const refreshedCodexAuth = await ensureValidCodexToken(codexAuth as CodexAuth);
         if (refreshedCodexAuth !== codexAuth) {
-          // Token was refreshed, update database
+          // Token was refreshed, update database (encrypted)
+          const encryptedCodexAuth = encryptUserFields({ codexAuth: refreshedCodexAuth as any });
           await db
             .update(users)
-            .set({ codexAuth: refreshedCodexAuth })
+            .set(encryptedCodexAuth as any)
             .where(eq(users.id, freshUser.id));
-          codexAuth = refreshedCodexAuth;
+          codexAuth = refreshedCodexAuth as typeof codexAuth;
           logger.info('Codex OAuth token refreshed during session check', {
             component: 'AuthRoute',
             userId: freshUser.id
@@ -492,10 +501,10 @@ router.get('/session', async (req: Request, res: Response) => {
         email: freshUser.email,
         displayName: freshUser.displayName,
         githubId: freshUser.githubId,
-        githubAccessToken: freshUser.githubAccessToken,
+        githubAccessToken: decryptedFields.githubAccessToken,
         claudeAuth: claudeAuth,
         codexAuth: codexAuth,
-        geminiAuth: freshUser.geminiAuth,
+        geminiAuth: decryptedFields.geminiAuth,
         preferredProvider: freshUser.preferredProvider || 'claude',
         imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
         voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
