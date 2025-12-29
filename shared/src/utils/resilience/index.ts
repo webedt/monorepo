@@ -78,3 +78,22 @@ export {
   GITHUB_RETRY_CONFIG,
   CLAUDE_REMOTE_RETRY_CONFIG,
 } from './externalApiResilience.js';
+
+// Rate Limiter
+export {
+  ARateLimiter,
+  ARateLimiterStore,
+  ARateLimiterRegistry,
+  type RateLimiterConfig,
+  type RateLimitResult,
+  type RateLimiterStats,
+  type SlidingWindowEntry,
+} from './ARateLimiter.js';
+
+export {
+  SlidingWindowRateLimiter,
+  SlidingWindowStore,
+  rateLimiterRegistry,
+  createRateLimiter,
+  createSlidingWindowStore,
+} from './rateLimiter.js';
