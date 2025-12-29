@@ -7,6 +7,7 @@
 export { ClaudeRemoteProvider } from './claudeRemoteProvider.js';
 export { SelfHostedWorkerProvider } from './selfHostedWorkerProvider.js';
 export { GeminiProvider } from './geminiProvider.js';
+export { CodexRemoteProvider } from './codexRemoteProvider.js';
 export type {
   ExecutionProvider,
   ExecuteParams,
@@ -18,26 +19,29 @@ export type {
 } from './types.js';
 export type { SelfHostedWorkerConfig } from './selfHostedWorkerProvider.js';
 export type { GeminiResumeParams } from './geminiProvider.js';
+export type { CodexExecuteParams, CodexResumeParams } from './codexRemoteProvider.js';
 
 import { ClaudeRemoteProvider } from './claudeRemoteProvider.js';
 import { SelfHostedWorkerProvider } from './selfHostedWorkerProvider.js';
 import { GeminiProvider } from './geminiProvider.js';
+import { CodexRemoteProvider } from './codexRemoteProvider.js';
 import type { ExecutionProvider } from './types.js';
-import { AI_WORKER_ENABLED, AI_WORKER_URL } from '../../config/env.js';
+import { AI_WORKER_ENABLED, AI_WORKER_URL, CODEX_ENABLED } from '../../config/env.js';
 import { logger } from '../../utils/logging/logger.js';
 
 /**
  * Provider type for explicit selection
  */
-export type ProviderType = 'claude-remote' | 'self-hosted' | 'gemini' | 'auto';
+export type ProviderType = 'claude-remote' | 'self-hosted' | 'gemini' | 'codex' | 'auto';
 
 /**
  * Get the execution provider based on configuration
  *
  * Provider selection logic:
- * 1. If explicitly specified, use that provider
+ * 1. If explicit provider type is specified, use that provider
  * 2. If AI_WORKER_ENABLED=true and AI_WORKER_URL is set, use SelfHostedWorkerProvider
- * 3. Otherwise, use ClaudeRemoteProvider (default)
+ * 3. If CODEX_ENABLED=true, use CodexRemoteProvider
+ * 4. Otherwise, use ClaudeRemoteProvider (default)
  *
  * @param providerType - Explicit provider type to use (overrides env config)
  */
@@ -64,6 +68,13 @@ export function getExecutionProvider(providerType: ProviderType = 'auto'): Execu
     return new GeminiProvider();
   }
 
+  if (providerType === 'codex') {
+    logger.info('Using CodexRemoteProvider (explicit)', {
+      component: 'ExecutionProviders',
+    });
+    return new CodexRemoteProvider();
+  }
+
   // Auto-select based on environment configuration
   if (AI_WORKER_ENABLED && AI_WORKER_URL) {
     logger.info('Using SelfHostedWorkerProvider (auto-detected from env)', {
@@ -71,6 +82,13 @@ export function getExecutionProvider(providerType: ProviderType = 'auto'): Execu
       workerUrl: AI_WORKER_URL,
     });
     return new SelfHostedWorkerProvider();
+  }
+
+  if (CODEX_ENABLED) {
+    logger.info('Using CodexRemoteProvider (auto-detected from env)', {
+      component: 'ExecutionProviders',
+    });
+    return new CodexRemoteProvider();
   }
 
   // Default to Claude Remote

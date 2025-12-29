@@ -43,6 +43,28 @@ export const SESSION_SECRET = process.env.SESSION_SECRET || 'development-secret-
 // Feature flags
 export const USE_NEW_ARCHITECTURE = process.env.USE_NEW_ARCHITECTURE === 'true';
 
+// Verbose/Debug mode configuration
+// VERBOSE_MODE enables maximum detail output for debugging
+// Levels: 'off' (default), 'on' (verbose logging), 'debug' (verbose + debug logs)
+export const VERBOSE_MODE = process.env.VERBOSE_MODE || 'off';
+export const LOG_LEVEL = process.env.LOG_LEVEL || (VERBOSE_MODE === 'debug' ? 'debug' : 'info');
+export const VERBOSE_HTTP = process.env.VERBOSE_HTTP === 'true' || VERBOSE_MODE !== 'off';
+export const VERBOSE_TIMING = process.env.VERBOSE_TIMING === 'true' || VERBOSE_MODE !== 'off';
+
+/**
+ * Check if verbose mode is enabled
+ */
+export function isVerbose(): boolean {
+  return VERBOSE_MODE !== 'off';
+}
+
+/**
+ * Check if debug level logging is enabled
+ */
+export function isDebugLevel(): boolean {
+  return VERBOSE_MODE === 'debug' || LOG_LEVEL === 'debug';
+}
+
 // Claude Remote Sessions configuration
 export const CLAUDE_ENVIRONMENT_ID = process.env.CLAUDE_ENVIRONMENT_ID || '';
 export const CLAUDE_API_BASE_URL = process.env.CLAUDE_API_BASE_URL || 'https://api.anthropic.com';
@@ -54,6 +76,13 @@ export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // Open
 // LLM fallback configuration
 // Empty repo URL for Claude Web fallback (used when OpenRouter is unavailable)
 export const LLM_FALLBACK_REPO_URL = process.env.LLM_FALLBACK_REPO_URL || 'https://github.com/anthropics/anthropic-quickstarts';
+
+// Codex/OpenAI configuration
+export const CODEX_API_BASE_URL = process.env.CODEX_API_BASE_URL || 'https://api.openai.com/v1';
+export const CODEX_DEFAULT_MODEL = process.env.CODEX_DEFAULT_MODEL || 'gpt-4o';
+export const CODEX_ORGANIZATION_ID = process.env.CODEX_ORGANIZATION_ID || '';  // OpenAI Organization ID
+export const CODEX_PROJECT_ID = process.env.CODEX_PROJECT_ID || '';  // OpenAI Project ID
+export const CODEX_ENABLED = process.env.CODEX_ENABLED === 'true';  // Explicitly enable Codex provider
 
 // AI Worker configuration (self-hosted worker for LLM execution)
 // When configured, enables the SelfHostedWorkerProvider as an alternative to Claude Remote Sessions
@@ -122,9 +151,16 @@ export function logEnvConfig(): void {
   console.log(`  WORKSPACE_DIR=${WORKSPACE_DIR}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
   console.log(`  USE_NEW_ARCHITECTURE=${USE_NEW_ARCHITECTURE}`);
+  console.log(`  VERBOSE_MODE=${VERBOSE_MODE}`);
+  console.log(`  LOG_LEVEL=${LOG_LEVEL}`);
+  console.log(`  VERBOSE_HTTP=${VERBOSE_HTTP}`);
+  console.log(`  VERBOSE_TIMING=${VERBOSE_TIMING}`);
   console.log(`  CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID || 'not set'}`);
   console.log(`  CLAUDE_API_BASE_URL=${CLAUDE_API_BASE_URL}`);
   console.log(`  CLAUDE_DEFAULT_MODEL=${CLAUDE_DEFAULT_MODEL}`);
   console.log(`  AI_WORKER_ENABLED=${AI_WORKER_ENABLED}`);
   console.log(`  AI_WORKER_URL=${AI_WORKER_URL || 'not set'}`);
+  console.log(`  CODEX_ENABLED=${CODEX_ENABLED}`);
+  console.log(`  CODEX_API_BASE_URL=${CODEX_API_BASE_URL}`);
+  console.log(`  CODEX_DEFAULT_MODEL=${CODEX_DEFAULT_MODEL}`);
 }

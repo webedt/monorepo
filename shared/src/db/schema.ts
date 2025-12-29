@@ -48,12 +48,20 @@ export const users = pgTable('users', {
   stopListeningAfterSubmit: boolean('stop_listening_after_submit').default(false).notNull(),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),
   preferredModel: text('preferred_model'),
-  chatVerbosityLevel: text('chat_verbosity_level').default('verbose').notNull(), // 'minimal' | 'normal' | 'verbose'
+  chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
   storageUsedBytes: text('storage_used_bytes').default('0').notNull(), // Current usage (stored as string for bigint precision)
+  // Spending limits configuration
+  spendingLimitEnabled: boolean('spending_limit_enabled').default(false).notNull(),
+  monthlyBudgetCents: text('monthly_budget_cents').default('0').notNull(), // Budget in cents (stored as string for precision)
+  perTransactionLimitCents: text('per_transaction_limit_cents').default('0').notNull(), // Per-transaction limit in cents
+  spendingResetDay: integer('spending_reset_day').default(1).notNull(), // Day of month to reset (1-31)
+  currentMonthSpentCents: text('current_month_spent_cents').default('0').notNull(), // Current month spending in cents
+  spendingLimitAction: text('spending_limit_action').default('warn').notNull(), // 'warn' | 'block' - action when limit reached
+  spendingResetAt: timestamp('spending_reset_at'), // When the current month spending was last reset
 });
 
 export const sessions = pgTable('sessions', {
@@ -93,6 +101,9 @@ export const chatSessions = pgTable('chat_sessions', {
   deletedAt: timestamp('deleted_at'), // Soft delete timestamp
   workerLastActivity: timestamp('worker_last_activity'), // Last time worker sent an event (for orphan detection)
   favorite: boolean('favorite').default(false).notNull(), // User favorite/starred status
+  // Sharing fields - "public but unlisted" (shareable if you know the link)
+  shareToken: text('share_token').unique(), // UUID-based token for sharing
+  shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
 });
 
 export const messages = pgTable('messages', {

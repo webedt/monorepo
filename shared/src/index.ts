@@ -76,6 +76,28 @@ export type {
   GeminiEventCallback,
 } from './gemini/index.js';
 
+// Codex/OpenAI API
+// Provides integration with OpenAI's Responses API for code generation
+export { CodexClient, ACodexClient, CodexError } from './codex/index.js';
+export type {
+  CodexClientConfig,
+  CreateCodexSessionParams,
+  CreateCodexSessionResult,
+  CodexSession,
+  CodexSessionStatus,
+  CodexSessionResult,
+  CodexEvent,
+  CodexEventType,
+  CodexEventCallback,
+  CodexPollOptions,
+  CodexContentBlock,
+  CodexTextContent,
+  CodexImageContent,
+  CodexMessage,
+  CodexToolCall,
+  CodexToolResult,
+} from './codex/index.js';
+
 // Session management
 // Note: Exports BroadcastEvent (renamed from SessionEvent) to avoid conflict with ClaudeSessionEvent
 export * from './sessions/index.js';

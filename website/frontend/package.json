@@ -14,9 +14,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "devDependencies": {
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^6.4.1",
     "vite-plugin-version-mark": "^0.2.2"
