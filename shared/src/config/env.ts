@@ -55,6 +55,13 @@ export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // Open
 // Empty repo URL for Claude Web fallback (used when OpenRouter is unavailable)
 export const LLM_FALLBACK_REPO_URL = process.env.LLM_FALLBACK_REPO_URL || 'https://github.com/anthropics/anthropic-quickstarts';
 
+// Codex/OpenAI configuration
+export const CODEX_API_BASE_URL = process.env.CODEX_API_BASE_URL || 'https://api.openai.com/v1';
+export const CODEX_DEFAULT_MODEL = process.env.CODEX_DEFAULT_MODEL || 'gpt-4o';
+export const CODEX_ORGANIZATION_ID = process.env.CODEX_ORGANIZATION_ID || '';  // OpenAI Organization ID
+export const CODEX_PROJECT_ID = process.env.CODEX_PROJECT_ID || '';  // OpenAI Project ID
+export const CODEX_ENABLED = process.env.CODEX_ENABLED === 'true';  // Explicitly enable Codex provider
+
 // AI Worker configuration (self-hosted worker for LLM execution)
 // When configured, enables the SelfHostedWorkerProvider as an alternative to Claude Remote Sessions
 export const AI_WORKER_URL = process.env.AI_WORKER_URL || '';  // e.g., http://localhost:8080
@@ -122,4 +129,7 @@ export function logEnvConfig(): void {
   console.log(`  CLAUDE_DEFAULT_MODEL=${CLAUDE_DEFAULT_MODEL}`);
   console.log(`  AI_WORKER_ENABLED=${AI_WORKER_ENABLED}`);
   console.log(`  AI_WORKER_URL=${AI_WORKER_URL || 'not set'}`);
+  console.log(`  CODEX_ENABLED=${CODEX_ENABLED}`);
+  console.log(`  CODEX_API_BASE_URL=${CODEX_API_BASE_URL}`);
+  console.log(`  CODEX_DEFAULT_MODEL=${CODEX_DEFAULT_MODEL}`);
 }
