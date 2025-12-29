@@ -1,19 +1,20 @@
 import { ASessionEventBroadcaster } from './ASessionEventBroadcaster.js';
 import { metrics } from '../utils/monitoring/metrics.js';
 import { logger } from '../utils/logging/logger.js';
+import { TIMEOUTS, INTERVALS, LIMITS } from '../config/constants.js';
 
 import type { SessionEvent } from './ASessionEventBroadcaster.js';
 
 export type { BroadcastEvent, SessionEvent } from './ASessionEventBroadcaster.js';
 
 const BROADCASTER_TYPE = 'session_event';
-const STALE_TIMEOUT_MS = 30_000;
-const HEARTBEAT_INTERVAL_MS = 15_000;
-const CLEANUP_INTERVAL_MS = 10_000;
-const WARN_SUBSCRIBER_COUNT = 500;
-const ERROR_SUBSCRIBER_COUNT = 900;
-const MAX_LISTENER_LIMIT = 1000;
-const MAX_SUBSCRIBERS_PER_SESSION = 50;
+const STALE_TIMEOUT_MS = TIMEOUTS.SSE.STALE;
+const HEARTBEAT_INTERVAL_MS = INTERVALS.SSE.HEARTBEAT;
+const CLEANUP_INTERVAL_MS = INTERVALS.SSE.CLEANUP;
+const WARN_SUBSCRIBER_COUNT = LIMITS.SSE.WARN_THRESHOLD;
+const ERROR_SUBSCRIBER_COUNT = LIMITS.SSE.ERROR_THRESHOLD;
+const MAX_LISTENER_LIMIT = LIMITS.SSE.MAX_LISTENERS;
+const MAX_SUBSCRIBERS_PER_SESSION = LIMITS.SSE.MAX_PER_SESSION;
 
 interface Subscriber {
   id: string;
@@ -173,7 +174,7 @@ class SessionEventBroadcaster extends ASessionEventBroadcaster {
 
     sessionsToEvict.sort((a, b) => a.lastAccess - b.lastAccess);
 
-    const targetEvictions = Math.ceil(sessionsToEvict.length * 0.2);
+    const targetEvictions = Math.ceil(sessionsToEvict.length * LIMITS.EVICTION.LRU_RATE);
     const evicted: string[] = [];
 
     for (let i = 0; i < Math.min(targetEvictions, sessionsToEvict.length); i++) {
