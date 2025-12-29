@@ -76,6 +76,14 @@ class ShutdownRegistry implements IShutdownRegistry {
   private initialized = false;
   private shuttingDown = false;
 
+  // Store signal handler references for cleanup in reset()
+  private signalHandlers: {
+    sigterm?: () => void;
+    sigint?: () => void;
+    uncaughtException?: (error: Error) => void;
+    unhandledRejection?: (reason: unknown) => void;
+  } = {};
+
   /**
    * Register a shutdown handler
    */
@@ -120,30 +128,33 @@ class ShutdownRegistry implements IShutdownRegistry {
       return;
     }
 
-    // Handle SIGTERM (graceful termination)
-    process.on('SIGTERM', () => {
+    // Store handler references so they can be removed in reset()
+    this.signalHandlers.sigterm = () => {
       logger.info('Received SIGTERM signal', { component: 'ShutdownRegistry' });
       this.shutdown(0);
-    });
+    };
 
-    // Handle SIGINT (Ctrl+C)
-    process.on('SIGINT', () => {
+    this.signalHandlers.sigint = () => {
       logger.info('Received SIGINT signal', { component: 'ShutdownRegistry' });
       this.shutdown(0);
-    });
+    };
 
-    // Handle uncaught exceptions
-    process.on('uncaughtException', (error: Error) => {
+    this.signalHandlers.uncaughtException = (error: Error) => {
       logger.error('Uncaught exception', error, { component: 'ShutdownRegistry' });
       this.shutdown(1);
-    });
+    };
 
-    // Handle unhandled promise rejections
-    process.on('unhandledRejection', (reason: unknown) => {
+    this.signalHandlers.unhandledRejection = (reason: unknown) => {
       const error = reason instanceof Error ? reason : new Error(String(reason));
       logger.error('Unhandled promise rejection', error, { component: 'ShutdownRegistry' });
       this.shutdown(1);
-    });
+    };
+
+    // Register the handlers
+    process.on('SIGTERM', this.signalHandlers.sigterm);
+    process.on('SIGINT', this.signalHandlers.sigint);
+    process.on('uncaughtException', this.signalHandlers.uncaughtException);
+    process.on('unhandledRejection', this.signalHandlers.unhandledRejection);
 
     this.initialized = true;
     logger.info('ShutdownRegistry initialized', { component: 'ShutdownRegistry' });
@@ -216,8 +227,25 @@ class ShutdownRegistry implements IShutdownRegistry {
 
   /**
    * Reset the registry (for testing)
+   * Removes all handlers and signal listeners to allow re-initialization
    */
   reset(): void {
+    // Remove signal handlers if they were registered
+    if (this.signalHandlers.sigterm) {
+      process.off('SIGTERM', this.signalHandlers.sigterm);
+    }
+    if (this.signalHandlers.sigint) {
+      process.off('SIGINT', this.signalHandlers.sigint);
+    }
+    if (this.signalHandlers.uncaughtException) {
+      process.off('uncaughtException', this.signalHandlers.uncaughtException);
+    }
+    if (this.signalHandlers.unhandledRejection) {
+      process.off('unhandledRejection', this.signalHandlers.unhandledRejection);
+    }
+
+    // Clear all state
+    this.signalHandlers = {};
     this.handlers = [];
     this.initialized = false;
     this.shuttingDown = false;

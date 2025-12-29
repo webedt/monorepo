@@ -731,13 +731,15 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
       const closeHandler = (code: number) => {
         if (code !== 1000 && code !== 1001) {
+          // Abnormal close - reject (safeReject handles cleanup)
           safeReject(new ClaudeRemoteError(
             `WebSocket closed unexpectedly with code ${code}`,
             500
           ));
+        } else {
+          // Normal close codes - just cleanup without rejecting
+          cleanup();
         }
-        // For normal close codes, just cleanup without rejecting
-        cleanup();
       };
 
       // Register WebSocket event handlers
