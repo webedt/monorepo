@@ -20,6 +20,9 @@ import {
   clearKeyCache,
 } from '../src/utils/encryption.js';
 
+// Valid test salt (32 hex characters = 16 bytes)
+const TEST_SALT = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
+
 describe('Encryption', () => {
   // Store original env vars
   let originalEncryptionKey: string | undefined;
@@ -61,6 +64,7 @@ describe('Encryption', () => {
   describe('validateEncryptionConfig', () => {
     it('should fail when ENCRYPTION_KEY is not set', () => {
       delete process.env.ENCRYPTION_KEY;
+      delete process.env.ENCRYPTION_SALT;
       const result = validateEncryptionConfig();
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('not set'));
@@ -68,13 +72,39 @@ describe('Encryption', () => {
 
     it('should fail when ENCRYPTION_KEY is too short', () => {
       process.env.ENCRYPTION_KEY = 'short';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const result = validateEncryptionConfig();
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('at least 16 characters'));
     });
 
-    it('should pass with valid ENCRYPTION_KEY', () => {
+    it('should fail when ENCRYPTION_SALT is not set', () => {
       process.env.ENCRYPTION_KEY = 'this-is-a-valid-encryption-key-32-chars';
+      delete process.env.ENCRYPTION_SALT;
+      const result = validateEncryptionConfig();
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('ENCRYPTION_SALT'));
+    });
+
+    it('should fail when ENCRYPTION_SALT is invalid hex', () => {
+      process.env.ENCRYPTION_KEY = 'this-is-a-valid-encryption-key-32-chars';
+      process.env.ENCRYPTION_SALT = 'not-valid-hex';
+      const result = validateEncryptionConfig();
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('hex string'));
+    });
+
+    it('should fail when ENCRYPTION_SALT is too short', () => {
+      process.env.ENCRYPTION_KEY = 'this-is-a-valid-encryption-key-32-chars';
+      process.env.ENCRYPTION_SALT = 'a1b2c3d4'; // Only 8 hex chars
+      const result = validateEncryptionConfig();
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('32 characters'));
+    });
+
+    it('should pass with valid ENCRYPTION_KEY and ENCRYPTION_SALT', () => {
+      process.env.ENCRYPTION_KEY = 'this-is-a-valid-encryption-key-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const result = validateEncryptionConfig();
       assert.strictEqual(result.valid, true);
       assert.strictEqual(result.error, undefined);
@@ -84,6 +114,7 @@ describe('Encryption', () => {
   describe('encrypt and decrypt', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should encrypt and decrypt a simple string', () => {
@@ -137,7 +168,7 @@ describe('Encryption', () => {
       const plaintext = 'secret message';
       const encrypted = encrypt(plaintext);
 
-      // Change the key
+      // Change the key (keep salt same to isolate key change)
       process.env.ENCRYPTION_KEY = 'different-key-at-least-32-characters-long';
       clearKeyCache();
 
@@ -148,6 +179,7 @@ describe('Encryption', () => {
   describe('isEncrypted', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should return true for encrypted data', () => {
@@ -172,6 +204,7 @@ describe('Encryption', () => {
   describe('encryptJson and decryptJson', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should encrypt and decrypt JSON objects', () => {
@@ -222,6 +255,7 @@ describe('Encryption', () => {
 
     it('should encrypt when encryption is enabled', () => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const value = 'test-token';
 
       const encrypted = safeEncrypt(value);
@@ -231,6 +265,7 @@ describe('Encryption', () => {
 
     it('should handle null values', () => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
 
       assert.strictEqual(safeEncrypt(null), null);
       assert.strictEqual(safeDecrypt(null), null);
@@ -238,6 +273,7 @@ describe('Encryption', () => {
 
     it('should decrypt unencrypted data as-is', () => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const plainValue = 'not-encrypted';
 
       assert.strictEqual(safeDecrypt(plainValue), plainValue);
@@ -255,6 +291,7 @@ describe('Encryption', () => {
 
     it('should encrypt JSON when encryption is enabled', () => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const data = { token: 'abc123', expiry: 12345 };
 
       const encrypted = safeEncryptJson(data);
@@ -266,6 +303,7 @@ describe('Encryption', () => {
 
     it('should handle already-object values in decrypt', () => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const data = { token: 'abc123' };
 
       // If value is already an object, should return as-is
@@ -275,6 +313,7 @@ describe('Encryption', () => {
 
     it('should handle plain JSON strings in decrypt', () => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const data = { token: 'abc123' };
       const jsonString = JSON.stringify(data);
 
@@ -286,6 +325,7 @@ describe('Encryption', () => {
   describe('Encryption Format', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-characters-long';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should produce v1 format: version:iv:authTag:ciphertext', () => {
@@ -307,8 +347,9 @@ describe('Encryption', () => {
   });
 
   describe('Key Derivation', () => {
-    it('should produce consistent keys for same passphrase', () => {
+    it('should produce consistent keys for same passphrase and salt', () => {
       process.env.ENCRYPTION_KEY = 'consistent-key-test-at-least-32-characters';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
       const plaintext = 'test message';
 
       const encrypted1 = encrypt(plaintext);
@@ -320,15 +361,43 @@ describe('Encryption', () => {
       assert.strictEqual(decrypt(encrypted2), plaintext);
     });
 
-    it('should work with explicit salt', () => {
+    it('should work with different valid salts', () => {
       process.env.ENCRYPTION_KEY = 'test-key-at-least-32-characters-long';
-      process.env.ENCRYPTION_SALT = 'a'.repeat(32); // 16 bytes in hex
+      process.env.ENCRYPTION_SALT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; // 26 bytes in hex (52 chars)
 
       const plaintext = 'test with salt';
       const encrypted = encrypt(plaintext);
       const decrypted = decrypt(encrypted);
 
       assert.strictEqual(decrypted, plaintext);
+    });
+
+    it('should produce different ciphertext with different salt', () => {
+      const plaintext = 'same message';
+      process.env.ENCRYPTION_KEY = 'test-key-at-least-32-characters-long';
+
+      // First salt
+      process.env.ENCRYPTION_SALT = TEST_SALT;
+      clearKeyCache();
+      const encrypted1 = encrypt(plaintext);
+
+      // Different salt
+      process.env.ENCRYPTION_SALT = 'b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7';
+      clearKeyCache();
+      const encrypted2 = encrypt(plaintext);
+
+      // Same plaintext but different encryption due to different derived key
+      // Note: encrypted texts will be different and cross-decryption should fail
+      assert.notStrictEqual(encrypted1, encrypted2);
+
+      // Each should decrypt with its own salt
+      process.env.ENCRYPTION_SALT = TEST_SALT;
+      clearKeyCache();
+      assert.strictEqual(decrypt(encrypted1), plaintext);
+
+      process.env.ENCRYPTION_SALT = 'b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7';
+      clearKeyCache();
+      assert.strictEqual(decrypt(encrypted2), plaintext);
     });
   });
 });

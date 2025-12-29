@@ -14,12 +14,17 @@ import {
 } from '../../src/services/sensitiveDataService.js';
 import { clearKeyCache, isEncrypted } from '../../src/utils/encryption.js';
 
+// Valid test salt (32 hex characters = 16 bytes)
+const TEST_SALT = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
+
 describe('SensitiveDataService', () => {
   // Store original env vars
   let originalEncryptionKey: string | undefined;
+  let originalEncryptionSalt: string | undefined;
 
   beforeEach(() => {
     originalEncryptionKey = process.env.ENCRYPTION_KEY;
+    originalEncryptionSalt = process.env.ENCRYPTION_SALT;
     clearKeyCache();
   });
 
@@ -29,12 +34,18 @@ describe('SensitiveDataService', () => {
     } else {
       delete process.env.ENCRYPTION_KEY;
     }
+    if (originalEncryptionSalt !== undefined) {
+      process.env.ENCRYPTION_SALT = originalEncryptionSalt;
+    } else {
+      delete process.env.ENCRYPTION_SALT;
+    }
     clearKeyCache();
   });
 
   describe('encryptUserFields', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-key-for-sensitive-data-service-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should encrypt githubAccessToken', () => {
@@ -133,6 +144,7 @@ describe('SensitiveDataService', () => {
   describe('decryptUserFields', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-key-for-sensitive-data-service-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should decrypt encrypted githubAccessToken', () => {
@@ -187,6 +199,7 @@ describe('SensitiveDataService', () => {
   describe('decryptUser', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-key-for-sensitive-data-service-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should decrypt all sensitive fields in user object', () => {
@@ -229,6 +242,7 @@ describe('SensitiveDataService', () => {
   describe('hasEncryptedFields', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-key-for-sensitive-data-service-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should return true for user with encrypted fields', () => {
@@ -261,6 +275,7 @@ describe('SensitiveDataService', () => {
   describe('hasUnencryptedSensitiveData', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-key-for-sensitive-data-service-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should return true for user with plain text token', () => {
@@ -301,6 +316,7 @@ describe('SensitiveDataService', () => {
   describe('Round-trip encryption', () => {
     beforeEach(() => {
       process.env.ENCRYPTION_KEY = 'test-key-for-round-trip-testing-32-chars';
+      process.env.ENCRYPTION_SALT = TEST_SALT;
     });
 
     it('should correctly round-trip all sensitive fields', () => {

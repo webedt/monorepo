@@ -12,11 +12,24 @@
  */
 
 import { eq } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type { User } from '../db/schema.js';
+import { users as usersTable } from '../db/schema.js';
+import * as schema from '../db/schema.js';
 
 import { safeDecrypt, safeDecryptJson, safeEncrypt, safeEncryptJson, isEncryptionEnabled, isEncrypted } from '../utils/encryption.js';
 import { logger } from '../utils/logging/logger.js';
+
+/**
+ * Database instance type with our schema
+ */
+type DatabaseInstance = NodePgDatabase<typeof schema>;
+
+/**
+ * Users table type
+ */
+type UsersTable = typeof usersTable;
 
 /**
  * Claude authentication data structure
@@ -267,12 +280,12 @@ export function hasUnencryptedSensitiveData(user: Partial<User>): boolean {
  * Database operations for sensitive user data
  */
 export class SensitiveDataService {
-  private db: any;
-  private usersTable: any;
+  private db: DatabaseInstance;
+  private users: UsersTable;
 
-  constructor(db: any, usersTable: any) {
+  constructor(db: DatabaseInstance, users: UsersTable) {
     this.db = db;
-    this.usersTable = usersTable;
+    this.users = users;
   }
 
   /**
@@ -281,8 +294,8 @@ export class SensitiveDataService {
   async getUserWithDecryptedFields(userId: string): Promise<User | null> {
     const [user] = await this.db
       .select()
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user) return null;
@@ -300,9 +313,11 @@ export class SensitiveDataService {
     const encrypted = encryptUserFields(fields);
 
     await this.db
-      .update(this.usersTable)
-      .set(encrypted)
-      .where(eq(this.usersTable.id, userId));
+      .update(this.users)
+      // Type assertion needed because encrypted fields may contain encrypted strings
+      // where the schema expects JSON objects (when encryption is enabled)
+      .set(encrypted as typeof this.users.$inferInsert)
+      .where(eq(this.users.id, userId));
 
     logger.debug('Updated sensitive fields for user', {
       component: 'SensitiveDataService',
@@ -317,9 +332,9 @@ export class SensitiveDataService {
    */
   async getClaudeAuth(userId: string): Promise<ClaudeAuthData | null> {
     const [user] = await this.db
-      .select({ claudeAuth: this.usersTable.claudeAuth })
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .select({ claudeAuth: this.users.claudeAuth })
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user?.claudeAuth) return null;
@@ -340,9 +355,9 @@ export class SensitiveDataService {
    */
   async getCodexAuth(userId: string): Promise<CodexAuthData | null> {
     const [user] = await this.db
-      .select({ codexAuth: this.usersTable.codexAuth })
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .select({ codexAuth: this.users.codexAuth })
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user?.codexAuth) return null;
@@ -363,9 +378,9 @@ export class SensitiveDataService {
    */
   async getGeminiAuth(userId: string): Promise<GeminiAuthData | null> {
     const [user] = await this.db
-      .select({ geminiAuth: this.usersTable.geminiAuth })
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .select({ geminiAuth: this.users.geminiAuth })
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user?.geminiAuth) return null;
@@ -386,9 +401,9 @@ export class SensitiveDataService {
    */
   async getGitHubAccessToken(userId: string): Promise<string | null> {
     const [user] = await this.db
-      .select({ githubAccessToken: this.usersTable.githubAccessToken })
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .select({ githubAccessToken: this.users.githubAccessToken })
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user?.githubAccessToken) return null;
@@ -408,9 +423,9 @@ export class SensitiveDataService {
    */
   async getOpenRouterApiKey(userId: string): Promise<string | null> {
     const [user] = await this.db
-      .select({ openrouterApiKey: this.usersTable.openrouterApiKey })
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .select({ openrouterApiKey: this.users.openrouterApiKey })
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user?.openrouterApiKey) return null;
@@ -430,9 +445,9 @@ export class SensitiveDataService {
    */
   async getImageAiKeys(userId: string): Promise<ImageAiKeysData | null> {
     const [user] = await this.db
-      .select({ imageAiKeys: this.usersTable.imageAiKeys })
-      .from(this.usersTable)
-      .where(eq(this.usersTable.id, userId))
+      .select({ imageAiKeys: this.users.imageAiKeys })
+      .from(this.users)
+      .where(eq(this.users.id, userId))
       .limit(1);
 
     if (!user?.imageAiKeys) return null;
@@ -452,6 +467,6 @@ export class SensitiveDataService {
 /**
  * Create a SensitiveDataService instance
  */
-export function createSensitiveDataService(db: any, usersTable: any): SensitiveDataService {
-  return new SensitiveDataService(db, usersTable);
+export function createSensitiveDataService(db: DatabaseInstance, users: UsersTable): SensitiveDataService {
+  return new SensitiveDataService(db, users);
 }

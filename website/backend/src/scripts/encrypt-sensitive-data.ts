@@ -24,7 +24,7 @@
  */
 
 import 'dotenv/config';
-import { db, users } from '@webedt/shared';
+import { db, users, sql } from '@webedt/shared';
 import {
   isEncryptionEnabled,
   validateEncryptionConfig,
@@ -86,15 +86,27 @@ async function migrateUsers(): Promise<MigrationStats> {
     },
   };
 
-  // Get all users
-  const allUsers = await db.select().from(users);
-  stats.totalUsers = allUsers.length;
+  // Count total users first (doesn't load all data into memory)
+  const [countResult] = await db.select({ count: sql<number>`count(*)` }).from(users);
+  stats.totalUsers = Number(countResult?.count ?? 0);
 
   log(`Found ${stats.totalUsers} users to process`);
 
-  for (let i = 0; i < allUsers.length; i += batchSize) {
-    const batch = allUsers.slice(i, i + batchSize);
-    log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(allUsers.length / batchSize)}`, true);
+  // Process users in batches using pagination (offset-based)
+  let offset = 0;
+  let batchNumber = 0;
+  const totalBatches = Math.ceil(stats.totalUsers / batchSize);
+
+  while (offset < stats.totalUsers) {
+    batchNumber++;
+    log(`Processing batch ${batchNumber}/${totalBatches}`, true);
+
+    // Fetch only the current batch from database
+    const batch = await db.select().from(users).limit(batchSize).offset(offset);
+
+    if (batch.length === 0) {
+      break; // No more users
+    }
 
     for (const user of batch) {
       try {
@@ -174,6 +186,9 @@ async function migrateUsers(): Promise<MigrationStats> {
         logError(`Failed to encrypt data for user ${user.id}: ${error}`);
       }
     }
+
+    // Move to next batch
+    offset += batchSize;
   }
 
   return stats;

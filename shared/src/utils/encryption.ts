@@ -27,6 +27,7 @@ const SEPARATOR = ':';
 // Cached derived key (derived once on startup)
 let cachedKey: Buffer | null = null;
 let cachedSalt: string | null = null;
+let cachedPassphrase: string | null = null;
 
 /**
  * Encrypted data format
@@ -50,11 +51,14 @@ export function isEncryptionEnabled(): boolean {
  * Uses PBKDF2 for key derivation to handle variable-length passphrases
  */
 function getEncryptionKey(): Buffer {
-  if (cachedKey && cachedSalt === process.env.ENCRYPTION_SALT) {
+  const passphrase = process.env.ENCRYPTION_KEY;
+  const salt = process.env.ENCRYPTION_SALT;
+
+  // Check if we can use cached key (both passphrase and salt unchanged)
+  if (cachedKey && cachedPassphrase === passphrase && cachedSalt === salt) {
     return cachedKey;
   }
 
-  const passphrase = process.env.ENCRYPTION_KEY;
   if (!passphrase) {
     throw new Error(
       'ENCRYPTION_KEY environment variable is not set. ' +
@@ -62,15 +66,25 @@ function getEncryptionKey(): Buffer {
     );
   }
 
-  // Use a fixed salt stored in environment (for consistent key derivation)
-  // or generate one and store it
-  let salt = process.env.ENCRYPTION_SALT;
+  // Require explicit salt for production security
+  // Using PBKDF2 with the same key to derive a salt is cryptographically weak
   if (!salt) {
-    // If no salt is provided, use a deterministic derivation from the key
-    // This allows the system to work without explicit salt config
-    salt = pbkdf2Sync(passphrase, 'webedt-encryption-salt', 1000, SALT_LENGTH, 'sha256').toString('hex');
+    throw new Error(
+      'ENCRYPTION_SALT environment variable is not set. ' +
+      'Generate a random 32-character hex string (16 bytes) for the salt. ' +
+      'Example: openssl rand -hex 16'
+    );
   }
 
+  // Validate salt format (should be hex string of at least 16 bytes = 32 hex chars)
+  if (!/^[0-9a-fA-F]{32,}$/.test(salt)) {
+    throw new Error(
+      'ENCRYPTION_SALT must be a valid hex string of at least 32 characters (16 bytes). ' +
+      'Example: openssl rand -hex 16'
+    );
+  }
+
+  cachedPassphrase = passphrase;
   cachedSalt = salt;
   cachedKey = pbkdf2Sync(
     passphrase,
@@ -172,10 +186,11 @@ export function decrypt(encryptedData: string): string {
 
 /**
  * Encrypt a JSON object
+ * Returns null for null/undefined input, encrypted string otherwise
  */
-export function encryptJson<T>(data: T): string {
+export function encryptJson<T>(data: T | null | undefined): string | null {
   if (data === null || data === undefined) {
-    return data as unknown as string;
+    return null;
   }
 
   const jsonString = JSON.stringify(data);
@@ -263,6 +278,7 @@ export function safeEncryptJson<T>(data: T | null | undefined): string | null {
 
 /**
  * Safely decrypt a JSON value, handling both encrypted and plain JSON
+ * Returns null if the value cannot be decrypted or parsed as JSON
  */
 export function safeDecryptJson<T>(value: string | T | null | undefined): T | null {
   if (value === null || value === undefined) {
@@ -275,11 +291,15 @@ export function safeDecryptJson<T>(value: string | T | null | undefined): T | nu
   }
 
   if (!isEncryptionEnabled()) {
-    // Try to parse as JSON
+    // Try to parse as JSON, return null if invalid
     try {
       return JSON.parse(value as string) as T;
     } catch {
-      return value as unknown as T;
+      logger.warn('Failed to parse unencrypted JSON value', {
+        component: 'Encryption',
+        valueLength: (value as string).length,
+      });
+      return null;
     }
   }
 
@@ -288,7 +308,11 @@ export function safeDecryptJson<T>(value: string | T | null | undefined): T | nu
     try {
       return JSON.parse(value as string) as T;
     } catch {
-      return value as unknown as T;
+      logger.warn('Failed to parse unencrypted JSON value', {
+        component: 'Encryption',
+        valueLength: (value as string).length,
+      });
+      return null;
     }
   }
 
@@ -296,41 +320,113 @@ export function safeDecryptJson<T>(value: string | T | null | undefined): T | nu
 }
 
 /**
+ * Derive an encryption key from passphrase and salt
+ * Used internally for key rotation without modifying global state
+ */
+function deriveKey(passphrase: string, salt: string): Buffer {
+  if (!/^[0-9a-fA-F]{32,}$/.test(salt)) {
+    throw new Error('Salt must be a valid hex string of at least 32 characters');
+  }
+
+  return pbkdf2Sync(
+    passphrase,
+    Buffer.from(salt, 'hex'),
+    PBKDF2_ITERATIONS,
+    KEY_LENGTH,
+    'sha512'
+  );
+}
+
+/**
+ * Decrypt data using a specific key (for key rotation)
+ * Does not use or modify the global key cache
+ */
+function decryptWithKey(encryptedData: string, key: Buffer): string {
+  if (!encryptedData) {
+    return encryptedData;
+  }
+
+  if (!encryptedData.startsWith(CURRENT_VERSION + SEPARATOR)) {
+    return encryptedData;
+  }
+
+  const parts = encryptedData.split(SEPARATOR);
+  if (parts.length !== 4) {
+    throw new Error('Invalid encrypted data format');
+  }
+
+  const [version, ivBase64, authTagBase64, ciphertextBase64] = parts;
+  if (version !== CURRENT_VERSION) {
+    throw new Error(`Unsupported encryption version: ${version}`);
+  }
+
+  const iv = Buffer.from(ivBase64, 'base64');
+  const authTag = Buffer.from(authTagBase64, 'base64');
+  const ciphertext = Buffer.from(ciphertextBase64, 'base64');
+
+  const decipher = createDecipheriv(ALGORITHM, key, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+  decipher.setAuthTag(authTag);
+
+  const decrypted = Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString('utf8');
+}
+
+/**
+ * Encrypt data using a specific key (for key rotation)
+ * Does not use or modify the global key cache
+ */
+function encryptWithKey(plaintext: string, key: Buffer): string {
+  if (!plaintext) {
+    return plaintext;
+  }
+
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, key, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ]);
+
+  const authTag = cipher.getAuthTag();
+
+  return [
+    CURRENT_VERSION,
+    iv.toString('base64'),
+    authTag.toString('base64'),
+    encrypted.toString('base64'),
+  ].join(SEPARATOR);
+}
+
+/**
  * Re-encrypt data with a new key (for key rotation)
  * Decrypts with old key and encrypts with new key
+ * This function is thread-safe and does not modify global state
  */
 export function rotateEncryption(
   encryptedData: string,
-  oldKey: string,
-  newKey: string
+  oldPassphrase: string,
+  oldSalt: string,
+  newPassphrase: string,
+  newSalt: string
 ): string {
-  // Temporarily set the old key to decrypt
-  const originalKey = process.env.ENCRYPTION_KEY;
-  const originalSalt = process.env.ENCRYPTION_SALT;
+  // Derive keys without modifying global state
+  const oldKey = deriveKey(oldPassphrase, oldSalt);
+  const newKey = deriveKey(newPassphrase, newSalt);
 
-  try {
-    // Clear cache and set old key
-    cachedKey = null;
-    cachedSalt = null;
-    process.env.ENCRYPTION_KEY = oldKey;
+  // Decrypt with old key
+  const plaintext = decryptWithKey(encryptedData, oldKey);
 
-    // Decrypt with old key
-    const plaintext = decrypt(encryptedData);
-
-    // Clear cache and set new key
-    cachedKey = null;
-    cachedSalt = null;
-    process.env.ENCRYPTION_KEY = newKey;
-
-    // Encrypt with new key
-    return encrypt(plaintext);
-  } finally {
-    // Restore original key
-    cachedKey = null;
-    cachedSalt = null;
-    process.env.ENCRYPTION_KEY = originalKey;
-    process.env.ENCRYPTION_SALT = originalSalt;
-  }
+  // Encrypt with new key
+  return encryptWithKey(plaintext, newKey);
 }
 
 /**
@@ -339,10 +435,11 @@ export function rotateEncryption(
 export function clearKeyCache(): void {
   cachedKey = null;
   cachedSalt = null;
+  cachedPassphrase = null;
 }
 
 /**
- * Validate that the encryption key is properly configured
+ * Validate that the encryption key and salt are properly configured
  */
 export function validateEncryptionConfig(): { valid: boolean; error?: string } {
   if (!process.env.ENCRYPTION_KEY) {
@@ -356,6 +453,20 @@ export function validateEncryptionConfig(): { valid: boolean; error?: string } {
     return {
       valid: false,
       error: 'ENCRYPTION_KEY should be at least 16 characters (32+ recommended)',
+    };
+  }
+
+  if (!process.env.ENCRYPTION_SALT) {
+    return {
+      valid: false,
+      error: 'ENCRYPTION_SALT environment variable is not set. Generate with: openssl rand -hex 16',
+    };
+  }
+
+  if (!/^[0-9a-fA-F]{32,}$/.test(process.env.ENCRYPTION_SALT)) {
+    return {
+      valid: false,
+      error: 'ENCRYPTION_SALT must be a valid hex string of at least 32 characters (16 bytes)',
     };
   }
 
