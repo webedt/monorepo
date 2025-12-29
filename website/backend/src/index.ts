@@ -60,6 +60,9 @@ import autocompleteRoutes from './api/routes/autocomplete.js';
 import snippetsRoutes from './api/routes/snippets.js';
 import diffsRoutes from './api/routes/diffs.js';
 
+// Import Swagger/OpenAPI
+import { swaggerSpec, swaggerUi, swaggerUiOptions } from './api/swagger/index.js';
+
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
 
@@ -323,6 +326,8 @@ healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
 healthMonitor.startPeriodicChecks(30000);
 
 // Basic health check endpoint (fast, for load balancers)
+// Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints
+// at the root level, not part of the /api namespace, so they are not included in OpenAPI docs.
 app.get('/health', (req, res) => {
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
@@ -409,6 +414,13 @@ app.get('/metrics', (req, res) => {
     success: true,
     data: metrics.getMetricsJson(),
   });
+});
+
+// Swagger/OpenAPI Documentation
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+app.get('/api/openapi.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
 });
 
 // Add API routes
@@ -516,6 +528,9 @@ async function startServer() {
   console.log('  GET  /ready                            - Kubernetes readiness probe');
   console.log('  GET  /live                             - Kubernetes liveness probe');
   console.log('  GET  /metrics                          - Performance metrics (JSON)');
+  console.log('');
+  console.log('  GET  /api/docs                         - Swagger UI documentation');
+  console.log('  GET  /api/openapi.json                 - OpenAPI specification');
   console.log('');
   console.log('  POST /api/execute-remote               - Execute AI request (SSE)');
   console.log('  GET  /api/resume/:sessionId            - Resume session (SSE)');

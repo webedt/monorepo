@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Generated OpenAPI spec (regenerate with: npm run openapi:generate)
+openapi.json
