@@ -6,14 +6,11 @@ import { TextArea } from '../input';
 import { Spinner } from '../spinner';
 import { toast } from '../toast';
 import { githubApi, sessionsApi } from '../../lib/api';
-import { UI_KEYS } from '../../lib/storageKeys';
-import { SimpleStorage } from '../../lib/typedStorage';
+import { lastRepoStorage } from '../../lib/storageInstances';
 
 import type { Repository, Branch, Session } from '../../types';
 
 import './new-session-modal.css';
-
-const lastRepoStorage = new SimpleStorage<string>(UI_KEYS.LAST_REPO, '');
 
 export interface NewSessionModalOptions extends ComponentOptions {
   onSessionCreated?: (session: Session) => void;

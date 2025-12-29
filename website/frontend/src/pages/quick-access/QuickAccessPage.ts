@@ -9,7 +9,8 @@ import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Icon, Spinner, toast, SearchableSelect } from '../../components';
 import { sessionsApi, githubApi } from '../../lib/api';
 import { UI_KEYS } from '../../lib/storageKeys';
-import { TypedStorage, SimpleStorage, ArrayStorage } from '../../lib/typedStorage';
+import { TypedStorage } from '../../lib/typedStorage';
+import { lastRepoStorage, recentReposStorage } from '../../lib/storageInstances';
 import { authStore } from '../../stores/authStore';
 
 import type { Session, Repository, Branch } from '../../types';
@@ -38,14 +39,6 @@ const quickStartTemplatesStorage = new TypedStorage({
   defaultValue: [],
   version: 1,
 });
-
-const recentReposStorage = new ArrayStorage<string>(
-  UI_KEYS.RECENT_REPOS,
-  [],
-  { itemValidator: (item): item is string => typeof item === 'string' }
-);
-
-const lastRepoStorage = new SimpleStorage<string>(UI_KEYS.LAST_REPO, '');
 
 export class QuickAccessPage extends Page<PageOptions> {
   readonly route = '/quick-access';

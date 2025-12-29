@@ -2,6 +2,19 @@
  * Typed Storage
  * Type-safe localStorage wrapper with Zod schema validation,
  * automatic versioning, and migration support.
+ *
+ * ## Limitations
+ *
+ * 1. **Cache Invalidation**: The in-memory cache is not invalidated when
+ *    localStorage is modified externally (e.g., from another tab or directly
+ *    via localStorage API). Use `clearCache()` to force a reload from storage.
+ *
+ * 2. **Singleton Instances**: Multiple storage instances for the same key will
+ *    have independent caches. Use shared instances from `storageInstances.ts`
+ *    for commonly accessed keys to ensure cache consistency.
+ *
+ * 3. **Validation Errors**: The `set()` method silently catches validation errors
+ *    and logs them to console. Check console.error for debugging.
  */
 
 import type { ZodType } from 'zod';
@@ -340,9 +353,14 @@ export class ArrayStorage<T> {
     }
   }
 
+  /**
+   * Add item to front of array, removing duplicates.
+   * Note: Uses reference equality (===) for duplicate detection.
+   * For objects, use a custom solution or ensure same reference.
+   */
   push(item: T): void {
     const current = this.get();
-    // Remove existing if present, add to front
+    // Remove existing if present (reference equality), add to front
     const filtered = current.filter(i => i !== item);
     const updated = [item, ...filtered].slice(0, this.maxItems);
     this.set(updated);

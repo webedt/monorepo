@@ -6,14 +6,11 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, NewSessionModal, CollectionsPanel } from '../../components';
 import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
-import { UI_KEYS } from '../../lib/storageKeys';
-import { SimpleStorage } from '../../lib/typedStorage';
+import { lastRepoStorage } from '../../lib/storageInstances';
 
 import type { Session, Repository, Branch } from '../../types';
 
 import './agents.css';
-
-const lastRepoStorage = new SimpleStorage<string>(UI_KEYS.LAST_REPO, '');
 
 type FilterMode = 'all' | 'active' | 'favorites';
 
