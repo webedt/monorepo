@@ -10,9 +10,32 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: CloudSaves
+ *     description: Game save synchronization across devices
+ */
+
 // All routes require authentication
 router.use(requireAuth);
 
+/**
+ * @openapi
+ * /cloud-saves/stats:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Get cloud save statistics
+ *     description: Returns statistics about the user's cloud saves including total saves, size, and last sync time.
+ *     responses:
+ *       200:
+ *         description: Statistics retrieved successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get cloud save statistics for the current user
 router.get('/stats', async (req: Request, res: Response) => {
   try {
@@ -34,6 +57,28 @@ router.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/sync-history:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Get sync history
+ *     parameters:
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *     responses:
+ *       200:
+ *         description: Sync history retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get sync history for debugging
 router.get('/sync-history', async (req: Request, res: Response) => {
   try {
@@ -52,6 +97,22 @@ router.get('/sync-history', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/all:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: List all saves
+ *     description: Returns all cloud saves for the current user.
+ *     responses:
+ *       200:
+ *         description: Saves retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // List all saves for the current user
 router.get('/all', async (req: Request, res: Response) => {
   try {
@@ -76,6 +137,46 @@ router.get('/all', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/check-conflicts:
+ *   post:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Check for sync conflicts
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - localSaves
+ *             properties:
+ *               localSaves:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     gameId:
+ *                       type: string
+ *                     slotNumber:
+ *                       type: integer
+ *                     checksum:
+ *                       type: string
+ *                     updatedAt:
+ *                       type: string
+ *                       format: date-time
+ *     responses:
+ *       200:
+ *         description: Conflict check completed
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Check for sync conflicts
 router.post('/check-conflicts', async (req: Request, res: Response) => {
   try {
@@ -140,6 +241,27 @@ router.post('/check-conflicts', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/games/{gameId}:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: List game saves
+ *     parameters:
+ *       - name: gameId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Game saves retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // List saves for a specific game
 router.get('/games/:gameId', async (req: Request, res: Response) => {
   try {
@@ -166,6 +288,36 @@ router.get('/games/:gameId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/games/{gameId}/slots/{slotNumber}:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Get save slot
+ *     parameters:
+ *       - name: gameId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: slotNumber
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Save retrieved
+ *       400:
+ *         description: Invalid slot number
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get a specific save slot
 router.get('/games/:gameId/slots/:slotNumber', async (req: Request, res: Response) => {
   try {
@@ -198,6 +350,57 @@ router.get('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respons
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/games/{gameId}/slots/{slotNumber}:
+ *   post:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Upload save
+ *     parameters:
+ *       - name: gameId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: slotNumber
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - saveData
+ *             properties:
+ *               slotName:
+ *                 type: string
+ *               saveData:
+ *                 type: string
+ *               platformData:
+ *                 type: object
+ *               screenshotUrl:
+ *                 type: string
+ *               playTimeSeconds:
+ *                 type: integer
+ *               gameProgress:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Save uploaded
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       413:
+ *         description: Quota exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Upload/update a save
 router.post('/games/:gameId/slots/:slotNumber', async (req: Request, res: Response) => {
   try {
@@ -252,6 +455,36 @@ router.post('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respon
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/games/{gameId}/slots/{slotNumber}:
+ *   delete:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Delete save
+ *     parameters:
+ *       - name: gameId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: slotNumber
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Save deleted
+ *       400:
+ *         description: Invalid slot
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a save
 router.delete('/games/:gameId/slots/:slotNumber', async (req: Request, res: Response) => {
   try {
@@ -286,6 +519,29 @@ router.delete('/games/:gameId/slots/:slotNumber', async (req: Request, res: Resp
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/saves/{saveId}/versions:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Get save versions
+ *     parameters:
+ *       - name: saveId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Versions retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get save versions for recovery
 router.get('/saves/:saveId/versions', async (req: Request, res: Response) => {
   try {
@@ -317,6 +573,34 @@ router.get('/saves/:saveId/versions', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/saves/{saveId}/versions/{versionId}:
+ *   get:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Get version data
+ *     parameters:
+ *       - name: saveId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: versionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Version retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get a specific version's save data
 router.get('/saves/:saveId/versions/:versionId', async (req: Request, res: Response) => {
   try {
@@ -346,6 +630,34 @@ router.get('/saves/:saveId/versions/:versionId', async (req: Request, res: Respo
   }
 });
 
+/**
+ * @openapi
+ * /cloud-saves/saves/{saveId}/versions/{versionId}/restore:
+ *   post:
+ *     tags:
+ *       - CloudSaves
+ *     summary: Restore version
+ *     parameters:
+ *       - name: saveId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: versionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Version restored
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Restore a save from a previous version
 router.post('/saves/:saveId/versions/:versionId/restore', async (req: Request, res: Response) => {
   try {

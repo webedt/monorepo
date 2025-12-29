@@ -7,6 +7,241 @@ import { logger } from '@webedt/shared';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Workspace
+ *     description: Real-time collaboration presence and events
+ */
+
+/**
+ * @openapi
+ * /workspace/presence:
+ *   put:
+ *     tags:
+ *       - Workspace
+ *     summary: Update presence
+ *     description: Updates user presence on a branch. Rate limited to 60/min.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - owner
+ *               - repo
+ *               - branch
+ *             properties:
+ *               owner:
+ *                 type: string
+ *               repo:
+ *                 type: string
+ *               branch:
+ *                 type: string
+ *               page:
+ *                 type: string
+ *               cursorX:
+ *                 type: number
+ *               cursorY:
+ *                 type: number
+ *               selection:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Presence updated
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/presence/{owner}/{repo}/{branch}:
+ *   get:
+ *     tags:
+ *       - Workspace
+ *     summary: Get active users
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Active users retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   delete:
+ *     tags:
+ *       - Workspace
+ *     summary: Remove presence
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Presence removed
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/events:
+ *   post:
+ *     tags:
+ *       - Workspace
+ *     summary: Log workspace event
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - owner
+ *               - repo
+ *               - branch
+ *               - eventType
+ *             properties:
+ *               owner:
+ *                 type: string
+ *               repo:
+ *                 type: string
+ *               branch:
+ *                 type: string
+ *               eventType:
+ *                 type: string
+ *               page:
+ *                 type: string
+ *               path:
+ *                 type: string
+ *               payload:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Event logged
+ *       400:
+ *         description: Missing fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/events/{owner}/{repo}/{branch}:
+ *   get:
+ *     tags:
+ *       - Workspace
+ *     summary: Get recent events
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - name: since
+ *         in: query
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *     responses:
+ *       200:
+ *         description: Events retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/events/{owner}/{repo}/{branch}/stream:
+ *   get:
+ *     tags:
+ *       - Workspace
+ *     summary: SSE event stream
+ *     description: Real-time SSE stream of workspace events and presence.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+
 // All routes require authentication
 router.use(requireAuth);
 

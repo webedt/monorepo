@@ -42,6 +42,63 @@ const updateUserSchema = {
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Admin
+ *     description: Administrative operations (admin only)
+ */
+
+/**
+ * @openapi
+ * /admin/users:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: List all users
+ *     description: Returns a list of all users in the system. Admin access required.
+ *     responses:
+ *       200:
+ *         description: List of users retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       email:
+ *                         type: string
+ *                         format: email
+ *                       displayName:
+ *                         type: string
+ *                         nullable: true
+ *                       githubId:
+ *                         type: string
+ *                         nullable: true
+ *                       isAdmin:
+ *                         type: boolean
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // GET /api/admin/users - List all users
 router.get('/users', requireAdmin, async (req, res) => {
   try {
@@ -62,6 +119,46 @@ router.get('/users', requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get user details
+ *     description: Returns detailed information about a specific user. Admin access required.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/User'
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // GET /api/admin/users/:id - Get user details
 router.get('/users/:id', requireAdmin, async (req, res) => {
   try {
@@ -93,6 +190,83 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /admin/users:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Create a new user
+ *     description: Creates a new user account. Admin access required.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *                 description: Password (minimum 8 characters)
+ *               displayName:
+ *                 type: string
+ *                 description: User's display name
+ *               isAdmin:
+ *                 type: boolean
+ *                 default: false
+ *                 description: Whether the user is an admin
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     displayName:
+ *                       type: string
+ *                       nullable: true
+ *                     isAdmin:
+ *                       type: boolean
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: User with this email already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // POST /api/admin/users - Create a new user
 router.post('/users', requireAdmin, validateRequest(createUserSchema), async (req, res) => {
   try {
@@ -140,6 +314,84 @@ router.post('/users', requireAdmin, validateRequest(createUserSchema), async (re
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}:
+ *   patch:
+ *     tags:
+ *       - Admin
+ *     summary: Update user
+ *     description: Updates an existing user's information. Admin access required. Admins cannot remove their own admin status.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               displayName:
+ *                 type: string
+ *               isAdmin:
+ *                 type: boolean
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *     responses:
+ *       200:
+ *         description: User updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     displayName:
+ *                       type: string
+ *                       nullable: true
+ *                     isAdmin:
+ *                       type: boolean
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Cannot remove own admin status or no fields to update
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // PATCH /api/admin/users/:id - Update user
 router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), async (req, res) => {
   try {
@@ -210,6 +462,55 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}:
+ *   delete:
+ *     tags:
+ *       - Admin
+ *     summary: Delete user
+ *     description: Permanently deletes a user account. Admin access required. Admins cannot delete their own account.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Cannot delete own account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // DELETE /api/admin/users/:id - Delete user
 router.delete('/users/:id', requireAdmin, async (req, res) => {
   try {
@@ -236,6 +537,63 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}/impersonate:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Impersonate user
+ *     description: Start a session as another user. Admin access required. Cannot impersonate yourself.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID to impersonate
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Impersonation started successfully
+ *         headers:
+ *           Set-Cookie:
+ *             description: New session cookie for impersonated user
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Now impersonating user
+ *                     userId:
+ *                       type: string
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Cannot impersonate yourself
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // POST /api/admin/users/:id/impersonate - Impersonate user
 router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
   try {
@@ -275,6 +633,47 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /admin/stats:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get admin statistics
+ *     description: Returns platform-wide statistics including total users, admins, and active sessions. Admin access required.
+ *     responses:
+ *       200:
+ *         description: Statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalUsers:
+ *                       type: integer
+ *                       description: Total number of registered users
+ *                     totalAdmins:
+ *                       type: integer
+ *                       description: Total number of admin users
+ *                     activeSessions:
+ *                       type: integer
+ *                       description: Number of active login sessions
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // GET /api/admin/stats - Get admin statistics
 router.get('/stats', requireAdmin, async (req, res) => {
   try {

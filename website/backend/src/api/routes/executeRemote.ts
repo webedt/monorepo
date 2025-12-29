@@ -31,6 +31,13 @@ import {
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: ExecuteRemote
+ *     description: AI-powered code execution using Anthropic's Remote Sessions API
+ */
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -784,6 +791,79 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 // Routes
 // ============================================================================
 
+/**
+ * @openapi
+ * /execute-remote:
+ *   post:
+ *     tags:
+ *       - ExecuteRemote
+ *     summary: Execute AI code task
+ *     description: |
+ *       Starts a new AI-powered code execution session or resumes an existing one.
+ *       Returns Server-Sent Events (SSE) stream with real-time execution updates.
+ *       Rate limited to 10 requests per minute.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userRequest:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: object
+ *                 description: Task prompt (text or content blocks with images)
+ *               websiteSessionId:
+ *                 type: string
+ *                 description: Existing session ID to resume
+ *               github:
+ *                 type: object
+ *                 properties:
+ *                   repoUrl:
+ *                     type: string
+ *                     description: GitHub repository URL
+ *     responses:
+ *       200:
+ *         description: SSE stream of execution events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       400:
+ *         description: Missing required parameters
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   get:
+ *     tags:
+ *       - ExecuteRemote
+ *     summary: Execute AI code task (SSE reconnect)
+ *     description: Same as POST, supports SSE reconnection with query parameters.
+ *     parameters:
+ *       - name: websiteSessionId
+ *         in: query
+ *         schema:
+ *           type: string
+ *       - name: userRequest
+ *         in: query
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 // Main execute endpoint (POST for new requests, GET for SSE reconnect)
 // Rate limited to prevent abuse of expensive AI operations (10/min per user)
 router.post('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);

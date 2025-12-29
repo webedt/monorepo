@@ -3,6 +3,13 @@
  * Handles user settings and preferences
  */
 
+/**
+ * @openapi
+ * tags:
+ *   - name: User
+ *     description: User profile and settings management
+ */
+
 import { Router, Request, Response } from 'express';
 import { db, users, eq } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -13,7 +20,38 @@ import { encryptUserFields, decryptUserFields } from '@webedt/shared';
 
 const router = Router();
 
-// Update Claude authentication
+/**
+ * @openapi
+ * /api/user/claude-auth:
+ *   post:
+ *     tags: [User]
+ *     summary: Update Claude authentication credentials
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - accessToken
+ *               - refreshToken
+ *             properties:
+ *               accessToken:
+ *                 type: string
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Claude authentication updated successfully
+ *       400:
+ *         description: Invalid Claude auth credentials
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -50,7 +88,22 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
-// Remove Claude authentication
+/**
+ * @openapi
+ * /api/user/claude-auth:
+ *   delete:
+ *     tags: [User]
+ *     summary: Remove Claude authentication credentials
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Claude authentication removed successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/claude-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -70,7 +123,24 @@ router.delete('/claude-auth', requireAuth, async (req: Request, res: Response) =
   }
 });
 
-// Refresh Claude OAuth token and update in database
+/**
+ * @openapi
+ * /api/user/claude-auth/refresh:
+ *   post:
+ *     tags: [User]
+ *     summary: Refresh Claude OAuth token
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Token refresh status
+ *       400:
+ *         description: No Claude authentication found
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -142,8 +212,25 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
   }
 });
 
-// Get Claude credentials with auto-refresh (for autonomous workers)
-// This endpoint refreshes the token if needed and returns valid credentials
+/**
+ * @openapi
+ * /api/user/claude-auth/credentials:
+ *   get:
+ *     tags: [User]
+ *     summary: Get Claude credentials with auto-refresh
+ *     description: Returns valid Claude credentials, automatically refreshing if needed
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Claude credentials returned
+ *       400:
+ *         description: No Claude authentication found
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -207,7 +294,35 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
   }
 });
 
-// Update Codex authentication (OpenAI)
+/**
+ * @openapi
+ * /api/user/codex-auth:
+ *   post:
+ *     tags: [User]
+ *     summary: Update Codex (OpenAI) authentication credentials
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               apiKey:
+ *                 type: string
+ *               accessToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Codex authentication updated successfully
+ *       400:
+ *         description: Invalid Codex auth credentials
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -239,7 +354,22 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Remove Codex authentication
+/**
+ * @openapi
+ * /api/user/codex-auth:
+ *   delete:
+ *     tags: [User]
+ *     summary: Remove Codex authentication credentials
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Codex authentication removed successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -259,7 +389,43 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// Update Gemini authentication (OAuth only - from ~/.gemini/oauth_creds.json)
+/**
+ * @openapi
+ * /api/user/gemini-auth:
+ *   post:
+ *     tags: [User]
+ *     summary: Update Gemini OAuth authentication credentials
+ *     description: Accepts OAuth credentials from ~/.gemini/oauth_creds.json
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - accessToken
+ *               - refreshToken
+ *             properties:
+ *               accessToken:
+ *                 type: string
+ *               refreshToken:
+ *                 type: string
+ *               expiresAt:
+ *                 type: number
+ *               tokenType:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Gemini authentication updated successfully
+ *       400:
+ *         description: Invalid Gemini auth credentials
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -305,7 +471,22 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
-// Remove Gemini authentication
+/**
+ * @openapi
+ * /api/user/gemini-auth:
+ *   delete:
+ *     tags: [User]
+ *     summary: Remove Gemini authentication credentials
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Gemini authentication removed successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -325,7 +506,36 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
   }
 });
 
-// Update preferred AI provider
+/**
+ * @openapi
+ * /api/user/preferred-provider:
+ *   post:
+ *     tags: [User]
+ *     summary: Update preferred AI provider
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider
+ *             properties:
+ *               provider:
+ *                 type: string
+ *                 enum: [claude, codex, copilot, gemini]
+ *     responses:
+ *       200:
+ *         description: Preferred provider updated successfully
+ *       400:
+ *         description: Invalid provider value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/preferred-provider', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -356,7 +566,36 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
   }
 });
 
-// Update image resize max dimension
+/**
+ * @openapi
+ * /api/user/image-resize-setting:
+ *   post:
+ *     tags: [User]
+ *     summary: Update image resize maximum dimension
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - maxDimension
+ *             properties:
+ *               maxDimension:
+ *                 type: number
+ *                 enum: [512, 1024, 2048, 4096, 8000]
+ *     responses:
+ *       200:
+ *         description: Image resize setting updated successfully
+ *       400:
+ *         description: Invalid max dimension value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/image-resize-setting', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -387,7 +626,36 @@ router.post('/image-resize-setting', requireAuth, async (req: Request, res: Resp
   }
 });
 
-// Update display name
+/**
+ * @openapi
+ * /api/user/display-name:
+ *   post:
+ *     tags: [User]
+ *     summary: Update user display name
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - displayName
+ *             properties:
+ *               displayName:
+ *                 type: string
+ *                 maxLength: 100
+ *     responses:
+ *       200:
+ *         description: Display name updated successfully
+ *       400:
+ *         description: Invalid display name
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/display-name', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -430,7 +698,38 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// Update voice command keywords
+/**
+ * @openapi
+ * /api/user/voice-command-keywords:
+ *   post:
+ *     tags: [User]
+ *     summary: Update voice command keywords
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - keywords
+ *             properties:
+ *               keywords:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 maxItems: 20
+ *     responses:
+ *       200:
+ *         description: Voice command keywords updated successfully
+ *       400:
+ *         description: Invalid keywords array
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -477,7 +776,35 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
   }
 });
 
-// Update stop listening after submit preference
+/**
+ * @openapi
+ * /api/user/stop-listening-after-submit:
+ *   post:
+ *     tags: [User]
+ *     summary: Update stop listening after submit preference
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - stopAfterSubmit
+ *             properties:
+ *               stopAfterSubmit:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Preference updated successfully
+ *       400:
+ *         description: Invalid value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/stop-listening-after-submit', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -507,7 +834,36 @@ router.post('/stop-listening-after-submit', requireAuth, async (req: Request, re
   }
 });
 
-// Update default landing page
+/**
+ * @openapi
+ * /api/user/default-landing-page:
+ *   post:
+ *     tags: [User]
+ *     summary: Update default landing page
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - landingPage
+ *             properties:
+ *               landingPage:
+ *                 type: string
+ *                 enum: [store, library, community, sessions]
+ *     responses:
+ *       200:
+ *         description: Default landing page updated successfully
+ *       400:
+ *         description: Invalid landing page value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/default-landing-page', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -538,7 +894,36 @@ router.post('/default-landing-page', requireAuth, async (req: Request, res: Resp
   }
 });
 
-// Update preferred model
+/**
+ * @openapi
+ * /api/user/preferred-model:
+ *   post:
+ *     tags: [User]
+ *     summary: Update preferred Claude model
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - preferredModel
+ *             properties:
+ *               preferredModel:
+ *                 type: string
+ *                 enum: ['', opus, sonnet]
+ *     responses:
+ *       200:
+ *         description: Preferred model updated successfully
+ *       400:
+ *         description: Invalid model value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/preferred-model', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -572,7 +957,36 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
   }
 });
 
-// Update chat verbosity level
+/**
+ * @openapi
+ * /api/user/chat-verbosity:
+ *   post:
+ *     tags: [User]
+ *     summary: Update chat verbosity level
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - verbosityLevel
+ *             properties:
+ *               verbosityLevel:
+ *                 type: string
+ *                 enum: [minimal, normal, verbose]
+ *     responses:
+ *       200:
+ *         description: Chat verbosity level updated successfully
+ *       400:
+ *         description: Invalid verbosity level
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -603,7 +1017,36 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-// Update OpenRouter API key (for autocomplete)
+/**
+ * @openapi
+ * /api/user/openrouter-api-key:
+ *   post:
+ *     tags: [User]
+ *     summary: Update OpenRouter API key
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - apiKey
+ *             properties:
+ *               apiKey:
+ *                 type: string
+ *                 pattern: ^sk-or-
+ *     responses:
+ *       200:
+ *         description: OpenRouter API key updated successfully
+ *       400:
+ *         description: Invalid API key format
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -643,7 +1086,22 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
   }
 });
 
-// Remove OpenRouter API key
+/**
+ * @openapi
+ * /api/user/openrouter-api-key:
+ *   delete:
+ *     tags: [User]
+ *     summary: Remove OpenRouter API key
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: OpenRouter API key removed successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -663,7 +1121,36 @@ router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Resp
   }
 });
 
-// Update autocomplete settings
+/**
+ * @openapi
+ * /api/user/autocomplete-settings:
+ *   post:
+ *     tags: [User]
+ *     summary: Update autocomplete settings
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               enabled:
+ *                 type: boolean
+ *               model:
+ *                 type: string
+ *                 enum: [openai/gpt-oss-120b:cerebras, openai/gpt-oss-120b, deepseek/deepseek-coder, anthropic/claude-3-haiku]
+ *     responses:
+ *       200:
+ *         description: Autocomplete settings updated successfully
+ *       400:
+ *         description: Invalid settings
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -716,7 +1203,42 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
   }
 });
 
-// Update image AI API keys
+/**
+ * @openapi
+ * /api/user/image-ai-keys:
+ *   post:
+ *     tags: [User]
+ *     summary: Update image AI API keys
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - imageAiKeys
+ *             properties:
+ *               imageAiKeys:
+ *                 type: object
+ *                 properties:
+ *                   openrouter:
+ *                     type: string
+ *                   cometapi:
+ *                     type: string
+ *                   google:
+ *                     type: string
+ *     responses:
+ *       200:
+ *         description: Image AI keys updated successfully
+ *       400:
+ *         description: Invalid keys object
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -757,7 +1279,36 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
   }
 });
 
-// Update image AI provider preference
+/**
+ * @openapi
+ * /api/user/image-ai-provider:
+ *   post:
+ *     tags: [User]
+ *     summary: Update image AI provider preference
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider
+ *             properties:
+ *               provider:
+ *                 type: string
+ *                 enum: [openrouter, cometapi, google]
+ *     responses:
+ *       200:
+ *         description: Image AI provider updated successfully
+ *       400:
+ *         description: Invalid provider value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/image-ai-provider', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -787,7 +1338,36 @@ router.post('/image-ai-provider', requireAuth, async (req: Request, res: Respons
   }
 });
 
-// Update image AI model preference
+/**
+ * @openapi
+ * /api/user/image-ai-model:
+ *   post:
+ *     tags: [User]
+ *     summary: Update image AI model preference
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - model
+ *             properties:
+ *               model:
+ *                 type: string
+ *                 enum: [google/gemini-2.5-flash-image, google/gemini-3-pro-image-preview]
+ *     responses:
+ *       200:
+ *         description: Image AI model updated successfully
+ *       400:
+ *         description: Invalid model value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -817,7 +1397,24 @@ router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-// Get spending limits configuration
+/**
+ * @openapi
+ * /api/user/spending-limits:
+ *   get:
+ *     tags: [User]
+ *     summary: Get spending limits configuration
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Spending limits configuration returned
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/spending-limits', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -867,7 +1464,44 @@ router.get('/spending-limits', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-// Update spending limits configuration
+/**
+ * @openapi
+ * /api/user/spending-limits:
+ *   post:
+ *     tags: [User]
+ *     summary: Update spending limits configuration
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               enabled:
+ *                 type: boolean
+ *               monthlyBudgetCents:
+ *                 type: string
+ *               perTransactionLimitCents:
+ *                 type: string
+ *               resetDay:
+ *                 type: number
+ *                 minimum: 1
+ *                 maximum: 31
+ *               limitAction:
+ *                 type: string
+ *                 enum: [warn, block]
+ *     responses:
+ *       200:
+ *         description: Spending limits updated successfully
+ *       400:
+ *         description: Invalid settings
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/spending-limits', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -961,7 +1595,22 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
   }
 });
 
-// Reset current month spending (admin or scheduled job)
+/**
+ * @openapi
+ * /api/user/spending-limits/reset:
+ *   post:
+ *     tags: [User]
+ *     summary: Reset current month spending
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Monthly spending reset successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/spending-limits/reset', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;

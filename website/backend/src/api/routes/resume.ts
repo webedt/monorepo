@@ -20,6 +20,44 @@ import { v4 as uuidv4 } from 'uuid';
 const router = Router();
 
 /**
+ * @openapi
+ * tags:
+ *   - name: Resume
+ *     description: Session event replay and live streaming (deprecated - use Sessions API)
+ */
+
+/**
+ * @openapi
+ * /resume/resume/{sessionId}:
+ *   get:
+ *     tags:
+ *       - Resume
+ *     summary: Replay session events (deprecated)
+ *     description: |
+ *       DEPRECATED: Use GET /api/sessions/:id/events/stream instead.
+ *       Replays stored events and subscribes to live events for running sessions.
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream of session events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
  * GET /resume/:sessionId
  *
  * DEPRECATED: Use GET /api/sessions/:id/events/stream instead
@@ -321,9 +359,48 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
 });
 
 /**
- * GET /sessions/:sessionId/events
- *
- * Get all stored events for a session (non-SSE, JSON response)
+ * @openapi
+ * /resume/sessions/{sessionId}/events:
+ *   get:
+ *     tags:
+ *       - Resume
+ *     summary: Get session events
+ *     description: Returns all stored events for a session as JSON (non-SSE).
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Events retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     events:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     sessionId:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
