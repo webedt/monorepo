@@ -23,34 +23,25 @@ import {
   sql,
   ilike,
   or,
+  logger,
+  isValidHexColor,
+  isValidLanguage,
+  isValidCategory,
 } from '@webedt/shared';
+import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
+import { isDatabaseError, isUniqueConstraintError } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 // Validation constants
-const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
 const MAX_TITLE_LENGTH = 100;
 const MAX_DESCRIPTION_LENGTH = 500;
 const MAX_CODE_LENGTH = 50000;
 const MAX_TAGS = 10;
 const MAX_TAG_LENGTH = 30;
-
-// Validation helpers
-function isValidHexColor(color: unknown): color is string {
-  return typeof color === 'string' && HEX_COLOR_REGEX.test(color);
-}
-
-function isValidLanguage(lang: unknown): lang is string {
-  return typeof lang === 'string' && SNIPPET_LANGUAGES.includes(lang as any);
-}
-
-function isValidCategory(cat: unknown): cat is string {
-  return typeof cat === 'string' && SNIPPET_CATEGORIES.includes(cat as any);
-}
 
 function validateTags(tags: unknown): string[] {
   if (!Array.isArray(tags)) return [];
@@ -481,7 +472,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     logger.error('Create snippet error', error as Error, { component: 'Snippets' });
 
     // Check for unique constraint violation
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A snippet with this title already exists' });
       return;
     }
@@ -622,7 +613,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Update snippet error', error as Error, { component: 'Snippets' });
 
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A snippet with this title already exists' });
       return;
     }
@@ -1035,7 +1026,7 @@ router.post('/collections', requireAuth, async (req: Request, res: Response) => 
   } catch (error) {
     logger.error('Create snippet collection error', error as Error, { component: 'Snippets' });
 
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A collection with this name already exists' });
       return;
     }
@@ -1141,7 +1132,7 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
   } catch (error) {
     logger.error('Update snippet collection error', error as Error, { component: 'Snippets' });
 
-    if ((error as any)?.code === '23505') {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'A collection with this name already exists' });
       return;
     }

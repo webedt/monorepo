@@ -380,7 +380,7 @@ webCommand
         },
         (event) => {
           eventCount++;
-          verboseLog(`Event #${eventCount}:`, event.type, event.type === 'tool_use' ? `(${(event as any).name})` : '');
+          verboseLog(`Event #${eventCount}:`, event.type, event.type === 'tool_use' && event.name ? `(${event.name})` : '');
 
           if (options.jsonl) {
             console.log(JSON.stringify(event));
@@ -424,10 +424,10 @@ webCommand
 
       // Verbose summary
       verboseLog('\n[VERBOSE] Execution Summary:');
-      verboseLog('  Input tokens:', (result as any).inputTokens || 'N/A');
-      verboseLog('  Output tokens:', (result as any).outputTokens || 'N/A');
+      verboseLog('  Input tokens:', result.inputTokens ?? 'N/A');
+      verboseLog('  Output tokens:', result.outputTokens ?? 'N/A');
       verboseLog('  Total events:', eventCount);
-      verboseLog('  Session created at:', (result as any).createdAt || 'N/A');
+      verboseLog('  Session created at:', result.createdAt ?? 'N/A');
     } catch (error) {
       verboseError('Execution failed:', error);
       handleCommandError(error, 'executing session', { json: options.json });

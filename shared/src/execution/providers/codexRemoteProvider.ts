@@ -6,57 +6,21 @@
  */
 
 import { CodexClient } from '../../codex/codexClient.js';
-import { logger } from '../../utils/logging/logger.js';
 import type { CodexAuth } from '../../auth/codexAuth.js';
 import { CODEX_API_BASE_URL, CODEX_DEFAULT_MODEL } from '../../config/env.js';
-import type {
-  ExecutionProvider,
-  ExecuteParams,
-  ResumeParams,
-  ExecutionResult,
-  ExecutionEventCallback,
-  ExecutionEvent,
-  ContentBlock,
+import {
+  AExecutionProvider,
+  type ExecuteParams,
+  type ResumeParams,
+  type ExecutionResult,
+  type ExecutionEventCallback,
+  type ExecutionEvent,
+  type ContentBlock,
+  type ProviderCapabilities,
 } from './types.js';
 import type { CodexEvent } from '../../codex/types.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 
-/**
- * Extract text from prompt (handles both string and content blocks)
- */
-function extractTextFromPrompt(prompt: string | ContentBlock[]): string {
-  if (typeof prompt === 'string') {
-    return prompt;
-  }
-  return prompt
-    .filter((block): block is { type: 'text'; text: string } => block.type === 'text' && 'text' in block)
-    .map(block => block.text)
-    .join('\n');
-}
-
-/**
- * Generate a simple title from the prompt
- */
-function generateTitle(prompt: string | ContentBlock[]): string {
-  const text = extractTextFromPrompt(prompt);
-  const title = text.slice(0, 50).replace(/\n/g, ' ').trim();
-  return title.length < text.length ? title + '...' : title;
-}
-
-/**
- * Generate branch prefix from the prompt
- */
-function generateBranchPrefix(prompt: string | ContentBlock[]): string {
-  const text = extractTextFromPrompt(prompt);
-  const words = text.slice(0, 40)
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .trim()
-    .split(/\s+/)
-    .slice(0, 4)
-    .join('-');
-  return `codex/${words || 'session'}`;
-}
 
 /**
  * Convert Codex events to ExecutionEvents
@@ -154,13 +118,46 @@ export interface CodexResumeParams extends Omit<ResumeParams, 'claudeAuth'> {
 /**
  * Codex Remote Provider
  */
-export class CodexRemoteProvider implements ExecutionProvider {
+export class CodexRemoteProvider extends AExecutionProvider {
   readonly name = 'codex';
+
+  readonly capabilities: ProviderCapabilities = {
+    supportsResume: true,
+    supportsImages: false,
+    supportsInterrupt: true,
+    generatesTitle: true,
+    hasPersistentSessions: true,
+  };
 
   private client: CodexClient;
 
   constructor() {
+    super();
     this.client = new CodexClient();
+  }
+
+  /**
+   * Generate a simple title from the prompt
+   */
+  private generateLocalTitle(prompt: string | ContentBlock[]): string {
+    const text = this.extractTextFromPrompt(prompt);
+    const title = text.slice(0, 50).replace(/\n/g, ' ').trim();
+    return title.length < text.length ? title + '...' : title;
+  }
+
+  /**
+   * Generate branch prefix from the prompt
+   */
+  private generateLocalBranchPrefix(prompt: string | ContentBlock[]): string {
+    const text = this.extractTextFromPrompt(prompt);
+    const words = text.slice(0, 40)
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 4)
+      .join('-');
+    return `codex/${words || 'session'}`;
   }
 
   /**
@@ -194,8 +191,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
       throw new Error('No authentication credentials provided');
     }
 
-    logger.info('Starting Codex execution', {
-      component: 'CodexRemoteProvider',
+    this.logExecution('info', 'Starting Codex execution', {
       chatSessionId,
       gitUrl,
       model: model || CODEX_DEFAULT_MODEL,
@@ -203,13 +199,13 @@ export class CodexRemoteProvider implements ExecutionProvider {
 
     this.configureClient(codexAuth);
 
-    const title = generateTitle(prompt);
-    const branchPrefix = generateBranchPrefix(prompt);
+    const title = this.generateLocalTitle(prompt);
+    const branchPrefix = this.generateLocalBranchPrefix(prompt);
 
     // Emit title generation event (local generation only for Codex)
     await onEvent({
       type: 'title_generation',
-      timestamp: new Date().toISOString(),
+      timestamp: this.createTimestamp(),
       source,
       method: 'local',
       status: 'success',
@@ -221,7 +217,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
       // Execute via Codex client
       const result = await this.client.execute(
         {
-          prompt: typeof prompt === 'string' ? prompt : extractTextFromPrompt(prompt),
+          prompt: this.extractTextFromPrompt(prompt),
           gitUrl,
           model: model || CODEX_DEFAULT_MODEL,
           title,
@@ -234,8 +230,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
         { abortSignal }
       );
 
-      logger.info('Codex execution completed', {
-        component: 'CodexRemoteProvider',
+      this.logExecution('info', 'Codex execution completed', {
         chatSessionId,
         sessionId: result.sessionId,
         status: result.status,
@@ -253,19 +248,12 @@ export class CodexRemoteProvider implements ExecutionProvider {
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Codex execution failed', error, {
-        component: 'CodexRemoteProvider',
+      this.logExecution('error', 'Codex execution failed', {
+        error,
         chatSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -290,8 +278,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
       throw new Error('No authentication credentials provided');
     }
 
-    logger.info('Resuming Codex session', {
-      component: 'CodexRemoteProvider',
+    this.logExecution('info', 'Resuming Codex session', {
       chatSessionId,
       remoteSessionId,
     });
@@ -301,7 +288,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
     try {
       const result = await this.client.resume(
         remoteSessionId,
-        typeof prompt === 'string' ? prompt : extractTextFromPrompt(prompt),
+        this.extractTextFromPrompt(prompt),
         async (codexEvent: CodexEvent) => {
           const executionEvent = convertCodexEvent(codexEvent, source);
           await onEvent(executionEvent);
@@ -309,8 +296,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
         { abortSignal }
       );
 
-      logger.info('Codex resume completed', {
-        component: 'CodexRemoteProvider',
+      this.logExecution('info', 'Codex resume completed', {
         chatSessionId,
         remoteSessionId,
         status: result.status,
@@ -325,20 +311,13 @@ export class CodexRemoteProvider implements ExecutionProvider {
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Codex resume failed', error, {
-        component: 'CodexRemoteProvider',
+      this.logExecution('error', 'Codex resume failed', {
+        error,
         chatSessionId,
         remoteSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -347,8 +326,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
    * Interrupt a running session
    */
   async interrupt(remoteSessionId: string, claudeAuth: ClaudeAuth): Promise<void> {
-    logger.info('Interrupting Codex session', {
-      component: 'CodexRemoteProvider',
+    this.logExecution('info', 'Interrupting Codex session', {
       remoteSessionId,
     });
 
@@ -357,8 +335,7 @@ export class CodexRemoteProvider implements ExecutionProvider {
 
     await this.client.cancelSession(remoteSessionId);
 
-    logger.info('Codex session interrupted', {
-      component: 'CodexRemoteProvider',
+    this.logExecution('info', 'Codex session interrupted', {
       remoteSessionId,
     });
   }

@@ -6,9 +6,12 @@
 import { Page } from '../base/Page';
 import { snippetsStore } from '../../stores/snippetsStore';
 import { toast } from '../../components';
-import type { Snippet, SnippetLanguage, SnippetCategory } from '../../types';
+import type { Snippet, SnippetLanguage, SnippetCategory, SnippetListFilters } from '../../types';
 import { SNIPPET_LANGUAGES, SNIPPET_CATEGORIES } from '../../types';
 import './snippets.css';
+
+// Type for valid sort options
+type SnippetSortBy = NonNullable<SnippetListFilters['sortBy']>;
 
 export class SnippetsPage extends Page {
   readonly route = '/snippets';
@@ -531,8 +534,8 @@ export class SnippetsPage extends Page {
     });
 
     this.on('#sort-filter', 'change', (e) => {
-      const value = (e.target as HTMLSelectElement).value;
-      snippetsStore.setFilters({ sortBy: value as any });
+      const value = (e.target as HTMLSelectElement).value as SnippetSortBy;
+      snippetsStore.setFilters({ sortBy: value });
       this.refresh();
     });
 

@@ -10,20 +10,19 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { GeminiClient } from '../../gemini/index.js';
-import { logger } from '../../utils/logging/logger.js';
 import { GEMINI_API_BASE_URL, GEMINI_DEFAULT_MODEL } from '../../config/env.js';
 
 import type { GeminiAuth } from '../../auth/lucia.js';
 import type { GeminiSessionEvent } from '../../gemini/types.js';
 import type { Content } from '../../gemini/types.js';
-import type {
-  ExecutionProvider,
-  ExecuteParams,
-  ResumeParams,
-  ExecutionResult,
-  ExecutionEventCallback,
-  ExecutionEvent,
-  ContentBlock,
+import {
+  AExecutionProvider,
+  type ExecuteParams,
+  type ResumeParams,
+  type ExecutionResult,
+  type ExecutionEventCallback,
+  type ExecutionEvent,
+  type ProviderCapabilities,
 } from './types.js';
 
 /**
@@ -32,19 +31,6 @@ import type {
 export interface GeminiResumeParams extends ResumeParams {
   /** Conversation history for context (Gemini doesn't have persistent sessions) */
   history?: Content[];
-}
-
-/**
- * Extract text from prompt (handles both string and content blocks)
- */
-function extractTextFromPrompt(prompt: string | ContentBlock[]): string {
-  if (typeof prompt === 'string') {
-    return prompt;
-  }
-  return prompt
-    .filter((block): block is { type: 'text'; text: string } => block.type === 'text' && 'text' in block)
-    .map(block => block.text)
-    .join('\n');
 }
 
 /**
@@ -96,8 +82,16 @@ Be concise but thorough. Focus on providing actionable solutions.`;
 /**
  * Gemini Provider
  */
-export class GeminiProvider implements ExecutionProvider {
+export class GeminiProvider extends AExecutionProvider {
   readonly name = 'gemini';
+
+  readonly capabilities: ProviderCapabilities = {
+    supportsResume: true,
+    supportsImages: true,
+    supportsInterrupt: false,
+    generatesTitle: false,
+    hasPersistentSessions: false,
+  };
 
   /**
    * Get and configure a GeminiClient with the given auth
@@ -126,26 +120,20 @@ export class GeminiProvider implements ExecutionProvider {
       throw new Error('Gemini authentication required for GeminiProvider');
     }
 
-    logger.info('Starting Gemini execution', {
-      component: 'GeminiProvider',
+    this.logExecution('info', 'Starting Gemini execution', {
       chatSessionId,
       model: model || GEMINI_DEFAULT_MODEL,
     });
 
     const client = this.getClient(geminiAuth);
-    const textPrompt = extractTextFromPrompt(prompt);
+    const textPrompt = this.extractTextFromPrompt(prompt);
 
     // Generate a session ID for tracking
     const sessionId = `gemini_${uuidv4()}`;
     const startTime = Date.now();
 
     // Emit session created event
-    await onEvent({
-      type: 'session_created',
-      timestamp: new Date().toISOString(),
-      source,
-      remoteSessionId: sessionId,
-    });
+    await this.emitSessionCreatedEvent(onEvent, sessionId);
 
     try {
       // Generate content with streaming
@@ -162,8 +150,7 @@ export class GeminiProvider implements ExecutionProvider {
         { abortSignal }
       );
 
-      logger.info('Gemini execution completed', {
-        component: 'GeminiProvider',
+      this.logExecution('info', 'Gemini execution completed', {
         chatSessionId,
         sessionId,
         status: result.status,
@@ -179,19 +166,12 @@ export class GeminiProvider implements ExecutionProvider {
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Gemini execution failed', error, {
-        component: 'GeminiProvider',
+      this.logExecution('error', 'Gemini execution failed', {
+        error,
         chatSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -215,15 +195,14 @@ export class GeminiProvider implements ExecutionProvider {
       throw new Error('Gemini authentication required for GeminiProvider');
     }
 
-    logger.info('Resuming Gemini session', {
-      component: 'GeminiProvider',
+    this.logExecution('info', 'Resuming Gemini session', {
       chatSessionId,
       remoteSessionId,
       historyLength: history.length,
     });
 
     const client = this.getClient(geminiAuth);
-    const textPrompt = extractTextFromPrompt(prompt);
+    const textPrompt = this.extractTextFromPrompt(prompt);
     const startTime = Date.now();
 
     try {
@@ -241,8 +220,7 @@ export class GeminiProvider implements ExecutionProvider {
         { abortSignal }
       );
 
-      logger.info('Gemini resume completed', {
-        component: 'GeminiProvider',
+      this.logExecution('info', 'Gemini resume completed', {
         chatSessionId,
         remoteSessionId,
         status: result.status,
@@ -255,20 +233,13 @@ export class GeminiProvider implements ExecutionProvider {
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Gemini resume failed', error, {
-        component: 'GeminiProvider',
+      this.logExecution('error', 'Gemini resume failed', {
+        error,
         chatSessionId,
         remoteSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -280,8 +251,7 @@ export class GeminiProvider implements ExecutionProvider {
    * This method is a no-op since Gemini doesn't have remote sessions to interrupt.
    */
   async interrupt(remoteSessionId: string): Promise<void> {
-    logger.info('Gemini interrupt requested (no-op - use AbortSignal instead)', {
-      component: 'GeminiProvider',
+    this.logExecution('info', 'Gemini interrupt requested (no-op - use AbortSignal instead)', {
       remoteSessionId,
     });
     // Gemini interruption is handled via AbortSignal in the execute/resume methods
