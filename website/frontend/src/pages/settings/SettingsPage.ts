@@ -667,10 +667,20 @@ export class SettingsPage extends Page<PageOptions> {
 
     try {
       const parsed = JSON.parse(authJson);
-      await userApi.updateGeminiAuth(parsed);
+
+      // Transform snake_case keys from ~/.gemini/oauth_creds.json to camelCase
+      const geminiAuth: GeminiAuth = {
+        accessToken: parsed.access_token || parsed.accessToken,
+        refreshToken: parsed.refresh_token || parsed.refreshToken,
+        expiresAt: parsed.expiry_date || parsed.expiresAt,
+        tokenType: parsed.token_type || parsed.tokenType,
+        scope: parsed.scope,
+      };
+
+      await userApi.updateGeminiAuth(geminiAuth);
 
       // Update local user state
-      authStore.updateUser({ geminiAuth: parsed as GeminiAuth });
+      authStore.updateUser({ geminiAuth });
       toast.success('Gemini authentication saved');
       this.update({});
     } catch (error) {
