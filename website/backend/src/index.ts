@@ -33,9 +33,9 @@ import { waitForDatabase } from '@webedt/shared';
 import executeRemoteRoutes from './api/routes/executeRemote.js';
 import resumeRoutes from './api/routes/resume.js';
 import authRoutes from './api/routes/auth.js';
-import userRoutes from './api/routes/user.js';
-import sessionsRoutes from './api/routes/sessions.js';
-import githubRoutes from './api/routes/github.js';
+import userRoutes from './api/routes/user/index.js';
+import sessionsRoutes from './api/routes/sessions/index.js';
+import githubRoutes from './api/routes/github/index.js';
 import adminRoutes from './api/routes/admin.js';
 import transcribeRoutes from './api/routes/transcribe.js';
 import imageGenRoutes from './api/routes/imageGen.js';
@@ -77,7 +77,7 @@ import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/
 import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
 
 // Import graceful shutdown
-import { registerShutdownHandlers, GracefulShutdownConfig } from './gracefulShutdown.js';
+import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -610,10 +610,11 @@ async function startServer() {
   // Run initial cleanup on startup
   cleanupOrphanedSessions();
 
-  // Schedule periodic cleanup
-  setInterval(() => {
+  // Schedule periodic cleanup and track the interval for graceful shutdown
+  const orphanCleanupInterval = setInterval(() => {
     cleanupOrphanedSessions();
   }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+  setOrphanCleanupInterval(orphanCleanupInterval);
 
   // Start Claude session background sync
   if (CLAUDE_SYNC_ENABLED) {

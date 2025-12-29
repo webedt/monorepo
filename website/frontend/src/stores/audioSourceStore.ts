@@ -3,7 +3,12 @@
  * Manages audio source settings and provides a reactive interface for sound generation
  */
 
+import { z } from 'zod';
+
 import { AudioSource, AUDIO_PRESETS } from '../lib/audio';
+import { STORE_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
+
 import type { WaveformType, EnvelopeConfig, AudioSourcePreset } from '../lib/audio';
 
 export interface AudioSourceSettings {
@@ -17,7 +22,26 @@ export interface AudioSourceSettings {
 
 type AudioSourceListener = (settings: AudioSourceSettings) => void;
 
-const STORAGE_KEY = 'webedt_audio_source_settings';
+const EnvelopeConfigSchema = z.object({
+  attack: z.number().min(0).default(0.01),
+  decay: z.number().min(0).default(0.1),
+  sustain: z.number().min(0).max(1).default(0.7),
+  release: z.number().min(0).default(0.2),
+});
+
+const AudioSourceSettingsSchema = z.object({
+  waveform: z.enum(['sine', 'square', 'sawtooth', 'triangle']).default('sine'),
+  frequency: z.number().min(20).max(20000).default(440),
+  volume: z.number().min(0).max(1).default(0.5),
+  detune: z.number().min(-1200).max(1200).default(0),
+  envelope: EnvelopeConfigSchema.default({
+    attack: 0.01,
+    decay: 0.1,
+    sustain: 0.7,
+    release: 0.2,
+  }),
+  presetName: z.string().default('Default'),
+});
 
 const DEFAULT_SETTINGS: AudioSourceSettings = {
   waveform: 'sine',
@@ -33,6 +57,13 @@ const DEFAULT_SETTINGS: AudioSourceSettings = {
   presetName: 'Default',
 };
 
+const audioSourceStorage = new TypedStorage({
+  key: STORE_KEYS.AUDIO_SOURCE,
+  schema: AudioSourceSettingsSchema,
+  defaultValue: DEFAULT_SETTINGS,
+  version: 1,
+});
+
 class AudioSourceStore {
   private settings: AudioSourceSettings;
   private listeners: Set<AudioSourceListener> = new Set();
@@ -40,28 +71,11 @@ class AudioSourceStore {
   private audioContext: AudioContext | null = null;
 
   constructor() {
-    this.settings = this.loadFromStorage();
-  }
-
-  private loadFromStorage(): AudioSourceSettings {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return { ...DEFAULT_SETTINGS, ...parsed };
-      }
-    } catch (error) {
-      console.error('Failed to load audio source settings:', error);
-    }
-    return { ...DEFAULT_SETTINGS };
+    this.settings = audioSourceStorage.get();
   }
 
   private saveToStorage(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
-    } catch (error) {
-      console.error('Failed to save audio source settings:', error);
-    }
+    audioSourceStorage.set(this.settings);
   }
 
   private notifyListeners(): void {

@@ -21,6 +21,7 @@ import {
   type ConnectionStats,
   type DatabaseHealthCheckResult,
 } from './connection.js';
+import { TIMEOUTS, LIMITS, RETRY, CONTEXT_RETRY } from '../config/constants.js';
 import {
   runMigrations,
   validateSchema,
@@ -77,9 +78,9 @@ function ensurePool(): pg.Pool {
 
     _pool = new Pool({
       connectionString: DATABASE_URL,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      max: LIMITS.DATABASE.MAX_CONNECTIONS,
+      idleTimeoutMillis: TIMEOUTS.DATABASE.IDLE,
+      connectionTimeoutMillis: TIMEOUTS.DATABASE.CONNECTION,
       ssl: DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
     });
   }
@@ -302,11 +303,11 @@ async function doInitialize(): Promise<void> {
 
     // Set up connection manager for health checks
     connectionManager = createConnection(DATABASE_URL!, {
-      maxConnections: 1,
+      maxConnections: 1,  // Health checks only need 1 connection
       minConnections: 0,
-      maxRetries: 3,
-      baseRetryDelayMs: 1000,
-      maxRetryDelayMs: 10000,
+      maxRetries: RETRY.DEFAULT.MAX_ATTEMPTS,
+      baseRetryDelayMs: RETRY.DEFAULT.BASE_DELAY_MS,
+      maxRetryDelayMs: CONTEXT_RETRY.DB_HEALTH_CHECK.MAX_DELAY_MS,
     });
 
     console.log('');
@@ -371,7 +372,7 @@ export function getConnectionStats(): ConnectionStats | null {
     totalCount: _pool.totalCount,
     idleCount: _pool.idleCount,
     waitingCount: _pool.waitingCount,
-    maxConnections: 20,
+    maxConnections: LIMITS.DATABASE.MAX_CONNECTIONS,
     healthy: true,
     lastHealthCheck: null,
     consecutiveFailures: 0,
@@ -649,3 +650,17 @@ export {
   between,
   exists,
 } from 'drizzle-orm';
+
+// Re-export encrypted column types for schema definition
+export {
+  encryptedText,
+  encryptedJsonColumn,
+} from './encryptedColumns.js';
+
+// Re-export auth data types (canonical definitions from authTypes.ts)
+export type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from './authTypes.js';
