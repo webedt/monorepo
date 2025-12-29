@@ -193,3 +193,15 @@ export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
 // SceneTabs
 export { SceneTabs } from './scene-tabs';
 export type { SceneTabsOptions } from './scene-tabs';
+
+// MidiImportDialog
+export { MidiImportDialog } from './midi-import-dialog';
+export type { MidiImportDialogOptions } from './midi-import-dialog';
+
+// MidiPlayer
+export { MidiPlayer } from './midi-player';
+export type { MidiPlayerOptions } from './midi-player';
+
+// MidiPianoRoll
+export { MidiPianoRoll } from './midi-piano-roll';
+export type { MidiPianoRollOptions } from './midi-piano-roll';
