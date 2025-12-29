@@ -11,12 +11,20 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events, eq, and, or, asc, gt } from '@webedt/shared';
+import { db, chatSessions, events, eq, and, or, asc, gt, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { sseRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+
+/**
+ * Create an SSEWriter for a response with automatic heartbeat management.
+ */
+function createSSEWriter(res: Response): SSEWriter {
+  const sseHelper = ServiceProvider.get(ASseHelper);
+  return SSEWriter.create(res, sseHelper);
+}
 
 const router = Router();
 

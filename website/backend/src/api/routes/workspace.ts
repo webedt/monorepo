@@ -1,9 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc } from '@webedt/shared';
+import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
 import { collaborationRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
+
+/**
+ * Create an SSEWriter for a response with automatic heartbeat management.
+ */
+function createSSEWriter(res: Response): SSEWriter {
+  const sseHelper = ServiceProvider.get(ASseHelper);
+  return SSEWriter.create(res, sseHelper);
+}
 
 const router = Router();
 
@@ -514,19 +522,23 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
 
   const decodedBranch = decodeURIComponent(branch);
 
-  // Set up SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  // Set up SSE with automatic heartbeats
+  const writer = createSSEWriter(res);
+  writer.setup();
 
   // Send initial connected event
-  res.write(`event: connected\ndata: ${JSON.stringify({ branch: decodedBranch, owner, repo })}\n\n`);
+  writer.writeNamedEvent('connected', { branch: decodedBranch, owner, repo });
 
   // Poll for new events every 2 seconds
   // In production, this would use PostgreSQL LISTEN/NOTIFY
   let lastEventTime = new Date();
   const pollInterval = setInterval(async () => {
     try {
+      if (!writer.isWritable()) {
+        clearInterval(pollInterval);
+        return;
+      }
+
       const newEvents = await db
         .select({
           id: workspaceEvents.id,
@@ -552,10 +564,10 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
         .orderBy(workspaceEvents.createdAt);
 
       for (const event of newEvents) {
-        res.write(`event: workspace_event\ndata: ${JSON.stringify({
+        writer.writeNamedEvent('workspace_event', {
           ...event,
           userName: event.displayName || event.email?.split('@')[0] || 'Anonymous',
-        })}\n\n`);
+        });
         lastEventTime = event.createdAt;
       }
 
@@ -582,7 +594,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
           )
         );
 
-      res.write(`event: presence_update\ndata: ${JSON.stringify({
+      writer.writeNamedEvent('presence_update', {
         users: activeUsers.map((u) => ({
           userId: u.userId,
           displayName: u.displayName || u.email?.split('@')[0] || 'Anonymous',
@@ -592,7 +604,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
           selection: u.selection,
           isCurrentUser: u.userId === userId,
         })),
-      })}\n\n`);
+      });
     } catch (error) {
       logger.error('workspace', 'Error in event stream', { error });
     }
@@ -601,6 +613,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
   // Cleanup on close
   req.on('close', () => {
     clearInterval(pollInterval);
+    writer.end();
   });
 });
 
