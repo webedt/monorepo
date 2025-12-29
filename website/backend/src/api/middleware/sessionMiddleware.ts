@@ -4,14 +4,18 @@
  * Provides reusable middleware and utilities for session routes:
  * - validateSessionId: Validates session ID from request params
  * - requireSessionOwnership: Fetches session and verifies user ownership
+ * - createRequireSessionOwnership: Factory for ownership middleware with injected services
  * - setupSSEHeaders: Sets up SSE response headers
  * - asyncHandler: Wraps async route handlers with error handling
+ *
+ * Uses constructor injection pattern for better testability.
+ * Services can be injected via factory functions instead of ServiceProvider.get().
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { ServiceProvider, ASessionQueryService, ASessionAuthorizationService, logger } from '@webedt/shared';
+import { ServiceProvider, ASessionQueryService, ASessionAuthorizationService, logger, createLazyServiceContainer } from '@webedt/shared';
 
-import type { ChatSession } from '@webedt/shared';
+import type { ChatSession, SessionMiddlewareServices } from '@webedt/shared';
 import type { AuthRequest } from './auth.js';
 
 /**
@@ -52,10 +56,85 @@ export function validateSessionId(req: Request, res: Response, next: NextFunctio
 }
 
 /**
+ * Create a session ownership middleware with injected services.
+ *
+ * This factory function enables proper unit testing by accepting
+ * services as parameters instead of using ServiceProvider.get().
+ *
+ * @param services - Session middleware services container
+ * @returns Express middleware function for ownership verification
+ *
+ * @example
+ * ```typescript
+ * // In production with service container
+ * const container = createServiceContainer();
+ * const ownershipMiddleware = createRequireSessionOwnership(container);
+ * router.get('/:id', requireAuth, validateSessionId, ownershipMiddleware, handler);
+ *
+ * // In tests
+ * const mockContainer = createMockServiceContainer({
+ *   sessionQueryService: mockQueryService,
+ *   sessionAuthorizationService: mockAuthService,
+ *   logger: mockLogger,
+ * });
+ * const ownershipMiddleware = createRequireSessionOwnership(mockContainer);
+ * ```
+ */
+export function createRequireSessionOwnership(
+  services: SessionMiddlewareServices
+): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  const { sessionQueryService, sessionAuthorizationService, logger: log } = services;
+
+  return async function requireSessionOwnershipMiddleware(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    const authReq = req as AuthRequest;
+    const sessionReq = req as SessionRequest;
+
+    if (!authReq.user) {
+      sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    if (!sessionReq.sessionId) {
+      sendError(res, 400, 'Invalid session ID');
+      return;
+    }
+
+    try {
+      const session = await sessionQueryService.getById(sessionReq.sessionId);
+
+      const authResult = sessionAuthorizationService.verifyOwnership(session, authReq.user.id);
+
+      if (!authResult.authorized) {
+        sendError(res, authResult.statusCode || 403, authResult.error || 'Access denied');
+        return;
+      }
+
+      sessionReq.chatSession = session!;
+      next();
+    } catch (error) {
+      log.error('Session ownership check failed', error as Error, {
+        component: 'SessionMiddleware',
+        sessionId: sessionReq.sessionId,
+      });
+      sendError(res, 500, 'Failed to verify session access');
+    }
+  };
+}
+
+/**
  * Middleware that fetches a session and verifies user ownership.
  *
  * MUST be used after `requireAuth` and `validateSessionId` middleware.
  * Sets `req.chatSession` on success.
+ *
+ * For new code, prefer using createRequireSessionOwnership() with explicit
+ * service injection for better testability.
+ *
+ * @deprecated Use createRequireSessionOwnership() for new code
  *
  * @example
  * router.get('/:id', requireAuth, validateSessionId, requireSessionOwnership, (req, res) => {
