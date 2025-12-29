@@ -8,7 +8,7 @@ import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc,
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -72,6 +72,256 @@ router.use((req: Request, res: Response, next) => {
   });
   next();
 });
+
+// ============================================================================
+// PUBLIC SHARE ROUTES (no authentication required)
+// These must be defined BEFORE /:id routes to avoid parameter conflicts
+// ============================================================================
+
+/**
+ * GET /api/sessions/shared/:token
+ * Public endpoint to access a shared session via share token
+ * No authentication required - anyone with the link can view
+ */
+router.get('/shared/:token', async (req: Request, res: Response) => {
+  try {
+    const shareToken = req.params.token;
+
+    if (!shareToken) {
+      res.status(400).json({ success: false, error: 'Share token is required' });
+      return;
+    }
+
+    // Find session by share token
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.shareToken, shareToken),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    // Verify share token access
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
+    const authResult = authService.verifyShareTokenAccess(session, shareToken);
+
+    if (!authResult.authorized) {
+      res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
+      return;
+    }
+
+    // Get preview URL if applicable
+    const previewUrl = await getPreviewUrlFromSession(session);
+
+    // Return session with limited info (public-safe fields only)
+    res.json({
+      success: true,
+      session: {
+        id: session.id,
+        userRequest: session.userRequest,
+        status: session.status,
+        repositoryOwner: session.repositoryOwner,
+        repositoryName: session.repositoryName,
+        branch: session.branch,
+        provider: session.provider,
+        createdAt: session.createdAt,
+        completedAt: session.completedAt,
+        previewUrl,
+        isShared: true,
+      }
+    });
+  } catch (error) {
+    logger.error('Get shared session error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to fetch shared session' });
+  }
+});
+
+/**
+ * GET /api/sessions/shared/:token/events
+ * Public endpoint to get events for a shared session
+ */
+router.get('/shared/:token/events', async (req: Request, res: Response) => {
+  try {
+    const shareToken = req.params.token;
+
+    if (!shareToken) {
+      res.status(400).json({ success: false, error: 'Share token is required' });
+      return;
+    }
+
+    // Find session by share token
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.shareToken, shareToken),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    // Verify share token access
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
+    const authResult = authService.verifyShareTokenAccess(session, shareToken);
+
+    if (!authResult.authorized) {
+      res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
+      return;
+    }
+
+    // Get events ordered by timestamp
+    const sessionEvents = await db
+      .select()
+      .from(events)
+      .where(eq(events.chatSessionId, session.id))
+      .orderBy(asc(events.id));
+
+    res.json({
+      success: true,
+      data: {
+        events: sessionEvents,
+        total: sessionEvents.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Get shared session events error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to fetch shared session events' });
+  }
+});
+
+/**
+ * GET /api/sessions/shared/:token/events/stream
+ * Public SSE endpoint to stream events for a shared session
+ */
+router.get('/shared/:token/events/stream', async (req: Request, res: Response) => {
+  try {
+    const shareToken = req.params.token;
+
+    if (!shareToken) {
+      res.status(400).json({ success: false, error: 'Share token is required' });
+      return;
+    }
+
+    // Find session by share token
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.shareToken, shareToken),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    // Verify share token access
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
+    const authResult = authService.verifyShareTokenAccess(session, shareToken);
+
+    if (!authResult.authorized) {
+      res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
+      return;
+    }
+
+    // Check if session is actively streaming
+    const isActive = sessionEventBroadcaster.isSessionActive(session.id);
+
+    logger.info(`Streaming shared session events: ${session.id}`, {
+      component: 'Sessions',
+      status: session.status,
+      isActive
+    });
+
+    // Set up SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.flushHeaders();
+
+    // Replay stored events
+    const storedEvents = await db
+      .select()
+      .from(events)
+      .where(eq(events.chatSessionId, session.id))
+      .orderBy(asc(events.id));
+
+    for (const event of storedEvents) {
+      if (res.writableEnded) break;
+      const eventData = {
+        ...(event.eventData as object),
+        _replayed: true,
+        _originalTimestamp: event.timestamp
+      };
+      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+    }
+
+    // Handle live streaming or completion
+    if (isActive) {
+      const subscriberId = uuidv4();
+
+      const unsubscribe = sessionEventBroadcaster.subscribe(session.id, subscriberId, (event) => {
+        try {
+          if (res.writableEnded) {
+            unsubscribe();
+            return;
+          }
+
+          res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+
+          if (event.eventType === 'completed') {
+            res.write(`event: completed\n`);
+            res.write(`data: ${JSON.stringify({
+              websiteSessionId: session.id,
+              completed: true,
+              replayed: false
+            })}\n\n`);
+            res.end();
+            unsubscribe();
+          }
+        } catch (err) {
+          logger.error(`Error writing to shared stream for subscriber ${subscriberId}`, err as Error, { component: 'Sessions' });
+          unsubscribe();
+        }
+      });
+
+      req.on('close', () => {
+        logger.info(`Client disconnected from shared session stream: ${session.id}`, { component: 'Sessions' });
+        unsubscribe();
+      });
+
+      req.on('error', (err) => {
+        logger.error(`Shared stream error for session ${session.id}`, err, { component: 'Sessions' });
+        unsubscribe();
+      });
+    } else {
+      // Session not active - send completion and close
+      res.write(`event: completed\n`);
+      res.write(`data: ${JSON.stringify({
+        websiteSessionId: session.id,
+        completed: true,
+        replayed: true,
+        status: session.status
+      })}\n\n`);
+      res.end();
+    }
+  } catch (error) {
+    logger.error('Shared session stream error', error as Error, { component: 'Sessions' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to stream shared session events' });
+    }
+  }
+});
+
+// ============================================================================
+// END PUBLIC SHARE ROUTES
+// ============================================================================
 
 // Create a new code session
 router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
@@ -729,6 +979,205 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
   } catch (error) {
     logger.error('Toggle favorite error', error as Error, { component: 'Sessions' });
     res.status(500).json({ success: false, error: 'Failed to toggle favorite status' });
+  }
+});
+
+/**
+ * POST /api/sessions/:id/share
+ * Generate a share token for a session (public but unlisted - shareable if you know the link)
+ * Optional body: { expiresInDays?: number } - defaults to no expiration
+ */
+router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+    const { expiresInDays } = req.body as { expiresInDays?: number };
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Generate new share token (or reuse existing if already shared)
+    const shareToken = session.shareToken || uuidv4();
+
+    // Calculate expiration date if provided
+    let shareExpiresAt: Date | null = null;
+    if (expiresInDays && expiresInDays > 0) {
+      shareExpiresAt = new Date();
+      shareExpiresAt.setDate(shareExpiresAt.getDate() + expiresInDays);
+    }
+
+    // Update session with share token
+    const [updatedSession] = await db
+      .update(chatSessions)
+      .set({
+        shareToken,
+        shareExpiresAt,
+      })
+      .where(eq(chatSessions.id, sessionId))
+      .returning();
+
+    logger.info(`Session ${sessionId} share token generated`, {
+      component: 'Sessions',
+      sessionId,
+      hasExpiration: !!shareExpiresAt,
+      expiresAt: shareExpiresAt?.toISOString(),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        shareToken,
+        shareUrl: `/sessions/shared/${shareToken}`,
+        expiresAt: shareExpiresAt?.toISOString() || null,
+      }
+    });
+  } catch (error) {
+    logger.error('Generate share token error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to generate share token' });
+  }
+});
+
+/**
+ * DELETE /api/sessions/:id/share
+ * Revoke the share token for a session (stop sharing)
+ */
+router.delete('/:id/share', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    if (!session.shareToken) {
+      res.status(400).json({ success: false, error: 'Session is not currently shared' });
+      return;
+    }
+
+    // Revoke share token
+    await db
+      .update(chatSessions)
+      .set({
+        shareToken: null,
+        shareExpiresAt: null,
+      })
+      .where(eq(chatSessions.id, sessionId));
+
+    logger.info(`Session ${sessionId} share token revoked`, {
+      component: 'Sessions',
+      sessionId,
+    });
+
+    res.json({
+      success: true,
+      message: 'Share link revoked',
+    });
+  } catch (error) {
+    logger.error('Revoke share token error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to revoke share token' });
+  }
+});
+
+/**
+ * GET /api/sessions/:id/share
+ * Get the current share status for a session
+ */
+router.get('/:id/share', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
+    const isValid = session.shareToken ? authService.isShareTokenValid(session) : false;
+
+    res.json({
+      success: true,
+      data: {
+        isShared: !!session.shareToken,
+        shareToken: session.shareToken || null,
+        shareUrl: session.shareToken ? `/sessions/shared/${session.shareToken}` : null,
+        expiresAt: session.shareExpiresAt?.toISOString() || null,
+        isExpired: session.shareToken ? !isValid : false,
+      }
+    });
+  } catch (error) {
+    logger.error('Get share status error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to get share status' });
   }
 });
 

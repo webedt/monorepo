@@ -225,6 +225,57 @@ export class SessionAuthorizationService extends ASessionAuthorizationService {
 
     return { authorized: true, role: access.role };
   }
+
+  verifyShareTokenAccess(
+    session: ChatSession | null,
+    shareToken: string
+  ): AuthorizationResult {
+    if (!session) {
+      return {
+        authorized: false,
+        error: 'Session not found',
+        statusCode: 404,
+      };
+    }
+
+    if (!session.shareToken) {
+      return {
+        authorized: false,
+        error: 'Session is not shared',
+        statusCode: 404,
+      };
+    }
+
+    if (session.shareToken !== shareToken) {
+      return {
+        authorized: false,
+        error: 'Invalid share token',
+        statusCode: 403,
+      };
+    }
+
+    if (!this.isShareTokenValid(session)) {
+      return {
+        authorized: false,
+        error: 'Share link has expired',
+        statusCode: 410,
+      };
+    }
+
+    return { authorized: true, role: 'shared' };
+  }
+
+  isShareTokenValid(session: ChatSession): boolean {
+    if (!session.shareToken) {
+      return false;
+    }
+
+    if (session.shareExpiresAt && new Date(session.shareExpiresAt) < new Date()) {
+      return false;
+    }
+
+    return true;
+  }
 }
 
 export const sessionAuthorizationService = new SessionAuthorizationService();

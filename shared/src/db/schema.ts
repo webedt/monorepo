@@ -93,6 +93,9 @@ export const chatSessions = pgTable('chat_sessions', {
   deletedAt: timestamp('deleted_at'), // Soft delete timestamp
   workerLastActivity: timestamp('worker_last_activity'), // Last time worker sent an event (for orphan detection)
   favorite: boolean('favorite').default(false).notNull(), // User favorite/starred status
+  // Sharing fields - "public but unlisted" (shareable if you know the link)
+  shareToken: text('share_token').unique(), // UUID-based token for sharing
+  shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
 });
 
 export const messages = pgTable('messages', {
