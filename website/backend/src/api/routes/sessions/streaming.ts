@@ -11,14 +11,13 @@ import type { AuthRequest } from '../../middleware/auth.js';
 import {
   validateSessionId,
   requireSessionOwnership,
-  setupSSEHeaders,
   asyncHandler,
 } from '../../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../../middleware/sessionMiddleware.js';
 import { sseRateLimiter } from '../../middleware/rateLimit.js';
 import { sessionEventBroadcaster, sessionListBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { sseWrite, sseWriteSync, getClaudeClient } from './helpers.js';
+import { createSSEWriter, getClaudeClient } from './helpers.js';
 
 const router = Router();
 
@@ -45,33 +44,32 @@ router.get('/updates', requireAuth, sseRateLimiter, async (req: Request, res: Re
     subscriberId
   });
 
-  // Set up SSE headers
-  setupSSEHeaders(res);
+  // Create SSEWriter with automatic heartbeat management
+  const writer = createSSEWriter(res);
+  writer.setup();
 
   // Send initial connected event
-  res.write(`event: connected\n`);
-  res.write(`data: ${JSON.stringify({
+  writer.writeNamedEvent('connected', {
     subscriberId,
     userId,
     timestamp: new Date().toISOString()
-  })}\n\n`);
+  });
 
   // Subscribe to session list updates for this user
   const unsubscribe = sessionListBroadcaster.subscribe(userId, subscriberId, (event) => {
     try {
       // Check if response is still writable
-      if (res.writableEnded) {
+      if (!writer.isWritable()) {
         unsubscribe();
         return;
       }
 
       // Write the event in SSE format
-      res.write(`event: ${event.type}\n`);
-      res.write(`data: ${JSON.stringify({
+      writer.writeNamedEvent(event.type, {
         type: event.type,
         session: event.session,
         timestamp: event.timestamp.toISOString()
-      })}\n\n`);
+      });
     } catch (err) {
       logger.error(`Error writing to session list stream for subscriber ${subscriberId}`, err as Error, {
         component: 'Sessions'
@@ -80,16 +78,6 @@ router.get('/updates', requireAuth, sseRateLimiter, async (req: Request, res: Re
     }
   });
 
-  // Send heartbeat every 15 seconds to keep connection alive
-  // Reduced from 30s to prevent proxy timeouts (Traefik default is ~30-60s)
-  const heartbeatInterval = setInterval(() => {
-    if (res.writableEnded) {
-      clearInterval(heartbeatInterval);
-      return;
-    }
-    res.write(`:heartbeat\n\n`);
-  }, 15000);
-
   // Handle client disconnect
   req.on('close', () => {
     logger.info(`Client disconnected from session list updates`, {
@@ -97,7 +85,7 @@ router.get('/updates', requireAuth, sseRateLimiter, async (req: Request, res: Re
       userId,
       subscriberId
     });
-    clearInterval(heartbeatInterval);
+    writer.end();
     unsubscribe();
   });
 
@@ -106,7 +94,7 @@ router.get('/updates', requireAuth, sseRateLimiter, async (req: Request, res: Re
     logger.error(`Session list stream error for subscriber ${subscriberId}`, err, {
       component: 'Sessions'
     });
-    clearInterval(heartbeatInterval);
+    writer.end();
     unsubscribe();
   });
 });
@@ -144,8 +132,9 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
     isRecentlyActive
   });
 
-  // Set up SSE headers
-  setupSSEHeaders(res);
+  // Create SSEWriter with automatic heartbeat management
+  const writer = createSSEWriter(res);
+  writer.setup();
 
   // No custom wrapper events - just replay stored events directly
 
@@ -163,13 +152,13 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
 
   // Replay each stored event (no wrapper markers)
   for (const event of storedEvents) {
-    if (res.writableEnded) break;
+    if (!writer.isWritable()) break;
     const eventData = {
       ...(event.eventData as object),
       _replayed: true,
       _originalTimestamp: event.timestamp
     };
-    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+    writer.writeEvent(eventData);
   }
 
   // PHASE 2: Handle based on session status
@@ -184,23 +173,22 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
     const unsubscribe = sessionEventBroadcaster.subscribe(sessionId, subscriberId, (event) => {
       try {
         // Check if response is still writable
-        if (res.writableEnded) {
+        if (!writer.isWritable()) {
           unsubscribe();
           return;
         }
 
         // Write the live event in SSE format
-        res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+        writer.writeEvent(event.data as Record<string, unknown>);
 
         // If this is a completed event, end the connection
         if (event.eventType === 'completed') {
-          res.write(`event: completed\n`);
-          res.write(`data: ${JSON.stringify({
+          writer.writeNamedEvent('completed', {
             websiteSessionId: sessionId,
             completed: true,
             replayed: false
-          })}\n\n`);
-          res.end();
+          });
+          writer.end();
           unsubscribe();
         }
       } catch (err) {
@@ -212,12 +200,14 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
     // Handle client disconnect
     req.on('close', () => {
       logger.info(`Client disconnected from session stream: ${sessionId}`, { component: 'Sessions' });
+      writer.end();
       unsubscribe();
     });
 
     // Handle errors
     req.on('error', (err) => {
       logger.error(`Stream error for session ${sessionId}`, err, { component: 'Sessions' });
+      writer.end();
       unsubscribe();
     });
   } else {
@@ -262,12 +252,12 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
           .limit(1);
 
         if (!user?.claudeAuth) {
-          res.write(`data: ${JSON.stringify({
+          writer.writeEvent({
             type: 'error',
             error: 'Claude authentication not configured',
             timestamp: new Date().toISOString()
-          })}\n\n`);
-          res.end();
+          });
+          writer.end();
           return;
         }
 
@@ -277,23 +267,23 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
             ? JSON.parse(user.claudeAuth)
             : user.claudeAuth as ClaudeAuth;
         } catch {
-          res.write(`data: ${JSON.stringify({
+          writer.writeEvent({
             type: 'error',
             error: 'Invalid Claude authentication data',
             timestamp: new Date().toISOString()
-          })}\n\n`);
-          res.end();
+          });
+          writer.end();
           return;
         }
 
         const validAuth = await ensureValidToken(claudeAuth);
         if (!validAuth) {
-          res.write(`data: ${JSON.stringify({
+          writer.writeEvent({
             type: 'error',
             error: 'Claude token expired',
             timestamp: new Date().toISOString()
-          })}\n\n`);
-          res.end();
+          });
+          writer.end();
           return;
         }
 
@@ -321,18 +311,18 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
               component: 'Sessions',
               sessionId,
             });
-            res.write(`data: ${JSON.stringify({
+            writer.writeEvent({
               type: 'error',
               error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first.',
               timestamp: new Date().toISOString()
-            })}\n\n`);
+            });
 
             // Reset session status since we couldn't resume
             await db.update(chatSessions)
               .set({ status: 'completed' })
               .where(eq(chatSessions.id, sessionId));
 
-            res.end();
+            writer.end();
             return;
           }
         }
@@ -358,7 +348,7 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
           component: 'Sessions',
           sessionId,
         });
-        sseWriteSync(res, `data: ${JSON.stringify(inputPreviewEvent)}\n\n`);
+        writer.writeEvent(inputPreviewEvent);
 
         // Create Claude client and resume session
         logger.info('Creating ClaudeRemoteClient for resume', {
@@ -434,11 +424,10 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
                 component: 'Sessions',
                 eventType,
                 sessionId,
-                writableEnded: res.writableEnded,
-                finished: res.finished,
+                isWritable: writer.isWritable(),
               });
 
-              if (res.writableEnded) {
+              if (!writer.isWritable()) {
                 logger.warn(`Resume event #${eventCount} - SKIPPED (response ended)`, {
                   component: 'Sessions',
                   eventType,
@@ -447,14 +436,13 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
                 return;
               }
               const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
-              const sseData = `data: ${JSON.stringify(eventWithTimestamp)}\n\n`;
-              logger.info(`Resume event #${eventCount} - SSE DATA LENGTH: ${sseData.length}`, {
+              logger.info(`Resume event #${eventCount} - SSE DATA`, {
                 component: 'Sessions',
                 eventType,
                 sessionId,
               });
-              // Use sseWrite with flush to ensure data gets through proxy chain
-              sseWrite(res, sseData);
+              // Use SSEWriter to ensure data gets through proxy chain
+              writer.writeEvent(eventWithTimestamp as Record<string, unknown>);
 
               // Store event in database - deduplicate by UUID
               const eventUuid = extractEventUuid(event as Record<string, unknown>);
@@ -507,12 +495,12 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
             })
             .where(eq(chatSessions.id, sessionId));
 
-          // Send completion event with flush
-          sseWrite(res, `event: completed\ndata: ${JSON.stringify({
+          // Send completion event
+          writer.writeNamedEvent('completed', {
             websiteSessionId: sessionId,
             completed: true,
             status: result.status === 'completed' || result.status === 'idle' ? 'completed' : 'error',
-          })}\n\n`);
+          });
         } catch (resumeError) {
           const errorMessage = resumeError instanceof Error ? resumeError.message : String(resumeError);
           const errorStack = resumeError instanceof Error ? resumeError.stack : undefined;
@@ -522,11 +510,11 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
             errorMessage,
             errorStack,
           });
-          sseWrite(res, `data: ${JSON.stringify({
+          writer.writeEvent({
             type: 'error',
             error: resumeError instanceof Error ? resumeError.message : 'Resume failed',
             timestamp: new Date().toISOString()
-          })}\n\n`);
+          });
 
           // Update session status to error
           await db.update(chatSessions)
@@ -534,20 +522,19 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
             .where(eq(chatSessions.id, sessionId));
         }
 
-        res.end();
+        writer.end();
         return;
       }
     }
 
     // No pending messages - session is completed/error, send completion event and close
-    res.write(`event: completed\n`);
-    res.write(`data: ${JSON.stringify({
+    writer.writeNamedEvent('completed', {
       websiteSessionId: sessionId,
       completed: true,
       replayed: true,
       status: session.status
-    })}\n\n`);
-    res.end();
+    });
+    writer.end();
   }
 }, { errorMessage: 'Failed to stream session events' });
 

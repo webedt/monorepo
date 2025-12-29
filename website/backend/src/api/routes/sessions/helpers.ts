@@ -7,7 +7,7 @@
  */
 
 import { Response } from 'express';
-import { createLazyServiceContainer } from '@webedt/shared';
+import { createLazyServiceContainer, SSEWriter } from '@webedt/shared';
 
 import type { ClaudeAuth } from '@webedt/shared';
 import type { ClaudeWebClientConfig, SessionHelperServices } from '@webedt/shared';
@@ -101,6 +101,14 @@ export function createSessionHelpers(services: SessionHelperServices) {
  * Lazy container for backward-compatible helper functions.
  */
 const lazyContainer = createLazyServiceContainer();
+
+/**
+ * Create an SSEWriter for a response with automatic heartbeat management.
+ */
+export function createSSEWriter(res: Response): SSEWriter {
+  const sseHelper = lazyContainer.sseHelper;
+  return SSEWriter.create(res, sseHelper);
+}
 
 /**
  * Helper to write SSE data safely using the shared SSE helper service.
