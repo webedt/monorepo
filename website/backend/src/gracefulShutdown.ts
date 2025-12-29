@@ -19,6 +19,7 @@ import {
   stopBackgroundSync,
   sessionEventBroadcaster,
   sessionListBroadcaster,
+  trashCleanupService,
   closeDatabase,
 } from '@webedt/shared';
 
@@ -151,6 +152,10 @@ export async function gracefulShutdown(
     // shutdown() is defined in the abstract base classes ASessionEventBroadcaster and ASessionListBroadcaster
     sessionEventBroadcaster.shutdown();
     sessionListBroadcaster.shutdown();
+
+    // Step 5b: Stop trash cleanup service
+    logger.info('Stopping trash cleanup service', { component: 'GracefulShutdown' });
+    await trashCleanupService.dispose();
 
     // Step 6: Stop accepting new connections on the server
     logger.info('Closing HTTP server to new connections', { component: 'GracefulShutdown' });

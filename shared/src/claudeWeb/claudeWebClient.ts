@@ -582,23 +582,51 @@ export class ClaudeWebClient extends AClaudeWebClient {
     const ws = await this.createWebSocket(sessionId, timeoutMs);
     let title: string | undefined;
     let branch: string | undefined;
+    let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+    let cleanedUp = false;
+
+    // Centralized cleanup function to prevent memory leaks
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+
+      // Clear the keep-alive interval
+      if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
+      }
+
+      // Remove abort signal listener
+      if (abortSignal) {
+        abortSignal.removeEventListener('abort', abortHandler);
+      }
+
+      // Remove all WebSocket listeners to prevent memory leaks
+      ws.removeAllListeners('message');
+      ws.removeAllListeners('error');
+      ws.removeAllListeners('close');
+
+      // Close the WebSocket if still open
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    };
+
+    const abortHandler = () => {
+      cleanup();
+    };
 
     return new Promise((resolve, reject) => {
-      const abortHandler = () => {
-        ws.close();
-        reject(new ClaudeRemoteError('Streaming aborted by signal'));
-      };
-
       if (abortSignal) {
         if (abortSignal.aborted) {
-          ws.close();
+          cleanup();
           reject(new ClaudeRemoteError('Streaming aborted by signal'));
           return;
         }
         abortSignal.addEventListener('abort', abortHandler, { once: true });
       }
 
-      ws.on('message', async (data: Buffer | string) => {
+      const messageHandler = async (data: Buffer | string) => {
         try {
           const rawData = data.toString();
 
@@ -620,10 +648,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
               }
 
               if (event.type === 'result') {
-                if (abortSignal) {
-                  abortSignal.removeEventListener('abort', abortHandler);
-                }
-                ws.close();
+                cleanup();
                 resolve({
                   sessionId,
                   status: 'completed',
@@ -649,10 +674,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
               }
 
               if (event.type === 'result') {
-                if (abortSignal) {
-                  abortSignal.removeEventListener('abort', abortHandler);
-                }
-                ws.close();
+                cleanup();
                 resolve({
                   sessionId,
                   status: 'completed',
@@ -669,10 +691,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
           if (message.type === 'session_status') {
             if (message.status === 'completed' || message.status === 'failed') {
-              if (abortSignal) {
-                abortSignal.removeEventListener('abort', abortHandler);
-              }
-              ws.close();
+              cleanup();
               resolve({
                 sessionId,
                 status: message.status,
@@ -684,41 +703,40 @@ export class ClaudeWebClient extends AClaudeWebClient {
         } catch {
           // Ignore parse errors for non-JSON messages
         }
-      });
+      };
 
-      ws.on('error', (error: Error) => {
-        if (abortSignal) {
-          abortSignal.removeEventListener('abort', abortHandler);
-        }
+      const errorHandler = (error: Error) => {
+        cleanup();
         reject(new ClaudeRemoteError(
           `WebSocket error during streaming: ${error.message}`,
           500
         ));
-      });
+      };
 
-      ws.on('close', (code: number) => {
-        if (abortSignal) {
-          abortSignal.removeEventListener('abort', abortHandler);
-        }
+      const closeHandler = (code: number) => {
+        cleanup();
         if (code !== 1000 && code !== 1001) {
           reject(new ClaudeRemoteError(
             `WebSocket closed unexpectedly with code ${code}`,
             500
           ));
         }
-      });
+      };
 
-      const keepAliveInterval = setInterval(() => {
+      // Register WebSocket event handlers
+      ws.on('message', messageHandler);
+      ws.on('error', errorHandler);
+      ws.on('close', closeHandler);
+
+      // Start keep-alive interval
+      keepAliveInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'keep_alive' }));
-        } else {
+        } else if (keepAliveInterval) {
           clearInterval(keepAliveInterval);
+          keepAliveInterval = null;
         }
       }, 30000);
-
-      ws.on('close', () => {
-        clearInterval(keepAliveInterval);
-      });
     });
   }
 

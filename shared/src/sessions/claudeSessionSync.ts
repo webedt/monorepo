@@ -134,6 +134,7 @@ const syncStats: SyncStats = {
 };
 
 let syncIntervalId: NodeJS.Timeout | null = null;
+let initialTimeoutId: NodeJS.Timeout | null = null;
 
 /**
  * Map Anthropic session status to our internal status
@@ -941,7 +942,8 @@ export function startBackgroundSync(): void {
   });
 
   // Run initial sync after a short delay (let server stabilize)
-  setTimeout(() => {
+  initialTimeoutId = setTimeout(() => {
+    initialTimeoutId = null; // Clear reference after it fires
     logger.info('[SessionSync] Running initial sync', { component: 'SessionSync' });
     runSync();
   }, CLAUDE_SYNC_INITIAL_DELAY_MS);
@@ -956,6 +958,13 @@ export function startBackgroundSync(): void {
  * Stop the background sync service
  */
 export function stopBackgroundSync(): void {
+  // Clear initial timeout if it hasn't fired yet
+  if (initialTimeoutId) {
+    clearTimeout(initialTimeoutId);
+    initialTimeoutId = null;
+  }
+
+  // Clear the periodic sync interval
   if (syncIntervalId) {
     clearInterval(syncIntervalId);
     syncIntervalId = null;
