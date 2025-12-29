@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService } from '@webedt/shared';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -2393,15 +2393,16 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
   }
 
   // Parse query params for backward compatibility (logged for debugging)
-  const activeOnly = req.query.activeOnly !== 'false';
-  const shouldStream = req.query.stream === 'true';
-  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+  // Prefixed with underscore as they are intentionally unused by shared sync
+  const _activeOnly = req.query.activeOnly !== 'false';
+  const _shouldStream = req.query.stream === 'true';
+  const _limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
   logger.info('Starting session sync using shared syncUserSessions', {
     component: 'SessionSync',
     userId,
     // Log query params for debugging, even though shared sync may not use them all
-    queryParams: { activeOnly, shouldStream, limit },
+    queryParams: { activeOnly: _activeOnly, shouldStream: _shouldStream, limit: _limit },
   });
 
   try {
@@ -2521,11 +2522,11 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     }
 
     // Count existing events before sync for backward-compatible response
-    const existingEventsBefore = await db
-      .select({ eventData: events.eventData })
+    // Use COUNT(*) instead of fetching all eventData for better performance
+    const [{ count: existingEventsCount }] = await db
+      .select({ count: sql<number>`count(*)` })
       .from(events)
       .where(eq(events.chatSessionId, sessionId));
-    const existingEventsCount = existingEventsBefore.length;
 
     // Use SessionService.sync() from shared package via ServiceProvider
     // This provides proper event deduplication, transaction safety, and status mapping
@@ -2536,11 +2537,11 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     });
 
     // Count events after sync to calculate new events imported
-    const eventsAfter = await db
-      .select({ eventData: events.eventData })
+    // Use COUNT(*) instead of fetching all eventData for better performance
+    const [{ count: totalEventsCount }] = await db
+      .select({ count: sql<number>`count(*)` })
       .from(events)
       .where(eq(events.chatSessionId, sessionId));
-    const totalEventsCount = eventsAfter.length;
     const newEventsImported = totalEventsCount - existingEventsCount;
 
     // Map local status back to remote status for backward compatibility
