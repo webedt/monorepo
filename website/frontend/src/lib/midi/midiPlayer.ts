@@ -17,16 +17,6 @@ import type { MidiTrack } from '@webedt/shared';
 import type { MidiTrackInfo } from './types';
 
 /**
- * Scheduled note for playback (pending scheduling)
- */
-interface ScheduledNote {
-  note: MidiNoteEvent;
-  trackIndex: number;
-  startTime: number;
-  endTime: number;
-}
-
-/**
  * Active oscillator for cleanup
  */
 interface ActiveOscillator {
@@ -46,7 +36,6 @@ export class MidiPlayer {
   private state: MidiPlayerState;
   private options: Required<MidiPlayerOptions>;
   private listeners: Set<MidiPlayerListener> = new Set();
-  private scheduledNotes: ScheduledNote[] = [];
   private activeOscillators: ActiveOscillator[] = [];
   private playbackStartTime: number = 0;
   private pauseTime: number = 0;
@@ -450,9 +439,7 @@ export class MidiPlayer {
   private scheduleNotes(startTime: number): void {
     if (!this.midiFile || !this.audioContext || !this.masterGain) return;
 
-    this.scheduledNotes = [];
     const now = this.audioContext.currentTime;
-    const lookAhead = 0.5; // Schedule 500ms ahead
 
     for (let trackIndex = 0; trackIndex < this.midiFile.tracks.length; trackIndex++) {
       if (this.options.mutedTracks.has(trackIndex)) continue;
@@ -465,19 +452,8 @@ export class MidiPlayer {
         const noteStartTime = (note.startTimeSeconds - startTime) / this.options.speed;
         const noteDuration = note.durationSeconds / this.options.speed;
 
-        // Only schedule notes within look-ahead window initially
-        // More notes will be scheduled during playback
-        if (noteStartTime <= lookAhead) {
-          this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
-        } else {
-          // Store for later scheduling
-          this.scheduledNotes.push({
-            note,
-            trackIndex,
-            startTime: note.startTimeSeconds,
-            endTime: note.startTimeSeconds + note.durationSeconds,
-          });
-        }
+        // Schedule all notes - Web Audio API handles far-future scheduling
+        this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
       }
     }
   }
@@ -543,9 +519,6 @@ export class MidiPlayer {
       }
     }
     this.activeOscillators = [];
-
-    // Clear pending notes
-    this.scheduledNotes = [];
   }
 
   /**
