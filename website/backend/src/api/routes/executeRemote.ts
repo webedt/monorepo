@@ -15,7 +15,7 @@ import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@we
 import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
 import type { ProviderType } from '@webedt/shared';
-import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath, parseGitUrl, validateBranchName, sanitizeBranchName } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -57,21 +57,18 @@ export interface UserRequestContent {
 // ============================================================================
 
 /**
- * Extract repository owner from GitHub URL
- * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
+ * Parse and validate a repository URL, returning owner/repo or an error.
+ * Parses once and returns the result for reuse, avoiding multiple parse calls.
+ *
+ * @param repoUrl - The GitHub repository URL
+ * @returns Object with owner, repo on success, or error string on failure
  */
-function extractRepoOwner(repoUrl: string): string | null {
-  const match = repoUrl.match(/github\.com\/([^\/]+)\//);
-  return match ? match[1] : null;
-}
-
-/**
- * Extract repository name from GitHub URL
- * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
- */
-function extractRepoName(repoUrl: string): string | null {
-  const match = repoUrl.match(/\/([^\/]+?)(\.git)?$/);
-  return match ? match[1] : null;
+function parseAndValidateRepoUrl(repoUrl: string): { owner: string; repo: string } | { error: string } {
+  const result = parseGitUrl(repoUrl);
+  if (!result.isValid) {
+    return { error: result.error };
+  }
+  return { owner: result.owner, repo: result.repo };
 }
 
 /**
@@ -174,12 +171,19 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // (Anthropic Remote Sessions API doesn't support specifying a base branch anyway)
     const baseBranch = 'main';
 
-    // Extract owner and repo name from URL (for PR functionality)
+    // Validate and extract owner and repo name from URL (for PR functionality)
+    // SECURITY: Validate URL early to prevent injection attacks
+    // Parse once and reuse the result to avoid triple parsing
     let repositoryOwner: string | null = null;
     let repositoryName: string | null = null;
     if (repoUrl) {
-      repositoryOwner = extractRepoOwner(repoUrl);
-      repositoryName = extractRepoName(repoUrl);
+      const parseResult = parseAndValidateRepoUrl(repoUrl);
+      if ('error' in parseResult) {
+        res.status(400).json({ success: false, error: `Invalid repository URL: ${parseResult.error}` });
+        return;
+      }
+      repositoryOwner = parseResult.owner;
+      repositoryName = parseResult.repo;
     }
 
     logger.info('Execute Remote request received', {
@@ -324,11 +328,25 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           });
 
           // Also extract owner/name if not already set (backward compatibility)
-          if (!repositoryOwner && repoUrl) {
-            repositoryOwner = extractRepoOwner(repoUrl);
-          }
-          if (!repositoryName && repoUrl) {
-            repositoryName = extractRepoName(repoUrl);
+          // SECURITY: Validate URL from existing session with same rigor as new URLs
+          if ((!repositoryOwner || !repositoryName) && repoUrl) {
+            const parseResult = parseAndValidateRepoUrl(repoUrl);
+            if ('error' in parseResult) {
+              // Existing session has invalid URL - this shouldn't happen but handle gracefully
+              logger.error('Existing session has invalid repository URL', {
+                component: 'ExecuteRemoteRoute',
+                chatSessionId,
+                error: parseResult.error,
+              });
+              res.status(400).json({ success: false, error: `Invalid repository URL in existing session: ${parseResult.error}` });
+              return;
+            }
+            if (!repositoryOwner) {
+              repositoryOwner = parseResult.owner;
+            }
+            if (!repositoryName) {
+              repositoryName = parseResult.repo;
+            }
           }
         }
 
@@ -481,7 +499,24 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Update title for any session that receives a title_generation event
       if (event.type === 'title_generation' && event.status === 'success' && event.title) {
         const newTitle = event.title;
-        const newBranch = event.branch_name;
+        let newBranch = event.branch_name;
+
+        // SECURITY: Validate branch name to prevent path traversal attacks
+        // A malicious remote session could return a branch like '../admin'
+        if (newBranch) {
+          try {
+            validateBranchName(newBranch);
+          } catch (branchError) {
+            logger.warn('Invalid branch name received from remote session, sanitizing', {
+              component: 'ExecuteRemoteRoute',
+              chatSessionId,
+              originalBranch: newBranch,
+              error: branchError instanceof Error ? branchError.message : 'Unknown error',
+            });
+            // Sanitize the branch name to make it safe for use in paths
+            newBranch = sanitizeBranchName(newBranch);
+          }
+        }
 
         // Generate sessionPath when we have all the info needed
         // This prevents duplicate sessions by establishing the unique sessionPath early
@@ -656,17 +691,33 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Update session with result
       const finalStatus = result.status === 'completed' ? 'completed' : 'error';
 
+      // SECURITY: Validate branch name from result to prevent path traversal
+      let safeBranch = result.branch;
+      if (safeBranch) {
+        try {
+          validateBranchName(safeBranch);
+        } catch (branchError) {
+          logger.warn('Invalid branch name in result, sanitizing', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            originalBranch: safeBranch,
+            error: branchError instanceof Error ? branchError.message : 'Unknown error',
+          });
+          safeBranch = sanitizeBranchName(safeBranch);
+        }
+      }
+
       // Generate sessionPath if we have all the info and don't have it yet
       // This is a fallback in case title_generation event didn't fire
       let finalSessionPath: string | undefined;
-      if (result.branch && repositoryOwner && repositoryName) {
-        finalSessionPath = generateSessionPath(repositoryOwner, repositoryName, result.branch);
+      if (safeBranch && repositoryOwner && repositoryName) {
+        finalSessionPath = generateSessionPath(repositoryOwner, repositoryName, safeBranch);
       }
 
       await db.update(chatSessions)
         .set({
           status: finalStatus,
-          branch: result.branch,
+          branch: safeBranch,
           remoteSessionId: result.remoteSessionId,
           remoteWebUrl: result.remoteWebUrl,
           totalCost: result.totalCost?.toString(),
@@ -679,7 +730,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionListBroadcaster.notifyStatusChanged(user.id, {
         id: chatSessionId,
         status: finalStatus,
-        branch: result.branch,
+        branch: safeBranch,
         remoteSessionId: result.remoteSessionId,
         remoteWebUrl: result.remoteWebUrl,
         totalCost: result.totalCost?.toString(),
@@ -689,7 +740,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
         status: result.status,
-        branch: result.branch,
+        branch: safeBranch,
         totalCost: result.totalCost,
       });
 
@@ -697,7 +748,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       const completedData = {
         websiteSessionId: chatSessionId,
         completed: true,
-        branch: result.branch,
+        branch: safeBranch,
         totalCost: result.totalCost,
         remoteSessionId: result.remoteSessionId,
         remoteWebUrl: result.remoteWebUrl,
