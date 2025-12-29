@@ -33,6 +33,9 @@ export interface ExecutionEvent {
   timestamp: string;
   source?: string;
 
+  // Event unique identifier (for deduplication)
+  uuid?: string;
+
   // Connected event
   sessionId?: string;
   provider?: string;
@@ -66,6 +69,15 @@ export interface ExecutionEvent {
   // Error event
   error?: string;
   code?: string;
+
+  // Tool use event
+  name?: string;
+  input?: unknown;
+  tool_use_id?: string;
+
+  // Result event (metrics)
+  inputTokens?: number;
+  outputTokens?: number;
 
   // Allow any additional fields from remote sessions
   // Events are now passed through directly (no raw_event wrapper)

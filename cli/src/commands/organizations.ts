@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { organizationService, db, users } from '@webedt/shared';
+import type { OrganizationRole } from '@webedt/shared';
 import { eq } from 'drizzle-orm';
 
 export const organizationsCommand = new Command('organizations')
@@ -327,13 +328,13 @@ organizationsCommand
         process.exit(1);
       }
 
-      const validRoles = ['owner', 'admin', 'member'];
-      if (!validRoles.includes(role)) {
+      const validRoles: OrganizationRole[] = ['owner', 'admin', 'member'];
+      if (!validRoles.includes(role as OrganizationRole)) {
         console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
         process.exit(1);
       }
 
-      const member = await organizationService.updateMemberRole(orgId, userId, role as any);
+      const member = await organizationService.updateMemberRole(orgId, userId, role as OrganizationRole);
       if (!member) {
         console.error(`Member not found.`);
         process.exit(1);

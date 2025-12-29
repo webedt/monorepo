@@ -1,4 +1,6 @@
 import { logger } from '../logging/logger.js';
+import type { NetworkError } from '../errorTypes.js';
+import { getErrorCode, getStatusCode } from '../errorTypes.js';
 
 export interface RetryConfig {
   maxRetries: number;
@@ -32,8 +34,8 @@ const DEFAULT_CONFIG: RetryConfig = {
 
 function defaultIsRetryable(error: Error): boolean {
   const message = error.message.toLowerCase();
-  const errorCode = (error as any).code;
-  const statusCode = (error as any).status || (error as any).statusCode;
+  const errorCode = getErrorCode(error);
+  const statusCode = getStatusCode(error);
 
   if (errorCode === 'ENOTFOUND' || errorCode === 'ETIMEDOUT' ||
       errorCode === 'ECONNRESET' || errorCode === 'ECONNREFUSED' ||
@@ -225,7 +227,7 @@ export const RETRY_CONFIGS = {
     backoffMultiplier: 2,
     useJitter: true,
     isRetryable: (error: Error) => {
-      const statusCode = (error as any).status || (error as any).statusCode;
+      const statusCode = getStatusCode(error);
       return statusCode === 429 || defaultIsRetryable(error);
     },
   } satisfies Partial<RetryConfig>,
@@ -237,7 +239,7 @@ export const RETRY_CONFIGS = {
     backoffMultiplier: 2,
     useJitter: true,
     isRetryable: (error: Error) => {
-      const code = (error as any).code;
+      const code = getErrorCode(error);
       return code === 'ENOTFOUND' || code === 'ETIMEDOUT' ||
              code === 'ECONNRESET' || code === 'ECONNREFUSED' ||
              defaultIsRetryable(error);
@@ -245,8 +247,9 @@ export const RETRY_CONFIGS = {
   } satisfies Partial<RetryConfig>,
 };
 
-export function extractRetryAfterMs(error: any): number | null {
-  const headers = error.response?.headers || error.headers;
+export function extractRetryAfterMs(error: NetworkError | unknown): number | null {
+  const networkErr = error as NetworkError;
+  const headers = networkErr?.response?.headers;
   if (!headers) return null;
 
   const retryAfter = headers['retry-after'] || headers['Retry-After'];
