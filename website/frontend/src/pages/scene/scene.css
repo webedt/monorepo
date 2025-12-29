@@ -1271,3 +1271,86 @@
     left: 0;
   }
 }
+
+/* Z-Order Controls */
+.z-order-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.z-order-display {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.z-order-display label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  min-width: 36px;
+}
+
+.z-order-display .property-input {
+  width: 70px;
+}
+
+.z-order-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.z-order-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  transition: all var(--transition-fast);
+  min-width: 28px;
+}
+
+.z-order-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-primary);
+}
+
+.z-order-btn:active {
+  background: var(--color-primary);
+  color: white;
+}
+
+/* Toolbar Z-Order Group */
+.z-order-group .toolbar-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-right: 4px;
+}
+
+.toolbar-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Hierarchy Z-Index Display */
+.hierarchy-z-index {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, monospace);
+  opacity: 0.7;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.hierarchy-item.selected .hierarchy-z-index {
+  color: rgba(255, 255, 255, 0.8);
+}
