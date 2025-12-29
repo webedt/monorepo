@@ -78,6 +78,9 @@ import {
   healthMonitor,
   createDatabaseHealthCheck,
   metrics,
+  initializeExternalApiResilience,
+  getExternalApiCircuitBreakerStatus,
+  areExternalApisAvailable,
 } from '@webedt/shared';
 
 // Import background sync service
@@ -337,17 +340,25 @@ healthMonitor.startPeriodicChecks(30000);
 // Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints
 // at the root level, not part of the /api namespace, so they are not included in OpenAPI docs.
 app.get('/health', (req, res) => {
+  // Check external API availability via circuit breakers
+  const externalApis = areExternalApisAvailable();
+  const allExternalApisAvailable = externalApis.github && externalApis.claudeRemote;
+
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
     success: true,
     data: {
-      status: 'ok',
+      status: allExternalApisAvailable ? 'ok' : 'degraded',
       service: 'website-backend',
       containerId: CONTAINER_ID,
       build: {
         commitSha: BUILD_COMMIT_SHA,
         timestamp: BUILD_TIMESTAMP,
         imageTag: BUILD_IMAGE_TAG,
+      },
+      externalApis: {
+        github: externalApis.github ? 'available' : 'circuit_open',
+        claudeRemote: externalApis.claudeRemote ? 'available' : 'circuit_open',
       },
       timestamp: new Date().toISOString(),
     }
@@ -375,12 +386,28 @@ app.get('/health/status', async (req, res) => {
       },
     });
 
+    // Add external API circuit breaker details
+    const externalApiStatus = getExternalApiCircuitBreakerStatus();
+    const externalApis = areExternalApisAvailable();
+
     const statusCode = status.status === 'healthy' ? 200 : status.status === 'degraded' ? 200 : 503;
 
     res.setHeader('X-Container-ID', CONTAINER_ID);
     res.status(statusCode).json({
       success: status.status !== 'unhealthy',
-      data: status,
+      data: {
+        ...status,
+        externalApis: {
+          github: {
+            available: externalApis.github,
+            ...externalApiStatus.github,
+          },
+          claudeRemote: {
+            available: externalApis.claudeRemote,
+            ...externalApiStatus.claudeRemote,
+          },
+        },
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -511,6 +538,9 @@ app.use(
 async function startServer() {
   // Bootstrap all services (registers singletons with ServiceProvider)
   await bootstrapServices();
+
+  // Initialize external API resilience (circuit breakers for GitHub and Claude Remote)
+  initializeExternalApiResilience();
 
   app.listen(PORT, () => {
   console.log('='.repeat(60));

@@ -61,3 +61,19 @@ export {
   generateRequestKey,
   simpleHash,
 } from './requestDeduplicator.js';
+
+// External API Resilience
+export {
+  initializeExternalApiResilience,
+  withGitHubResilience,
+  withClaudeRemoteResilience,
+  withCircuitBreakerOnly,
+  withRetryOnly,
+  getExternalApiCircuitBreakerStatus,
+  areExternalApisAvailable,
+  resetCircuitBreaker,
+  GITHUB_CIRCUIT_BREAKER_CONFIG,
+  CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG,
+  GITHUB_RETRY_CONFIG,
+  CLAUDE_REMOTE_RETRY_CONFIG,
+} from './externalApiResilience.js';

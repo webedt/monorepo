@@ -8,7 +8,7 @@ import { Octokit } from '@octokit/rest';
 import { db, users, chatSessions, events, eq, and, isNull } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
+import { logger, ServiceProvider, AClaudeWebClient, withGitHubResilience, withClaudeRemoteResilience } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
 import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
@@ -61,7 +61,10 @@ async function archiveClaudeRemoteSession(
       baseUrl: CLAUDE_API_BASE_URL,
     });
 
-    await client.archiveSession(remoteSessionId);
+    await withClaudeRemoteResilience(
+      () => client.archiveSession(remoteSessionId),
+      'archiveSession'
+    );
     logger.info(`Archived Claude Remote session ${remoteSessionId}`, { component: 'GitHub' });
     return { success: true, message: 'Remote session archived' };
   } catch (error: unknown) {
@@ -70,6 +73,11 @@ async function archiveClaudeRemoteSession(
     if (err.status === 404) {
       logger.info(`Claude Remote session ${remoteSessionId} not found (already archived)`, { component: 'GitHub' });
       return { success: true, message: 'Remote session already archived or does not exist' };
+    }
+    // Handle circuit breaker rejection gracefully
+    if (err.message?.includes('circuit breaker')) {
+      logger.warn(`Claude Remote API unavailable for archiving session ${remoteSessionId}`, { component: 'GitHub' });
+      return { success: false, message: 'Claude Remote API temporarily unavailable' };
     }
     logger.error(`Failed to archive Claude Remote session ${remoteSessionId}`, error as Error, { component: 'GitHub' });
     return { success: false, message: 'Failed to archive remote session' };
@@ -266,10 +274,13 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
     }
 
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-    const { data: repos } = await octokit.repos.listForAuthenticatedUser({
-      sort: 'updated',
-      per_page: 100,
-    });
+    const { data: repos } = await withGitHubResilience(
+      () => octokit.repos.listForAuthenticatedUser({
+        sort: 'updated',
+        per_page: 100,
+      }),
+      'listForAuthenticatedUser'
+    );
 
     const formattedRepos = repos.map((repo) => ({
       id: repo.id,
@@ -286,6 +297,11 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
     res.json({ success: true, data: formattedRepos });
   } catch (error) {
     logger.error('GitHub repos error', error as Error, { component: 'GitHub' });
+    const err = error as { message?: string };
+    if (err.message?.includes('circuit breaker')) {
+      res.status(503).json({ success: false, error: err.message });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to fetch repositories' });
   }
 });
@@ -343,11 +359,14 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
     }
 
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-    const { data: branches } = await octokit.repos.listBranches({
-      owner,
-      repo,
-      per_page: 100,
-    });
+    const { data: branches } = await withGitHubResilience(
+      () => octokit.repos.listBranches({
+        owner,
+        repo,
+        per_page: 100,
+      }),
+      'listBranches'
+    );
 
     const formattedBranches = branches.map((branch) => ({
       name: branch.name,
@@ -361,6 +380,11 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
     res.json({ success: true, data: formattedBranches });
   } catch (error) {
     logger.error('GitHub branches error', error as Error, { component: 'GitHub' });
+    const err = error as { message?: string };
+    if (err.message?.includes('circuit breaker')) {
+      res.status(503).json({ success: false, error: err.message });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to fetch branches' });
   }
 });
@@ -449,18 +473,24 @@ router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, re
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
 
     const base = baseBranch || 'main';
-    const { data: baseBranchData } = await octokit.repos.getBranch({
-      owner,
-      repo,
-      branch: base,
-    });
+    const { data: baseBranchData } = await withGitHubResilience(
+      () => octokit.repos.getBranch({
+        owner,
+        repo,
+        branch: base,
+      }),
+      'getBranch'
+    );
 
-    await octokit.git.createRef({
-      owner,
-      repo,
-      ref: `refs/heads/${branchName}`,
-      sha: baseBranchData.commit.sha,
-    });
+    await withGitHubResilience(
+      () => octokit.git.createRef({
+        owner,
+        repo,
+        ref: `refs/heads/${branchName}`,
+        sha: baseBranchData.commit.sha,
+      }),
+      'createRef'
+    );
 
     logger.info(`Created branch ${branchName} from ${base} in ${owner}/${repo}`, { component: 'GitHub' });
 
@@ -476,6 +506,10 @@ router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, re
     const err = error as { status?: number; message?: string };
     logger.error('GitHub create branch error', error as Error, { component: 'GitHub' });
 
+    if (err.message?.includes('circuit breaker')) {
+      res.status(503).json({ success: false, error: err.message });
+      return;
+    }
     if (err.status === 422) {
       res.status(422).json({ success: false, error: 'Branch already exists' });
       return;
@@ -732,14 +766,17 @@ router.get('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: R
 
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
 
-    const { data: pulls } = await octokit.pulls.list({
-      owner,
-      repo,
-      head: head ? `${owner}:${head}` : undefined,
-      base: base as string | undefined,
-      state: 'all',
-      per_page: 10,
-    });
+    const { data: pulls } = await withGitHubResilience(
+      () => octokit.pulls.list({
+        owner,
+        repo,
+        head: head ? `${owner}:${head}` : undefined,
+        base: base as string | undefined,
+        state: 'all',
+        per_page: 10,
+      }),
+      'listPulls'
+    );
 
     const formattedPulls = pulls.map((pr) => ({
       number: pr.number,
@@ -763,6 +800,11 @@ router.get('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: R
     res.json({ success: true, data: formattedPulls });
   } catch (error) {
     logger.error('GitHub get pulls error', error as Error, { component: 'GitHub' });
+    const err = error as { message?: string };
+    if (err.message?.includes('circuit breaker')) {
+      res.status(503).json({ success: false, error: err.message });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to fetch pull requests' });
   }
 });

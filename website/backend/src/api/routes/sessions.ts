@@ -23,7 +23,7 @@ import {
   sendUnauthorized,
 } from '../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../middleware/sessionMiddleware.js';
-import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, type ClaudeWebClientConfig } from '@webedt/shared';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, withClaudeRemoteResilience, type ClaudeWebClientConfig } from '@webedt/shared';
 import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
