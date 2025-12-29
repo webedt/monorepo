@@ -65,6 +65,7 @@ export {
 // External API Resilience
 export {
   initializeExternalApiResilience,
+  resetExternalApiResilienceForTesting,
   withGitHubResilience,
   withClaudeRemoteResilience,
   withCircuitBreakerOnly,

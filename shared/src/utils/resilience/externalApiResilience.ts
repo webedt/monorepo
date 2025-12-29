@@ -192,6 +192,14 @@ export function initializeExternalApiResilience(): void {
   });
 }
 
+/**
+ * Reset the initialization state. Use for testing only.
+ * This allows re-initialization in test scenarios.
+ */
+export function resetExternalApiResilienceForTesting(): void {
+  initialized = false;
+}
+
 // =============================================================================
 // Resilience Wrappers
 // =============================================================================
