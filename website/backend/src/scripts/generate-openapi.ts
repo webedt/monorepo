@@ -31,8 +31,8 @@ interface OpenAPISpec {
 
 const spec = swaggerSpec as OpenAPISpec;
 
-// Generate and write the spec
-const specJson = JSON.stringify(swaggerSpec, null, 2);
+// Generate and write the spec (with trailing newline for POSIX compliance)
+const specJson = JSON.stringify(swaggerSpec, null, 2) + '\n';
 fs.writeFileSync(outputPath, specJson);
 
 console.log(`OpenAPI specification generated: ${outputPath}`);

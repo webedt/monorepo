@@ -233,56 +233,9 @@ healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
 // Start periodic health checks (every 30 seconds)
 healthMonitor.startPeriodicChecks(30000);
 
-/**
- * @openapi
- * /health:
- *   get:
- *     tags:
- *       - Health
- *     summary: Basic health check
- *     description: Fast health check endpoint for load balancers. Returns basic service status.
- *     security: []
- *     responses:
- *       200:
- *         description: Service is healthy
- *         headers:
- *           X-Container-ID:
- *             description: Container identifier
- *             schema:
- *               type: string
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     status:
- *                       type: string
- *                       example: ok
- *                     service:
- *                       type: string
- *                       example: website-backend
- *                     containerId:
- *                       type: string
- *                     build:
- *                       type: object
- *                       properties:
- *                         commitSha:
- *                           type: string
- *                         timestamp:
- *                           type: string
- *                         imageTag:
- *                           type: string
- *                     timestamp:
- *                       type: string
- *                       format: date-time
- */
 // Basic health check endpoint (fast, for load balancers)
+// Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints
+// at the root level, not part of the /api namespace, so they are not included in OpenAPI docs.
 app.get('/health', (req, res) => {
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({

@@ -79,7 +79,6 @@ API endpoints may be rate-limited at the infrastructure level.
       },
     ],
     tags: [
-      { name: 'Health', description: 'Health check and monitoring endpoints' },
       { name: 'Auth', description: 'Authentication and session management' },
       { name: 'Sessions', description: 'AI coding session operations' },
       { name: 'GitHub', description: 'GitHub OAuth and repository operations' },
@@ -150,6 +149,7 @@ API endpoints may be rate-limited at the infrastructure level.
         },
 
         // User schemas
+        // Note: Sensitive fields (tokens, auth objects) are excluded from API documentation
         User: {
           type: 'object',
           properties: {
@@ -157,10 +157,10 @@ API endpoints may be rate-limited at the infrastructure level.
             email: { type: 'string', format: 'email' },
             displayName: { type: 'string', nullable: true },
             githubId: { type: 'string', nullable: true },
-            githubAccessToken: { type: 'string', nullable: true },
-            claudeAuth: { type: 'object', nullable: true },
-            codexAuth: { type: 'object', nullable: true },
-            geminiAuth: { type: 'object', nullable: true },
+            githubConnected: { type: 'boolean', description: 'Whether GitHub is connected' },
+            claudeConnected: { type: 'boolean', description: 'Whether Claude auth is configured' },
+            codexConnected: { type: 'boolean', description: 'Whether Codex auth is configured' },
+            geminiConnected: { type: 'boolean', description: 'Whether Gemini auth is configured' },
             preferredProvider: { type: 'string', enum: ['claude', 'codex', 'gemini'], default: 'claude' },
             imageResizeMaxDimension: { type: 'integer', nullable: true },
             voiceCommandKeywords: { type: 'array', items: { type: 'string' } },
