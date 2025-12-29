@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, events, eq, asc, logger, ensureValidToken, fetchEnvironmentIdFromSessions, CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, extractEventUuid, SSEWriter } from '@webedt/shared';
+import { db, chatSessions, users, events, eq, asc, logger, ensureValidToken, fetchEnvironmentIdFromSessions, CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, extractEventUuid } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
