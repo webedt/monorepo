@@ -149,12 +149,20 @@ class ShutdownManager extends AShutdownManager {
         const remainingTime = settings.totalTimeoutMs - elapsed;
         const timeout = Math.min(settings.handlerTimeoutMs, remainingTime);
 
-        await Promise.race([
-          handler.shutdown(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Handler timeout')), timeout)
-          ),
-        ]);
+        // Store timeout ID so we can clear it when handler succeeds
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Handler timeout')), timeout);
+        });
+
+        try {
+          await Promise.race([handler.shutdown(), timeoutPromise]);
+        } finally {
+          // Always clear timeout to prevent memory leak
+          if (timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+          }
+        }
 
         const durationMs = Date.now() - handlerStartTime;
         successCount++;
