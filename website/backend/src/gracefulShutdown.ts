@@ -23,6 +23,7 @@ import {
 } from '@webedt/shared';
 
 import { connectionTracker } from './api/middleware/connectionTracker.js';
+import { cleanupRateLimitStores } from './api/middleware/rateLimit.js';
 
 export interface GracefulShutdownConfig {
   /**
@@ -151,6 +152,10 @@ export async function gracefulShutdown(
     // shutdown() is defined in the abstract base classes ASessionEventBroadcaster and ASessionListBroadcaster
     sessionEventBroadcaster.shutdown();
     sessionListBroadcaster.shutdown();
+
+    // Step 5.5: Clean up rate limit stores
+    logger.info('Cleaning up rate limit stores', { component: 'GracefulShutdown' });
+    cleanupRateLimitStores();
 
     // Step 6: Stop accepting new connections on the server
     logger.info('Closing HTTP server to new connections', { component: 'GracefulShutdown' });
