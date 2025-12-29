@@ -14,7 +14,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { randomBytes, timingSafeEqual } from 'crypto';
-import { logger } from '@webedt/shared';
+import { logger, isProduction } from '@webedt/shared';
 
 // Cookie options interface (subset of cookie package's CookieSerializeOptions)
 interface CookieSerializeOptions {
@@ -157,7 +157,7 @@ function isExemptPath(path: string): boolean {
 export function csrfTokenMiddleware(req: Request, res: Response, next: NextFunction): void {
   const cookies = parseCookies(req.headers.cookie);
   const existingToken = cookies[CSRF_COOKIE_NAME];
-  const isSecure = process.env.NODE_ENV === 'production';
+  const isSecure = isProduction();
 
   // Only generate a new token if one doesn't exist
   if (!existingToken) {
@@ -259,7 +259,7 @@ export function getCsrfToken(req: Request, res: Response): string {
 
   if (!token) {
     token = generateCsrfToken();
-    const isSecure = process.env.NODE_ENV === 'production';
+    const isSecure = isProduction();
     const cookieOptions = getCsrfCookieOptions(isSecure);
     res.appendHeader('Set-Cookie', serializeCookie(CSRF_COOKIE_NAME, token, cookieOptions));
   }

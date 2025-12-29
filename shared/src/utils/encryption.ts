@@ -11,6 +11,7 @@
 
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'crypto';
 import { logger } from './logging/logger.js';
+import { ENCRYPTION_KEY, ENCRYPTION_SALT } from '../config/env.js';
 
 // Constants
 const ALGORITHM = 'aes-256-gcm';
@@ -43,7 +44,7 @@ export interface EncryptedData {
  * Check if encryption is enabled (ENCRYPTION_KEY is set)
  */
 export function isEncryptionEnabled(): boolean {
-  return !!process.env.ENCRYPTION_KEY;
+  return !!ENCRYPTION_KEY;
 }
 
 /**
@@ -51,8 +52,8 @@ export function isEncryptionEnabled(): boolean {
  * Uses PBKDF2 for key derivation to handle variable-length passphrases
  */
 function getEncryptionKey(): Buffer {
-  const passphrase = process.env.ENCRYPTION_KEY;
-  const salt = process.env.ENCRYPTION_SALT;
+  const passphrase = ENCRYPTION_KEY;
+  const salt = ENCRYPTION_SALT;
 
   // Check if we can use cached key (both passphrase and salt unchanged)
   if (cachedKey && cachedPassphrase === passphrase && cachedSalt === salt) {
@@ -442,28 +443,28 @@ export function clearKeyCache(): void {
  * Validate that the encryption key and salt are properly configured
  */
 export function validateEncryptionConfig(): { valid: boolean; error?: string } {
-  if (!process.env.ENCRYPTION_KEY) {
+  if (!ENCRYPTION_KEY) {
     return {
       valid: false,
       error: 'ENCRYPTION_KEY environment variable is not set',
     };
   }
 
-  if (process.env.ENCRYPTION_KEY.length < 16) {
+  if (ENCRYPTION_KEY.length < 16) {
     return {
       valid: false,
       error: 'ENCRYPTION_KEY should be at least 16 characters (32+ recommended)',
     };
   }
 
-  if (!process.env.ENCRYPTION_SALT) {
+  if (!ENCRYPTION_SALT) {
     return {
       valid: false,
       error: 'ENCRYPTION_SALT environment variable is not set. Generate with: openssl rand -hex 16',
     };
   }
 
-  if (!/^[0-9a-fA-F]{32,}$/.test(process.env.ENCRYPTION_SALT)) {
+  if (!/^[0-9a-fA-F]{32,}$/.test(ENCRYPTION_SALT)) {
     return {
       valid: false,
       error: 'ENCRYPTION_SALT must be a valid hex string of at least 32 characters (16 bytes)',

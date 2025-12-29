@@ -9,6 +9,7 @@ import { homedir, platform, userInfo } from 'os';
 import { join } from 'path';
 import { desc } from 'drizzle-orm';
 import { logger } from '../utils/logging/logger.js';
+import { CLAUDE_ACCESS_TOKEN } from '../config/env.js';
 
 /**
  * Source of Claude authentication credentials
@@ -238,9 +239,9 @@ export async function getClaudeCredentials(
   }
 
   // 2. Environment variable
-  if (process.env.CLAUDE_ACCESS_TOKEN) {
+  if (CLAUDE_ACCESS_TOKEN) {
     return {
-      accessToken: process.env.CLAUDE_ACCESS_TOKEN,
+      accessToken: CLAUDE_ACCESS_TOKEN,
       source: 'environment',
     };
   }
