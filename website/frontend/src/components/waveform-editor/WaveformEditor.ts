@@ -192,7 +192,7 @@ export class WaveformEditor extends Component<HTMLDivElement> {
     this.ctx.fillStyle = '#0f1117';
     this.ctx.fillRect(0, 0, width, height);
 
-    if (!this.audioBuffer) return;
+    if (!this.audioBuffer || this.duration === 0) return;
 
     // Draw center line
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';

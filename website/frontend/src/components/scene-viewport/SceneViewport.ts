@@ -972,8 +972,12 @@ export class SceneViewport extends Component<HTMLDivElement> {
   }
 
   loadSprite(objectId: string, url: string): Promise<void> {
-    return this.spriteRenderer.load(objectId, url).then(() => {
-      this.renderScene();
-    });
+    return this.spriteRenderer.load(objectId, url)
+      .then(() => {
+        this.renderScene();
+      })
+      .catch((error) => {
+        console.error(`Failed to load sprite for ${objectId}:`, error);
+      });
   }
 }
