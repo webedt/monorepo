@@ -54,6 +54,14 @@ export const users = pgTable('users', {
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
   storageUsedBytes: text('storage_used_bytes').default('0').notNull(), // Current usage (stored as string for bigint precision)
+  // Spending limits configuration
+  spendingLimitEnabled: boolean('spending_limit_enabled').default(false).notNull(),
+  monthlyBudgetCents: text('monthly_budget_cents').default('0').notNull(), // Budget in cents (stored as string for precision)
+  perTransactionLimitCents: text('per_transaction_limit_cents').default('0').notNull(), // Per-transaction limit in cents
+  spendingResetDay: integer('spending_reset_day').default(1).notNull(), // Day of month to reset (1-31)
+  currentMonthSpentCents: text('current_month_spent_cents').default('0').notNull(), // Current month spending in cents
+  spendingLimitAction: text('spending_limit_action').default('warn').notNull(), // 'warn' | 'block' - action when limit reached
+  spendingResetAt: timestamp('spending_reset_at'), // When the current month spending was last reset
 });
 
 export const sessions = pgTable('sessions', {

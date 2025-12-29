@@ -28,6 +28,17 @@ export class SettingsPage extends Page<PageOptions> {
     usedFormatted: string;
     quotaFormatted: string;
   } | null = null;
+  private spendingLimitsData: {
+    enabled: boolean;
+    monthlyBudgetCents: string;
+    perTransactionLimitCents: string;
+    resetDay: number;
+    currentMonthSpentCents: string;
+    remainingBudgetCents: string;
+    usagePercent: number;
+    limitAction: string;
+    lastResetAt: string | null;
+  } | null = null;
 
   protected render(): string {
     return `
@@ -46,6 +57,11 @@ export class SettingsPage extends Page<PageOptions> {
           <section class="settings-section">
             <h2 class="section-title">Billing & Storage</h2>
             <div class="section-card billing-card"></div>
+          </section>
+
+          <section class="settings-section">
+            <h2 class="section-title">Spending Limits</h2>
+            <div class="section-card spending-limits-card"></div>
           </section>
 
           <section class="settings-section">
@@ -68,6 +84,7 @@ export class SettingsPage extends Page<PageOptions> {
   }
 
   async load(): Promise<void> {
+    // Load billing data
     try {
       const billing = await billingApi.getCurrentPlan();
       this.billingData = {
@@ -89,13 +106,45 @@ export class SettingsPage extends Page<PageOptions> {
         quotaFormatted: '5 GB',
       };
     }
+
+    // Load spending limits data
+    try {
+      const spendingLimits = await userApi.getSpendingLimits();
+      this.spendingLimitsData = spendingLimits || {
+        enabled: false,
+        monthlyBudgetCents: '0',
+        perTransactionLimitCents: '0',
+        resetDay: 1,
+        currentMonthSpentCents: '0',
+        remainingBudgetCents: '0',
+        usagePercent: 0,
+        limitAction: 'warn',
+        lastResetAt: null,
+      };
+    } catch (error) {
+      console.error('Failed to load spending limits:', error);
+      this.spendingLimitsData = {
+        enabled: false,
+        monthlyBudgetCents: '0',
+        perTransactionLimitCents: '0',
+        resetDay: 1,
+        currentMonthSpentCents: '0',
+        remainingBudgetCents: '0',
+        usagePercent: 0,
+        limitAction: 'warn',
+        lastResetAt: null,
+      };
+    }
+
     this.renderBillingSection();
+    this.renderSpendingLimitsSection();
   }
 
   protected onMount(): void {
     super.onMount();
     this.renderAccountSection();
     this.renderBillingSection();
+    this.renderSpendingLimitsSection();
     this.renderEditorSection();
     this.renderConnectionsSection();
     this.renderDangerSection();
@@ -232,6 +281,173 @@ export class SettingsPage extends Page<PageOptions> {
       ENTERPRISE: 'Enterprise',
     };
     return labels[tier] || tier;
+  }
+
+  private formatCentsAsDollars(cents: string | number): string {
+    const centsNum = Number(cents) || 0;
+    return (centsNum / 100).toFixed(2);
+  }
+
+  private renderSpendingLimitsSection(): void {
+    const container = this.$('.spending-limits-card') as HTMLElement;
+    if (!container) return;
+
+    // Clear existing content
+    container.innerHTML = '';
+
+    const data = this.spendingLimitsData;
+    const isEnabled = data?.enabled || false;
+    const monthlyBudget = this.formatCentsAsDollars(data?.monthlyBudgetCents || '0');
+    const perTransactionLimit = this.formatCentsAsDollars(data?.perTransactionLimitCents || '0');
+    const currentSpent = this.formatCentsAsDollars(data?.currentMonthSpentCents || '0');
+    const remainingBudget = this.formatCentsAsDollars(data?.remainingBudgetCents || '0');
+    const usagePercent = data?.usagePercent || 0;
+    const resetDay = data?.resetDay || 1;
+    const limitAction = data?.limitAction || 'warn';
+
+    const content = document.createElement('div');
+    content.className = 'spending-limits-content';
+    content.innerHTML = `
+      <div class="spending-limits-toggle">
+        <div class="setting-info">
+          <span class="setting-name">Enable Spending Limits</span>
+          <span class="setting-description">Set monthly and per-transaction spending limits</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="spending-limits-enabled" ${isEnabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="spending-limits-settings ${isEnabled ? '' : 'disabled'}">
+        <div class="spending-overview">
+          <div class="spending-status">
+            <div class="spending-header">
+              <span class="spending-label">Current Month Spending</span>
+              <span class="spending-value">$${currentSpent} / $${monthlyBudget}</span>
+            </div>
+            <div class="usage-bar">
+              <div class="usage-fill ${usagePercent >= 90 ? 'warning' : ''} ${usagePercent >= 100 ? 'exceeded' : ''}" style="width: ${Math.min(usagePercent, 100)}%"></div>
+            </div>
+            <div class="spending-footer">
+              <span class="usage-percent">${usagePercent.toFixed(1)}% used</span>
+              <span class="remaining">$${remainingBudget} remaining</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="spending-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Monthly Budget ($)</label>
+              <input type="number" id="monthly-budget" class="form-input" value="${monthlyBudget}" min="0" step="0.01" placeholder="0.00">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Per-Transaction Limit ($)</label>
+              <input type="number" id="per-transaction-limit" class="form-input" value="${perTransactionLimit}" min="0" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Reset Day of Month</label>
+              <select id="reset-day" class="setting-select">
+                ${Array.from({ length: 31 }, (_, i) => i + 1).map(day =>
+                  `<option value="${day}" ${day === resetDay ? 'selected' : ''}>${day}${this.getDaySuffix(day)}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">When Limit Reached</label>
+              <select id="limit-action" class="setting-select">
+                <option value="warn" ${limitAction === 'warn' ? 'selected' : ''}>Warn Only</option>
+                <option value="block" ${limitAction === 'block' ? 'selected' : ''}>Block Transactions</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="spending-actions">
+          <div class="save-spending-btn"></div>
+        </div>
+      </div>
+    `;
+
+    // Add event listener for toggle
+    const toggleCheckbox = content.querySelector('#spending-limits-enabled') as HTMLInputElement;
+    const settingsSection = content.querySelector('.spending-limits-settings') as HTMLElement;
+    if (toggleCheckbox && settingsSection) {
+      toggleCheckbox.addEventListener('change', async () => {
+        const enabled = toggleCheckbox.checked;
+        settingsSection.classList.toggle('disabled', !enabled);
+        try {
+          await userApi.updateSpendingLimits({ enabled });
+          toast.success(enabled ? 'Spending limits enabled' : 'Spending limits disabled');
+        } catch (error) {
+          toast.error('Failed to update spending limits');
+          toggleCheckbox.checked = !enabled;
+          settingsSection.classList.toggle('disabled', enabled);
+        }
+      });
+    }
+
+    // Create save button
+    const saveBtn = new Button('Save Limits', {
+      variant: 'primary',
+      onClick: () => this.handleSaveSpendingLimits(),
+    });
+    const saveBtnContainer = content.querySelector('.save-spending-btn') as HTMLElement;
+    if (saveBtnContainer) {
+      saveBtn.mount(saveBtnContainer);
+      this.buttons.push(saveBtn);
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
+  }
+
+  private getDaySuffix(day: number): string {
+    if (day >= 11 && day <= 13) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  }
+
+  private async handleSaveSpendingLimits(): Promise<void> {
+    const monthlyBudgetInput = this.$('#monthly-budget') as HTMLInputElement;
+    const perTransactionInput = this.$('#per-transaction-limit') as HTMLInputElement;
+    const resetDaySelect = this.$('#reset-day') as HTMLSelectElement;
+    const limitActionSelect = this.$('#limit-action') as HTMLSelectElement;
+
+    const monthlyBudgetCents = Math.round(parseFloat(monthlyBudgetInput?.value || '0') * 100);
+    const perTransactionLimitCents = Math.round(parseFloat(perTransactionInput?.value || '0') * 100);
+    const resetDay = parseInt(resetDaySelect?.value || '1', 10);
+    const limitAction = (limitActionSelect?.value || 'warn') as 'warn' | 'block';
+
+    try {
+      await userApi.updateSpendingLimits({
+        monthlyBudgetCents,
+        perTransactionLimitCents,
+        resetDay,
+        limitAction,
+      });
+      toast.success('Spending limits saved');
+
+      // Reload the spending limits data
+      const spendingLimits = await userApi.getSpendingLimits();
+      if (spendingLimits) {
+        this.spendingLimitsData = spendingLimits;
+        this.renderSpendingLimitsSection();
+      }
+    } catch (error) {
+      toast.error('Failed to save spending limits');
+    }
   }
 
   private renderEditorSection(): void {
