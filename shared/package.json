@@ -41,9 +41,11 @@
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
+    "@types/minimatch": "^5.1.2",
     "@types/node": "^22.19.3",
     "@types/pg": "^8.11.10",
     "@types/ws": "^8.5.13",
+    "minimatch": "^10.1.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }

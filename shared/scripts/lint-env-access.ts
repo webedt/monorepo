@@ -15,23 +15,25 @@
  */
 
 import { execSync } from 'child_process';
-import { resolve, relative } from 'path';
+import { resolve } from 'path';
+import { minimatch } from 'minimatch';
 
 // Files that are allowed to access process.env directly
-const ALLOWED_FILES = [
+const ALLOWED_PATTERNS = [
+  // The centralized config module itself
   'shared/src/config/env.ts',
   // Test files may need to mock env vars
   '**/*.test.ts',
   '**/*.spec.ts',
   // Build scripts that run outside the application context
-  'shared/scripts/',
-  'website/backend/src/scripts/',
+  'shared/scripts/**',
+  'website/backend/src/scripts/**',
   // Entry points that load dotenv/config
-  'website/backend/src/index.ts', // Only for 'dotenv/config' import, not direct access
+  'website/backend/src/index.ts',
 ];
 
-// Pattern that's explicitly allowed (dotenv import)
-const ALLOWED_PATTERNS = [
+// Content patterns that are explicitly allowed
+const ALLOWED_CONTENT_PATTERNS = [
   "import 'dotenv/config'",
 ];
 
@@ -39,6 +41,23 @@ interface Violation {
   file: string;
   line: number;
   content: string;
+}
+
+/**
+ * Check if a file path matches any of the allowed patterns
+ */
+function isFileAllowed(filePath: string): boolean {
+  return ALLOWED_PATTERNS.some((pattern) => {
+    // Use minimatch for proper glob matching
+    return minimatch(filePath, pattern, { matchBase: false });
+  });
+}
+
+/**
+ * Check if content contains an allowed pattern (e.g., dotenv import)
+ */
+function isContentAllowed(content: string): boolean {
+  return ALLOWED_CONTENT_PATTERNS.some((p) => content.includes(p));
 }
 
 function main() {
@@ -62,21 +81,11 @@ function main() {
 
       const [, filePath, lineNum, content] = match;
 
-      // Check if file is in allowed list
-      const isAllowed = ALLOWED_FILES.some(pattern => {
-        if (pattern.includes('*')) {
-          // Simple glob matching
-          const regex = new RegExp(pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
-          return regex.test(filePath);
-        }
-        return filePath.startsWith(pattern) || filePath === pattern;
-      });
-
-      if (isAllowed) continue;
+      // Check if file is in allowed list using minimatch
+      if (isFileAllowed(filePath)) continue;
 
       // Check if content matches allowed patterns
-      const contentMatches = ALLOWED_PATTERNS.some(p => content.includes(p));
-      if (contentMatches) continue;
+      if (isContentAllowed(content)) continue;
 
       violations.push({
         file: filePath,
@@ -86,11 +95,13 @@ function main() {
     }
 
     if (violations.length === 0) {
-      console.log('No violations found. All process.env access is properly centralized.');
+      console.log('✅ No violations found. All process.env access is properly centralized.');
       process.exit(0);
     }
 
-    console.log(`Found ${violations.length} direct process.env access(es) that should use centralized config:\n`);
+    console.log(
+      `❌ Found ${violations.length} direct process.env access(es) that should use centralized config:\n`
+    );
 
     for (const v of violations) {
       console.log(`  ${v.file}:${v.line}`);

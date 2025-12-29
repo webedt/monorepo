@@ -51,11 +51,6 @@ const integerWithDefault = (defaultValue: number) =>
     .refine((val) => !isNaN(val), { message: 'Must be a valid integer' });
 
 /**
- * Helper for required string with no default
- */
-const requiredString = z.string().min(1, 'Required');
-
-/**
  * Helper for optional string with default
  */
 const optionalString = (defaultValue: string) =>
@@ -629,11 +624,16 @@ export function logEnvConfig(): void {
 // =============================================================================
 
 /**
- * Complete configuration object for dependency injection
- * Prefer using individual exports for tree-shaking
+ * Complete configuration object for dependency injection.
+ * Prefer using individual exports for tree-shaking.
+ *
+ * NOTE: isProduction, isDevelopment, isTest are STATIC boolean values computed
+ * at module load time. If you need dynamic environment checks (e.g., in tests
+ * that modify NODE_ENV), use the exported functions isProduction(), isDevelopment(),
+ * or isTest() instead.
  */
 export const config = {
-  // Environment
+  // Environment (isProduction/isDevelopment/isTest are static - see note above)
   NODE_ENV,
   isProduction: isProduction(),
   isDevelopment: isDevelopment(),
