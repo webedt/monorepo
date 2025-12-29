@@ -3,7 +3,7 @@
  * Covers event writing, heartbeat management, and resource cleanup.
  */
 
-import { describe, it, beforeEach, afterEach, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { SSEWriter } from '../../src/utils/http/SSEWriter.js';
 import { ASseHelper } from '../../src/utils/http/ASseHelper.js';
@@ -17,6 +17,7 @@ class MockSseHelper extends ASseHelper {
   public writtenData: string[] = [];
   public setupCalled = false;
   public endCalled = false;
+  public endCallCount = 0;
   public writableState = true;
 
   setupSse(_res: SseWritable): void {
@@ -59,12 +60,14 @@ class MockSseHelper extends ASseHelper {
 
   end(_res: SseWritable): void {
     this.endCalled = true;
+    this.endCallCount++;
   }
 
   reset(): void {
     this.writtenData = [];
     this.setupCalled = false;
     this.endCalled = false;
+    this.endCallCount = 0;
     this.writableState = true;
   }
 }
@@ -322,8 +325,9 @@ describe('SSEWriter', () => {
       writer.end();
       writer.end();
 
-      // Should only call end once
+      // Should only call helper.end() exactly once
       assert.strictEqual(mockHelper.endCalled, true);
+      assert.strictEqual(mockHelper.endCallCount, 1);
     });
 
     it('should stop heartbeat when ending', async () => {
