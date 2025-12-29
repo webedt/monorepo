@@ -19,6 +19,12 @@ export abstract class ASseHelper extends AService {
 
   abstract writeEvent(res: SseWritable, event: Record<string, unknown>): boolean;
 
+  /**
+   * Write an event with an ID for Last-Event-ID support.
+   * The event ID allows clients to resume from where they left off after reconnection.
+   */
+  abstract writeEventWithId(res: SseWritable, eventId: string, event: Record<string, unknown>): boolean;
+
   abstract writeHeartbeat(res: SseWritable): boolean;
 
   abstract isWritable(res: SseWritable): boolean;
