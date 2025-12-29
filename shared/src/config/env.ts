@@ -110,6 +110,150 @@ export const TRASH_CLEANUP_INTERVAL_MS = parseInt(process.env.TRASH_CLEANUP_INTE
 export const TRASH_CLEANUP_INITIAL_DELAY_MS = parseInt(process.env.TRASH_CLEANUP_INITIAL_DELAY_MS || '60000', 10);  // 1 minute after startup
 export const TRASH_RETENTION_DAYS = parseInt(process.env.TRASH_RETENTION_DAYS || '30', 10);  // Keep trashed sessions for 30 days
 
+// =============================================================================
+// TIMEOUTS - All timeout values in milliseconds
+// =============================================================================
+
+/**
+ * HTTP request timeouts
+ * - HTTP_REQUEST_TIMEOUT_MS: Default timeout for HTTP requests (30s)
+ * - HTTP_HEAD_TIMEOUT_MS: Timeout for HEAD validation requests (10s)
+ * - HTTP_HEALTH_CHECK_TIMEOUT_MS: Timeout for health check endpoints (5s)
+ */
+export const HTTP_REQUEST_TIMEOUT_MS = parseInt(process.env.HTTP_REQUEST_TIMEOUT_MS || '30000', 10);
+export const HTTP_HEAD_TIMEOUT_MS = parseInt(process.env.HTTP_HEAD_TIMEOUT_MS || '10000', 10);
+export const HTTP_HEALTH_CHECK_TIMEOUT_MS = parseInt(process.env.HTTP_HEALTH_CHECK_TIMEOUT_MS || '5000', 10);
+
+/**
+ * SSE/WebSocket timeouts
+ * - SSE_STALE_TIMEOUT_MS: Time before subscriber is considered stale (30s)
+ */
+export const SSE_STALE_TIMEOUT_MS = parseInt(process.env.SSE_STALE_TIMEOUT_MS || '30000', 10);
+
+/**
+ * Database timeouts
+ * - DB_CONNECTION_TIMEOUT_MS: Timeout for new connections (5s)
+ * - DB_IDLE_TIMEOUT_MS: Time before idle connections are closed (30s)
+ * - DB_STATEMENT_TIMEOUT_MS: Maximum query execution time (30s)
+ */
+export const DB_CONNECTION_TIMEOUT_MS = parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '5000', 10);
+export const DB_IDLE_TIMEOUT_MS = parseInt(process.env.DB_IDLE_TIMEOUT_MS || '30000', 10);
+export const DB_STATEMENT_TIMEOUT_MS = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || '30000', 10);
+
+/**
+ * Circuit breaker timeouts
+ * - CIRCUIT_BREAKER_RESET_TIMEOUT_MS: Time before circuit breaker resets (30s)
+ */
+export const CIRCUIT_BREAKER_RESET_TIMEOUT_MS = parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT_MS || '30000', 10);
+
+/**
+ * Execution timeouts
+ * - WORKER_EXECUTION_TIMEOUT_MS: Maximum time for worker execution (30 min)
+ * - WORKER_HEALTH_CHECK_TIMEOUT_MS: Timeout for worker health checks (5s)
+ */
+export const WORKER_EXECUTION_TIMEOUT_MS = parseInt(process.env.WORKER_EXECUTION_TIMEOUT_MS || '1800000', 10);
+export const WORKER_HEALTH_CHECK_TIMEOUT_MS = parseInt(process.env.WORKER_HEALTH_CHECK_TIMEOUT_MS || '5000', 10);
+
+// =============================================================================
+// INTERVALS - All interval values in milliseconds
+// =============================================================================
+
+/**
+ * SSE intervals
+ * - SSE_HEARTBEAT_INTERVAL_MS: Frequency of SSE heartbeats (15s)
+ * - SSE_CLEANUP_INTERVAL_MS: Frequency of stale subscriber cleanup (10s)
+ */
+export const SSE_HEARTBEAT_INTERVAL_MS = parseInt(process.env.SSE_HEARTBEAT_INTERVAL_MS || '15000', 10);
+export const SSE_CLEANUP_INTERVAL_MS = parseInt(process.env.SSE_CLEANUP_INTERVAL_MS || '10000', 10);
+
+/**
+ * Health check intervals
+ * - HEALTH_CHECK_INTERVAL_MS: Frequency of periodic health checks (30s)
+ * - DB_HEALTH_CHECK_INTERVAL_MS: Frequency of database health checks (30s)
+ */
+export const HEALTH_CHECK_INTERVAL_MS = parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || '30000', 10);
+export const DB_HEALTH_CHECK_INTERVAL_MS = parseInt(process.env.DB_HEALTH_CHECK_INTERVAL_MS || '30000', 10);
+
+/**
+ * Sync intervals
+ * - CRDT_SYNC_INTERVAL_MS: Frequency of CRDT sync operations (1s)
+ */
+export const CRDT_SYNC_INTERVAL_MS = parseInt(process.env.CRDT_SYNC_INTERVAL_MS || '1000', 10);
+
+// =============================================================================
+// LIMITS - Capacity and resource limits
+// =============================================================================
+
+/**
+ * SSE subscriber limits
+ * - SSE_MAX_LISTENERS: Maximum total SSE listeners across all sessions (1000)
+ * - SSE_MAX_SUBSCRIBERS_PER_SESSION: Maximum subscribers per session (50)
+ * - SSE_MAX_SUBSCRIBERS_PER_USER: Maximum subscribers per user (10)
+ * - SSE_WARN_SUBSCRIBER_COUNT: Subscriber count that triggers warning (500)
+ * - SSE_ERROR_SUBSCRIBER_COUNT: Subscriber count that triggers error/eviction (900)
+ */
+export const SSE_MAX_LISTENERS = parseInt(process.env.SSE_MAX_LISTENERS || '1000', 10);
+export const SSE_MAX_SUBSCRIBERS_PER_SESSION = parseInt(process.env.SSE_MAX_SUBSCRIBERS_PER_SESSION || '50', 10);
+export const SSE_MAX_SUBSCRIBERS_PER_USER = parseInt(process.env.SSE_MAX_SUBSCRIBERS_PER_USER || '10', 10);
+export const SSE_WARN_SUBSCRIBER_COUNT = parseInt(process.env.SSE_WARN_SUBSCRIBER_COUNT || '500', 10);
+export const SSE_ERROR_SUBSCRIBER_COUNT = parseInt(process.env.SSE_ERROR_SUBSCRIBER_COUNT || '900', 10);
+
+/**
+ * Database pool limits
+ * - DB_MAX_CONNECTIONS: Maximum connections in pool (20)
+ * - DB_MIN_CONNECTIONS: Minimum connections to maintain (2)
+ */
+export const DB_MAX_CONNECTIONS = parseInt(process.env.DB_MAX_CONNECTIONS || '20', 10);
+export const DB_MIN_CONNECTIONS = parseInt(process.env.DB_MIN_CONNECTIONS || '2', 10);
+
+/**
+ * Import/fetch limits
+ * - IMPORT_MAX_FILE_SIZE_BYTES: Maximum file size for URL imports (10MB)
+ */
+export const IMPORT_MAX_FILE_SIZE_BYTES = parseInt(process.env.IMPORT_MAX_FILE_SIZE_BYTES || '10485760', 10);
+
+/**
+ * Batch processing limits
+ * - CRDT_MAX_BATCH_SIZE: Maximum operations per CRDT sync batch (50)
+ * - MAX_CONCURRENT_API_CALLS: Maximum parallel API calls for sync (5)
+ */
+export const CRDT_MAX_BATCH_SIZE = parseInt(process.env.CRDT_MAX_BATCH_SIZE || '50', 10);
+export const MAX_CONCURRENT_API_CALLS = parseInt(process.env.MAX_CONCURRENT_API_CALLS || '5', 10);
+
+/**
+ * LRU eviction rate
+ * - LRU_EVICTION_RATE: Percentage of LRU entries to evict (0.2 = 20%)
+ */
+export const LRU_EVICTION_RATE = parseFloat(process.env.LRU_EVICTION_RATE || '0.2');
+
+// =============================================================================
+// RETRY CONFIGURATION - Retry and backoff settings
+// =============================================================================
+
+/**
+ * Default retry configuration
+ * - RETRY_MAX_ATTEMPTS: Maximum retry attempts (3)
+ * - RETRY_BASE_DELAY_MS: Base delay between retries (1000ms)
+ * - RETRY_MAX_DELAY_MS: Maximum delay between retries (30000ms)
+ * - RETRY_BACKOFF_MULTIPLIER: Exponential backoff multiplier (2)
+ * - RETRY_JITTER_FACTOR: Jitter factor for delay randomization (0.3 = 30%)
+ */
+export const RETRY_MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS || '3', 10);
+export const RETRY_BASE_DELAY_MS = parseInt(process.env.RETRY_BASE_DELAY_MS || '1000', 10);
+export const RETRY_MAX_DELAY_MS = parseInt(process.env.RETRY_MAX_DELAY_MS || '30000', 10);
+export const RETRY_BACKOFF_MULTIPLIER = parseFloat(process.env.RETRY_BACKOFF_MULTIPLIER || '2');
+export const RETRY_JITTER_FACTOR = parseFloat(process.env.RETRY_JITTER_FACTOR || '0.3');
+
+/**
+ * Circuit breaker configuration
+ * - CIRCUIT_BREAKER_FAILURE_THRESHOLD: Failures before opening circuit (5)
+ * - CIRCUIT_BREAKER_SUCCESS_THRESHOLD: Successes in half-open to close (3)
+ * - CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS: Max attempts in half-open state (3)
+ */
+export const CIRCUIT_BREAKER_FAILURE_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10);
+export const CIRCUIT_BREAKER_SUCCESS_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_SUCCESS_THRESHOLD || '3', 10);
+export const CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS || '3', 10);
+
 /**
  * Validate required environment variables
  */

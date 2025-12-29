@@ -14,6 +14,8 @@
 
 import { EventEmitter } from 'events';
 
+import { INTERVALS, LIMITS, RETRY } from '../config/constants.js';
+
 import type { CRDTConfig } from './types.js';
 import type { ConflictInfo } from './types.js';
 import type { DocumentSyncState } from './types.js';
@@ -83,16 +85,17 @@ export interface NetworkSyncConfig {
 
 /**
  * Default network sync configuration
+ * Values are sourced from centralized config for environment-based customization
  */
 export const DEFAULT_NETWORK_SYNC_CONFIG: NetworkSyncConfig = {
   replicaId: '',
   autoSync: true,
-  syncIntervalMs: 1000,
-  maxBatchSize: 50,
+  syncIntervalMs: INTERVALS.SYNC.CRDT,
+  maxBatchSize: LIMITS.BATCH.CRDT_SIZE,
   retry: {
-    maxAttempts: 3,
-    baseDelayMs: 1000,
-    maxDelayMs: 10000,
+    maxAttempts: RETRY.DEFAULT.MAX_ATTEMPTS,
+    baseDelayMs: RETRY.DEFAULT.BASE_DELAY_MS,
+    maxDelayMs: 10000, // Shorter max delay for CRDT sync
   },
   debug: false,
 };
