@@ -33,3 +33,7 @@ export type {
   ProjectItem,
   AddItemResult,
 } from './projectsService.types.js';
+
+// Rate Limiter
+export { GitHubRateLimiter, withRateLimiting } from './rateLimiter.js';
+export type { RateLimitState, RateLimiterConfig } from './rateLimiter.js';
