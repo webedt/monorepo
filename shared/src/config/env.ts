@@ -223,8 +223,10 @@ export const MAX_CONCURRENT_API_CALLS = parseInt(process.env.MAX_CONCURRENT_API_
 /**
  * LRU eviction rate
  * - LRU_EVICTION_RATE: Percentage of LRU entries to evict (0.2 = 20%)
+ *   Valid range: 0.1-0.5 (10%-50%)
  */
-export const LRU_EVICTION_RATE = parseFloat(process.env.LRU_EVICTION_RATE || '0.2');
+const rawLruEvictionRate = parseFloat(process.env.LRU_EVICTION_RATE || '0.2');
+export const LRU_EVICTION_RATE = Math.max(0.1, Math.min(0.5, rawLruEvictionRate));
 
 // =============================================================================
 // RETRY CONFIGURATION - Retry and backoff settings
@@ -255,6 +257,35 @@ export const CIRCUIT_BREAKER_SUCCESS_THRESHOLD = parseInt(process.env.CIRCUIT_BR
 export const CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS || '3', 10);
 
 /**
+ * Context-specific retry configuration
+ * These allow fine-tuning retry behavior for specific subsystems
+ * - CRDT_RETRY_MAX_DELAY_MS: Max delay for CRDT sync retries (10s, shorter for real-time sync)
+ * - DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS: Max delay for DB health check retries (10s)
+ * - DB_CONNECTION_MAX_RETRIES: Max retries for database connections (5, more than standard)
+ */
+export const CRDT_RETRY_MAX_DELAY_MS = parseInt(process.env.CRDT_RETRY_MAX_DELAY_MS || '10000', 10);
+export const DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS = parseInt(process.env.DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS || '10000', 10);
+export const DB_CONNECTION_MAX_RETRIES = parseInt(process.env.DB_CONNECTION_MAX_RETRIES || '5', 10);
+
+// =============================================================================
+// RECOVERY DELAYS - Suggested wait times for different error types
+// =============================================================================
+
+/**
+ * Recovery delay configuration for error-specific retry strategies
+ * - RECOVERY_DELAY_RATE_LIMIT_MS: Delay for rate limit errors (60s)
+ * - RECOVERY_DELAY_NETWORK_MS: Delay for network errors (2s)
+ * - RECOVERY_DELAY_SERVER_MS: Delay for server errors (5s)
+ * - RECOVERY_DELAY_CONFLICT_MS: Delay for conflict errors (10s)
+ * - RECOVERY_DELAY_UNKNOWN_MS: Delay for unknown errors (1s)
+ */
+export const RECOVERY_DELAY_RATE_LIMIT_MS = parseInt(process.env.RECOVERY_DELAY_RATE_LIMIT_MS || '60000', 10);
+export const RECOVERY_DELAY_NETWORK_MS = parseInt(process.env.RECOVERY_DELAY_NETWORK_MS || '2000', 10);
+export const RECOVERY_DELAY_SERVER_MS = parseInt(process.env.RECOVERY_DELAY_SERVER_MS || '5000', 10);
+export const RECOVERY_DELAY_CONFLICT_MS = parseInt(process.env.RECOVERY_DELAY_CONFLICT_MS || '10000', 10);
+export const RECOVERY_DELAY_UNKNOWN_MS = parseInt(process.env.RECOVERY_DELAY_UNKNOWN_MS || '1000', 10);
+
+/**
  * Validate required environment variables
  */
 export function validateEnv(): { valid: boolean; errors: string[]; warnings: string[] } {
@@ -270,6 +301,34 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   // Claude Remote Sessions validation
   if (!CLAUDE_ENVIRONMENT_ID) {
     warnings.push('CLAUDE_ENVIRONMENT_ID not set - Claude Remote Sessions will not work');
+  }
+
+  // SSE limits validation - ensure thresholds are in proper relationship
+  if (SSE_WARN_SUBSCRIBER_COUNT >= SSE_ERROR_SUBSCRIBER_COUNT) {
+    warnings.push(`SSE_WARN_SUBSCRIBER_COUNT (${SSE_WARN_SUBSCRIBER_COUNT}) should be less than SSE_ERROR_SUBSCRIBER_COUNT (${SSE_ERROR_SUBSCRIBER_COUNT})`);
+  }
+  if (SSE_ERROR_SUBSCRIBER_COUNT >= SSE_MAX_LISTENERS) {
+    warnings.push(`SSE_ERROR_SUBSCRIBER_COUNT (${SSE_ERROR_SUBSCRIBER_COUNT}) should be less than SSE_MAX_LISTENERS (${SSE_MAX_LISTENERS})`);
+  }
+  if (SSE_MAX_LISTENERS <= 0) {
+    errors.push('SSE_MAX_LISTENERS must be a positive number');
+  }
+  if (SSE_MAX_SUBSCRIBERS_PER_SESSION <= 0) {
+    errors.push('SSE_MAX_SUBSCRIBERS_PER_SESSION must be a positive number');
+  }
+  if (SSE_MAX_SUBSCRIBERS_PER_USER <= 0) {
+    errors.push('SSE_MAX_SUBSCRIBERS_PER_USER must be a positive number');
+  }
+
+  // Database limits validation
+  if (DB_MAX_CONNECTIONS <= 0) {
+    errors.push('DB_MAX_CONNECTIONS must be a positive number');
+  }
+  if (DB_MIN_CONNECTIONS < 0) {
+    errors.push('DB_MIN_CONNECTIONS must be non-negative');
+  }
+  if (DB_MIN_CONNECTIONS > DB_MAX_CONNECTIONS) {
+    warnings.push(`DB_MIN_CONNECTIONS (${DB_MIN_CONNECTIONS}) should not exceed DB_MAX_CONNECTIONS (${DB_MAX_CONNECTIONS})`);
   }
 
   return {

@@ -48,10 +48,20 @@ import {
   RETRY_MAX_DELAY_MS,
   RETRY_BACKOFF_MULTIPLIER,
   RETRY_JITTER_FACTOR,
+  // Context-specific retry
+  CRDT_RETRY_MAX_DELAY_MS,
+  DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS,
+  DB_CONNECTION_MAX_RETRIES,
   // Circuit breaker
   CIRCUIT_BREAKER_FAILURE_THRESHOLD,
   CIRCUIT_BREAKER_SUCCESS_THRESHOLD,
   CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
+  // Recovery delays
+  RECOVERY_DELAY_RATE_LIMIT_MS,
+  RECOVERY_DELAY_NETWORK_MS,
+  RECOVERY_DELAY_SERVER_MS,
+  RECOVERY_DELAY_CONFLICT_MS,
+  RECOVERY_DELAY_UNKNOWN_MS,
 } from './env.js';
 
 /**
@@ -341,13 +351,45 @@ export const CIRCUIT_BREAKER = {
  */
 export const RECOVERY_DELAYS = {
   /** Delay for rate limit errors (default: 60s) */
-  RATE_LIMIT: 60000,
+  RATE_LIMIT: RECOVERY_DELAY_RATE_LIMIT_MS,
   /** Delay for network errors (default: 2s) */
-  NETWORK: 2000,
+  NETWORK: RECOVERY_DELAY_NETWORK_MS,
   /** Delay for server errors (default: 5s) */
-  SERVER: 5000,
+  SERVER: RECOVERY_DELAY_SERVER_MS,
   /** Delay for conflict errors (default: 10s) */
-  CONFLICT: 10000,
+  CONFLICT: RECOVERY_DELAY_CONFLICT_MS,
   /** Delay for unknown errors (default: 1s) */
-  UNKNOWN: 1000,
+  UNKNOWN: RECOVERY_DELAY_UNKNOWN_MS,
+} as const;
+
+/**
+ * Context-specific retry configuration
+ *
+ * These values override defaults for specific use cases where
+ * different retry behavior is needed.
+ */
+export const CONTEXT_RETRY = {
+  /**
+   * CRDT sync retry configuration
+   * Shorter max delay for responsive real-time sync
+   */
+  CRDT: {
+    MAX_DELAY_MS: CRDT_RETRY_MAX_DELAY_MS,
+  },
+
+  /**
+   * Database health check retry configuration
+   * Shorter max delay for quick health status updates
+   */
+  DB_HEALTH_CHECK: {
+    MAX_DELAY_MS: DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS,
+  },
+
+  /**
+   * Database connection retry configuration
+   * More retries for critical database connections
+   */
+  DB_CONNECTION: {
+    MAX_RETRIES: DB_CONNECTION_MAX_RETRIES,
+  },
 } as const;

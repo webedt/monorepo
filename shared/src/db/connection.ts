@@ -10,7 +10,7 @@
 
 import pg from 'pg';
 
-import { TIMEOUTS, LIMITS, RETRY, INTERVALS } from '../config/constants.js';
+import { TIMEOUTS, LIMITS, RETRY, INTERVALS, CONTEXT_RETRY } from '../config/constants.js';
 
 const { Pool } = pg;
 
@@ -75,7 +75,7 @@ export class DatabaseConnection {
       idleTimeoutMillis: config.idleTimeoutMillis ?? TIMEOUTS.DATABASE.IDLE,
       connectionTimeoutMillis: config.connectionTimeoutMillis ?? TIMEOUTS.DATABASE.CONNECTION,
       statementTimeoutMs: config.statementTimeoutMs ?? TIMEOUTS.DATABASE.STATEMENT,
-      maxRetries: config.maxRetries ?? 5, // Database connections need more retries than standard
+      maxRetries: config.maxRetries ?? CONTEXT_RETRY.DB_CONNECTION.MAX_RETRIES,
       baseRetryDelayMs: config.baseRetryDelayMs ?? RETRY.DEFAULT.BASE_DELAY_MS,
       maxRetryDelayMs: config.maxRetryDelayMs ?? RETRY.DEFAULT.MAX_DELAY_MS,
     };

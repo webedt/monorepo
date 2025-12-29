@@ -14,7 +14,7 @@
 
 import { EventEmitter } from 'events';
 
-import { INTERVALS, LIMITS, RETRY } from '../config/constants.js';
+import { INTERVALS, LIMITS, RETRY, CONTEXT_RETRY } from '../config/constants.js';
 
 import type { CRDTConfig } from './types.js';
 import type { ConflictInfo } from './types.js';
@@ -95,7 +95,7 @@ export const DEFAULT_NETWORK_SYNC_CONFIG: NetworkSyncConfig = {
   retry: {
     maxAttempts: RETRY.DEFAULT.MAX_ATTEMPTS,
     baseDelayMs: RETRY.DEFAULT.BASE_DELAY_MS,
-    maxDelayMs: 10000, // Shorter max delay for CRDT sync
+    maxDelayMs: CONTEXT_RETRY.CRDT.MAX_DELAY_MS,
   },
   debug: false,
 };

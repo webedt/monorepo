@@ -21,7 +21,7 @@ import {
   type ConnectionStats,
   type DatabaseHealthCheckResult,
 } from './connection.js';
-import { TIMEOUTS, LIMITS, RETRY } from '../config/constants.js';
+import { TIMEOUTS, LIMITS, RETRY, CONTEXT_RETRY } from '../config/constants.js';
 import {
   runMigrations,
   validateSchema,
@@ -299,7 +299,7 @@ async function doInitialize(): Promise<void> {
       minConnections: 0,
       maxRetries: RETRY.DEFAULT.MAX_ATTEMPTS,
       baseRetryDelayMs: RETRY.DEFAULT.BASE_DELAY_MS,
-      maxRetryDelayMs: 10000,  // Shorter max delay for health check manager
+      maxRetryDelayMs: CONTEXT_RETRY.DB_HEALTH_CHECK.MAX_DELAY_MS,
     });
 
     console.log('');
