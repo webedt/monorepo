@@ -13,6 +13,7 @@ import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
+import { GameRuntime } from '../../lib/game';
 import { sceneStore } from '../../stores/sceneStore';
 import { customComponentsStore } from '../../stores';
 import type {
@@ -64,6 +65,11 @@ export class ScenePage extends Page<ScenePageOptions> {
   private showComponentsLibrary = false;
   private componentIdCounter = 0;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Play mode
+  private gameRuntime: GameRuntime | null = null;
+  private isPlayMode = false;
+  private playModeTimeScale = 1.0;
 
   // Event listener references for cleanup
   private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
@@ -202,6 +208,31 @@ export class ScenePage extends Page<ScenePageOptions> {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
               AI Suggest
             </button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group play-group">
+            <button class="toolbar-btn play-btn" data-action="play" title="Play (F5)">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </button>
+            <button class="toolbar-btn pause-btn" data-action="pause" title="Pause" style="display: none;">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            </button>
+            <button class="toolbar-btn stop-btn" data-action="stop" title="Stop (Escape)" style="display: none;">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+            </button>
+            <div class="play-time-display" style="display: none;">
+              <span class="play-time">0:00</span>
+              <span class="play-fps">60 FPS</span>
+            </div>
+            <select class="play-speed-select" style="display: none;" title="Playback Speed">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
           </div>
         </div>
 
@@ -566,6 +597,45 @@ export class ScenePage extends Page<ScenePageOptions> {
         });
       });
     }
+
+    // Play mode controls
+    const playBtn = this.$('[data-action="play"]');
+    const pauseBtn = this.$('[data-action="pause"]');
+    const stopBtn = this.$('[data-action="stop"]');
+    const playSpeedSelect = this.$('.play-speed-select') as HTMLSelectElement;
+
+    if (playBtn) {
+      playBtn.addEventListener('click', () => this.startPlayMode());
+    }
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', () => this.togglePausePlayMode());
+    }
+    if (stopBtn) {
+      stopBtn.addEventListener('click', () => this.stopPlayMode());
+    }
+    if (playSpeedSelect) {
+      playSpeedSelect.addEventListener('change', () => {
+        this.playModeTimeScale = parseFloat(playSpeedSelect.value);
+        if (this.gameRuntime) {
+          this.gameRuntime.setTimeScale(this.playModeTimeScale);
+        }
+      });
+    }
+
+    // Keyboard shortcuts for play mode
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'F5') {
+        e.preventDefault();
+        if (this.isPlayMode) {
+          this.stopPlayMode();
+        } else {
+          this.startPlayMode();
+        }
+      } else if (e.key === 'Escape' && this.isPlayMode) {
+        e.preventDefault();
+        this.stopPlayMode();
+      }
+    });
   }
 
   private setupCanvas(): void {
@@ -2798,6 +2868,307 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
   }
 
+  // ==================== Play Mode Methods ====================
+
+  private startPlayMode(): void {
+    if (this.isPlayMode) return;
+    if (!this.activeScene || this.objects.length === 0) {
+      toast.warning('Add objects to the scene before playing');
+      return;
+    }
+    if (!this.sceneCanvas || !this.ctx || !this.viewport) return;
+
+    this.isPlayMode = true;
+
+    // Initialize game runtime
+    this.gameRuntime = new GameRuntime({
+      canvas: this.sceneCanvas,
+      ctx: this.ctx,
+      screenToWorld: (screenX, screenY) => this.viewport!.screenToWorld(screenX, screenY),
+      onRender: (runtime) => this.renderPlayMode(runtime),
+      targetFps: 60,
+    });
+
+    this.gameRuntime.setTimeScale(this.playModeTimeScale);
+    this.gameRuntime.play(this.objects);
+
+    // Update UI
+    this.updatePlayModeUI();
+    this.updateEditorUIForPlayMode(true);
+
+    // Add play-mode class to scene page
+    const scenePage = this.$('.scene-page');
+    if (scenePage) scenePage.classList.add('play-mode');
+
+    toast.info('Play Mode started - Press Escape or F5 to stop');
+  }
+
+  private stopPlayMode(): void {
+    if (!this.isPlayMode) return;
+
+    this.isPlayMode = false;
+
+    if (this.gameRuntime) {
+      this.gameRuntime.stop();
+      this.gameRuntime.destroy();
+      this.gameRuntime = null;
+    }
+
+    // Update UI
+    this.updatePlayModeUI();
+    this.updateEditorUIForPlayMode(false);
+
+    // Remove play-mode class
+    const scenePage = this.$('.scene-page');
+    if (scenePage) scenePage.classList.remove('play-mode');
+
+    // Re-render the scene in edit mode
+    this.renderScene();
+  }
+
+  private togglePausePlayMode(): void {
+    if (!this.isPlayMode || !this.gameRuntime) return;
+
+    if (this.gameRuntime.isPaused()) {
+      this.gameRuntime.resume();
+    } else {
+      this.gameRuntime.pause();
+    }
+
+    this.updatePlayModeUI();
+  }
+
+  private updatePlayModeUI(): void {
+    const playBtn = this.$('[data-action="play"]') as HTMLButtonElement;
+    const pauseBtn = this.$('[data-action="pause"]') as HTMLButtonElement;
+    const stopBtn = this.$('[data-action="stop"]') as HTMLButtonElement;
+    const timeDisplay = this.$('.play-time-display') as HTMLElement;
+    const speedSelect = this.$('.play-speed-select') as HTMLElement;
+
+    if (this.isPlayMode) {
+      // Show play mode controls
+      if (playBtn) playBtn.style.display = 'none';
+      if (pauseBtn) {
+        pauseBtn.style.display = 'flex';
+        // Toggle play/pause icon based on state
+        const isPaused = this.gameRuntime?.isPaused() ?? false;
+        pauseBtn.innerHTML = isPaused
+          ? '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>'
+          : '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+        pauseBtn.title = isPaused ? 'Resume' : 'Pause';
+      }
+      if (stopBtn) stopBtn.style.display = 'flex';
+      if (timeDisplay) timeDisplay.style.display = 'flex';
+      if (speedSelect) speedSelect.style.display = 'block';
+    } else {
+      // Show edit mode controls
+      if (playBtn) playBtn.style.display = 'flex';
+      if (pauseBtn) pauseBtn.style.display = 'none';
+      if (stopBtn) stopBtn.style.display = 'none';
+      if (timeDisplay) timeDisplay.style.display = 'none';
+      if (speedSelect) speedSelect.style.display = 'none';
+    }
+  }
+
+  private updateEditorUIForPlayMode(isPlaying: boolean): void {
+    // Hide/show editor-only elements
+    const hierarchyPanel = this.$('.hierarchy-panel') as HTMLElement;
+    const propertiesPanel = this.$('.properties-panel') as HTMLElement;
+    const sceneTabs = this.$('.scene-tabs-container-wrapper') as HTMLElement;
+
+    // Disable interaction with editor panels during play
+    if (hierarchyPanel) hierarchyPanel.style.opacity = isPlaying ? '0.5' : '1';
+    if (propertiesPanel) propertiesPanel.style.opacity = isPlaying ? '0.5' : '1';
+
+    // Disable toolbar buttons (except play controls)
+    const toolbarBtns = this.$$('.toolbar-btn:not(.play-btn):not(.pause-btn):not(.stop-btn)');
+    toolbarBtns.forEach(btn => {
+      (btn as HTMLButtonElement).disabled = isPlaying;
+    });
+
+    // Disable scene tabs
+    if (sceneTabs) sceneTabs.style.pointerEvents = isPlaying ? 'none' : 'auto';
+  }
+
+  private renderPlayMode(runtime: GameRuntime): void {
+    if (!this.ctx || !this.viewport || !this.sceneCanvas) return;
+
+    const { width, height } = this.sceneCanvas;
+
+    // Clear canvas
+    this.ctx.clearRect(0, 0, width, height);
+
+    // Fill background
+    this.ctx.fillStyle = '#1a1a2e';
+    this.ctx.fillRect(0, 0, width, height);
+
+    // Apply viewport transform
+    this.ctx.save();
+    this.viewport.applyTransform(this.ctx);
+
+    // Render all visible runtime objects
+    const visibleObjects = runtime.getVisibleObjects();
+    for (const runtimeObj of visibleObjects) {
+      this.renderPlayModeObject(runtimeObj);
+    }
+
+    this.ctx.restore();
+
+    // Update time display
+    this.updatePlayTimeDisplay(runtime);
+
+    // Handle play mode input (example: object interaction)
+    this.handlePlayModeInput(runtime);
+  }
+
+  private renderPlayModeObject(runtimeObj: {
+    id: string;
+    original: SceneObject;
+    x: number;
+    y: number;
+    rotation: number;
+    scaleX: number;
+    scaleY: number;
+    opacity: number;
+    visible: boolean;
+  }): void {
+    if (!this.ctx || !runtimeObj.visible) return;
+
+    const obj = runtimeObj.original;
+    const dims = this.getObjectDimensions(obj);
+    const pivotX = obj.transform.pivotX ?? 0.5;
+    const pivotY = obj.transform.pivotY ?? 0.5;
+    const pivotOffsetX = dims.width * pivotX;
+    const pivotOffsetY = dims.height * pivotY;
+
+    this.ctx.save();
+    this.ctx.globalAlpha = runtimeObj.opacity;
+
+    // Apply runtime transform (using runtime state, not original)
+    this.ctx.translate(runtimeObj.x, runtimeObj.y);
+    this.ctx.rotate((runtimeObj.rotation * Math.PI) / 180);
+    this.ctx.scale(runtimeObj.scaleX, runtimeObj.scaleY);
+    this.ctx.translate(-pivotOffsetX, -pivotOffsetY);
+
+    // Render based on type
+    switch (obj.type) {
+      case 'sprite':
+        if (obj.spriteUrl && this.spriteRenderer.isLoaded(obj.id)) {
+          const spriteInfo = this.spriteRenderer.getInfo(obj.id);
+          if (spriteInfo?.image) {
+            const w = obj.spriteWidth ?? spriteInfo.width;
+            const h = obj.spriteHeight ?? spriteInfo.height;
+            this.ctx.drawImage(spriteInfo.image, 0, -h, w, h);
+          }
+        } else {
+          // Placeholder
+          const w = obj.spriteWidth ?? 100;
+          const h = obj.spriteHeight ?? 100;
+          this.ctx.fillStyle = '#4a4a6a';
+          this.ctx.fillRect(0, -h, w, h);
+        }
+        break;
+
+      case 'shape':
+        this.ctx.fillStyle = obj.color || '#e74c3c';
+        if (obj.shapeType === 'rectangle') {
+          this.ctx.fillRect(0, -80, 100, 80);
+        } else if (obj.shapeType === 'circle') {
+          this.ctx.beginPath();
+          this.ctx.arc(50, -50, 50, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
+        break;
+
+      case 'text':
+        this.ctx.fillStyle = obj.color || '#fff';
+        this.ctx.font = `${obj.fontSize || 24}px ${obj.fontFamily || 'Arial'}`;
+        this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'bottom';
+        this.ctx.fillText(obj.text || 'Text', 0, 0);
+        break;
+
+      case 'ui-button':
+        this.renderUIButton(obj, dims);
+        break;
+
+      case 'ui-panel':
+        this.renderUIPanel(obj, dims);
+        break;
+
+      case 'ui-text':
+        this.renderUIText(obj, dims);
+        break;
+
+      case 'ui-image':
+        this.renderUIImage(obj, dims);
+        break;
+
+      case 'ui-slider':
+        this.renderUISlider(obj, dims);
+        break;
+
+      case 'ui-progress-bar':
+        this.renderUIProgressBar(obj, dims);
+        break;
+
+      case 'ui-checkbox':
+        this.renderUICheckbox(obj, dims);
+        break;
+
+      case 'custom':
+        this.renderCustomComponent(obj, dims);
+        break;
+    }
+
+    this.ctx.restore();
+  }
+
+  private updatePlayTimeDisplay(runtime: GameRuntime): void {
+    const timeEl = this.$('.play-time');
+    const fpsEl = this.$('.play-fps');
+
+    if (timeEl) {
+      const totalSeconds = Math.floor(runtime.time.totalTime / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      timeEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    if (fpsEl) {
+      fpsEl.textContent = `${runtime.time.fps} FPS`;
+    }
+  }
+
+  private handlePlayModeInput(runtime: GameRuntime): void {
+    const input = runtime.input;
+
+    // Example: Move objects with arrow keys/WASD
+    const horizontal = input.getHorizontalAxis();
+    const vertical = input.getVerticalAxis();
+    const moveSpeed = 200; // pixels per second
+
+    // Find player-controlled object (first sprite or object with data.isPlayer)
+    for (const obj of runtime.objects.values()) {
+      if (obj.original.type === 'sprite' || obj.data.isPlayer) {
+        obj.velocityX = horizontal * moveSpeed;
+        obj.velocityY = vertical * moveSpeed;
+        break; // Only control one object
+      }
+    }
+
+    // Handle clicks on UI buttons
+    if (input.isMouseButtonPressed(0)) {
+      const mouseWorld = input.getMouseWorldPosition();
+      const clickedObj = runtime.findObjectAtPoint(mouseWorld.x, mouseWorld.y);
+
+      if (clickedObj && clickedObj.original.type === 'ui-button') {
+        // Toggle checkbox or trigger button click feedback
+        console.log('Button clicked:', clickedObj.original.name);
+      }
+    }
+  }
+
   protected onUnmount(): void {
     // Remove canvas event listeners
     if (this.sceneCanvas) {
@@ -2850,6 +3221,12 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.sceneTabs) {
       this.sceneTabs.unmount();
       this.sceneTabs = null;
+    }
+
+    // Cleanup game runtime
+    if (this.gameRuntime) {
+      this.gameRuntime.destroy();
+      this.gameRuntime = null;
     }
   }
 }
