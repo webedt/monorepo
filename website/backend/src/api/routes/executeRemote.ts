@@ -15,7 +15,7 @@ import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@we
 import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
 import type { ProviderType } from '@webedt/shared';
-import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath, extractEventUuid } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -430,7 +430,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as any).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         // Skip duplicate event
         logger.debug('Skipping duplicate event', {
@@ -445,6 +445,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         // Mark as stored to prevent future duplicates
