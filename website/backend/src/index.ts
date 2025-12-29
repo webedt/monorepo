@@ -22,7 +22,7 @@ import {
   bootstrapServices,
 } from '@webedt/shared';
 
-import { logger } from '@webedt/shared';
+import { logger, runWithCorrelation } from '@webedt/shared';
 
 // Import database (initializes on import)
 import { waitForDatabase } from '@webedt/shared';
@@ -66,6 +66,7 @@ import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionSt
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';
 import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
+import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 
 // Import health monitoring and metrics utilities
@@ -272,6 +273,18 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Correlation ID middleware - must be applied early for request tracing
+// Extracts X-Request-ID header or generates a new UUID
+app.use(correlationIdMiddleware);
+
+// Wrap all subsequent middleware in correlation context for async propagation
+// This enables automatic correlation ID inclusion in logs and database operations
+app.use((req, res, next) => {
+  runWithCorrelation(req.correlationId, () => {
+    next();
+  });
+});
+
 // Verbose logging middleware (enabled via VERBOSE_MODE or VERBOSE_HTTP env vars)
 app.use(verboseLoggingMiddleware);
 app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 seconds
@@ -450,17 +463,27 @@ app.use(
   ) => {
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorStack = err instanceof Error ? err.stack : undefined;
+    const correlationId = req.correlationId;
 
-    logger.error('Unhandled error:', err);
+    logger.error('Unhandled error:', err, {
+      component: 'GlobalErrorHandler',
+      requestId: correlationId,
+    });
     console.error('[GlobalErrorHandler] Error details:', {
       message: errorMessage,
       stack: errorStack,
       path: req.path,
-      method: req.method
+      method: req.method,
+      correlationId,
     });
 
-    // Return more descriptive error message for debugging
-    res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
+    // Return error response with correlation ID for client-side debugging
+    res.status(500).json({
+      success: false,
+      error: errorMessage || 'Internal server error',
+      requestId: correlationId,
+      timestamp: new Date().toISOString(),
+    });
   }
 );
 
