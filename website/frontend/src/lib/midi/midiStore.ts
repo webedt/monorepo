@@ -265,6 +265,7 @@ function createMidiStore() {
      */
     toggleLoop(): void {
       const loop = !state.settings.loop;
+      player.setLoop(loop);
       updateSettings({ loop });
     },
 

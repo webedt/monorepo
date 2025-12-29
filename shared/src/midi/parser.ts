@@ -602,9 +602,10 @@ export function parseMidiFromBase64(base64: string, options?: MidiParseOptions):
     }
     return parseMidi(bytes, options);
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return {
       success: false,
-      error: 'Invalid base64 data',
+      error: `Invalid base64 data: ${message}`,
     };
   }
 }
