@@ -8,6 +8,8 @@
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage tests/**/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
