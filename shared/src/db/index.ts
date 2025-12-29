@@ -598,6 +598,16 @@ export {
   type DatabaseHealthCheckResult,
 } from './connection.js';
 
+// Re-export transaction utilities
+export {
+  withTransaction,
+  withTransactionOrThrow,
+  createTransactionHelper,
+  type TransactionContext,
+  type TransactionOptions,
+  type TransactionResult,
+} from './transaction.js';
+
 // Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds
 // Consumers should import these from @webedt/shared instead of drizzle-orm directly
 export {
