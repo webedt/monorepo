@@ -31,6 +31,17 @@ import type {
 } from './types.js';
 
 /**
+ * Set of known valid event types for runtime validation.
+ * Used to warn about unrecognized event types from worker.
+ */
+const KNOWN_EVENT_TYPES: Set<string> = new Set([
+  'connected', 'message', 'assistant_message', 'session_name', 'session_created',
+  'title_generation', 'completed', 'error', 'input_preview', 'interrupted',
+  'user', 'assistant', 'tool_use', 'tool_result', 'result', 'env_manager_log',
+  'system', 'text', 'message_start', 'message_delta', 'message_complete',
+]);
+
+/**
  * Configuration for the self-hosted worker
  */
 export interface SelfHostedWorkerConfig {
@@ -391,8 +402,15 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
               const event = JSON.parse(currentData) as ExecutionEvent;
 
               // Override type if event type was specified
-              // Cast is safe as worker should only send valid ExecutionEventTypes
               if (currentEventType) {
+                // Warn about unrecognized event types for debugging
+                if (!KNOWN_EVENT_TYPES.has(currentEventType)) {
+                  logger.warn('Unrecognized event type from worker', {
+                    component: 'SelfHostedWorkerProvider',
+                    chatSessionId,
+                    eventType: currentEventType,
+                  });
+                }
                 event.type = currentEventType as ExecutionEventType;
               }
 

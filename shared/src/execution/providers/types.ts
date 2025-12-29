@@ -376,7 +376,7 @@ export function isEventType<T extends ExecutionEventType>(
  *   case 'error': // handle
  *   // ... all cases
  *   default:
- *     assertNever(event.type); // Compile error if a type is missing
+ *     assertNeverEventType(event.type); // Compile error if a type is missing
  * }
  */
 export function assertNeverEventType(type: never): never {
