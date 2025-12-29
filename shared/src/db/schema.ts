@@ -48,7 +48,7 @@ export const users = pgTable('users', {
   stopListeningAfterSubmit: boolean('stop_listening_after_submit').default(false).notNull(),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),
   preferredModel: text('preferred_model'),
-  chatVerbosityLevel: text('chat_verbosity_level').default('verbose').notNull(), // 'minimal' | 'normal' | 'verbose'
+  chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
