@@ -326,7 +326,7 @@ export class SettingsPage extends Page<PageOptions> {
     const user = authStore.getUser();
     const isGitHubConnected = !!user?.githubId;
     const isClaudeConnected = !!user?.claudeAuth;
-    const isCodexConnected = !!user?.codexAuth?.apiKey;
+    const isCodexConnected = !!(user?.codexAuth?.apiKey || user?.codexAuth?.accessToken);
     const isGeminiConnected = !!user?.geminiAuth?.accessToken;
 
     const content = document.createElement('div');
@@ -422,7 +422,7 @@ export class SettingsPage extends Page<PageOptions> {
       const claudeAuthInputContainer = content.querySelector('.claude-auth-input') as HTMLElement;
       if (claudeAuthInputContainer) {
         this.claudeAuthInput = new Input({
-          type: 'text',
+          type: 'password',
           placeholder: '{"claudeAiOauth":{"accessToken":"...","refreshToken":"..."}}',
         });
         this.claudeAuthInput.mount(claudeAuthInputContainer);
@@ -488,7 +488,7 @@ export class SettingsPage extends Page<PageOptions> {
       const geminiAuthInputContainer = content.querySelector('.gemini-auth-input') as HTMLElement;
       if (geminiAuthInputContainer) {
         this.geminiAuthInput = new Input({
-          type: 'text',
+          type: 'password',
           placeholder: '{"access_token":"...","refresh_token":"...","expiry_date":...}',
         });
         this.geminiAuthInput.mount(geminiAuthInputContainer);
