@@ -15,6 +15,11 @@ import {
   CLAUDE_ENVIRONMENT_ID,
   CLAUDE_API_BASE_URL,
   fetchEnvironmentIdFromSessions,
+  sendSuccess,
+  sendError,
+  sendUnauthorized,
+  sendInternalError,
+  ApiErrorCode,
 } from '@webedt/shared';
 import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 
@@ -78,7 +83,8 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
     const limit = parseInt(req.query.limit as string) || 100;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      sendUnauthorized(res);
+      return;
     }
 
     // Decode branch name (may be URL encoded)
@@ -101,18 +107,15 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
     // Reverse to get chronological order
     messages.reverse();
 
-    res.json({
-      success: true,
-      data: {
-        messages,
-        branch: decodedBranch,
-        owner,
-        repo,
-      },
+    sendSuccess(res, {
+      messages,
+      branch: decodedBranch,
+      owner,
+      repo,
     });
   } catch (error) {
     logger.error('liveChat', 'Failed to get live chat messages', { error });
-    res.status(500).json({ error: 'Failed to get messages' });
+    sendInternalError(res, 'Failed to get messages');
   }
 });
 
@@ -131,11 +134,13 @@ router.post(
       const userId = req.user?.id;
 
       if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
+        sendUnauthorized(res);
+        return;
       }
 
       if (!role || !content) {
-        return res.status(400).json({ error: 'Missing required fields: role, content' });
+        sendError(res, 'Missing required fields: role, content', 400, ApiErrorCode.VALIDATION_ERROR);
+        return;
       }
 
       // Decode branch name
@@ -155,13 +160,10 @@ router.post(
 
       await db.insert(liveChatMessages).values(message);
 
-      res.json({
-        success: true,
-        data: message,
-      });
+      sendSuccess(res, message);
     } catch (error) {
       logger.error('liveChat', 'Failed to add live chat message', { error });
-      res.status(500).json({ error: 'Failed to add message' });
+      sendInternalError(res, 'Failed to add message');
     }
   }
 );
@@ -176,7 +178,8 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      sendUnauthorized(res);
+      return;
     }
 
     // Decode branch name
@@ -196,13 +199,10 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
     // Recalculate storage after deletion to ensure accuracy
     await StorageService.recalculateUsage(userId);
 
-    res.json({
-      success: true,
-      message: 'Messages cleared',
-    });
+    sendSuccess(res, { message: 'Messages cleared' });
   } catch (error) {
     logger.error('liveChat', 'Failed to clear live chat messages', { error });
-    res.status(500).json({ error: 'Failed to clear messages' });
+    sendInternalError(res, 'Failed to clear messages');
   }
 });
 
@@ -219,11 +219,13 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
     const user = req.user;
 
     if (!userId || !user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      sendUnauthorized(res);
+      return;
     }
 
     if (!message) {
-      return res.status(400).json({ error: 'Missing required field: message' });
+      sendError(res, 'Missing required field: message', 400, ApiErrorCode.VALIDATION_ERROR);
+      return;
     }
 
     // Decode branch name
@@ -441,8 +443,9 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
   } catch (error) {
     logger.error('liveChat', 'Failed to execute live chat', { error });
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to execute' });
+      sendInternalError(res, 'Failed to execute');
     } else {
+      // SSE already started - send error in event format
       res.write(`event: error\ndata: ${JSON.stringify({ error: 'Execution failed' })}\n\n`);
       res.end();
     }
