@@ -3,11 +3,14 @@
  * Reactive state management with subscriptions
  */
 
+import { registerStore, getHmrState, saveHmrState } from './hmr';
+
 type Subscriber<T> = (state: T, prevState: T) => void;
 type Selector<T, R> = (state: T) => R;
 type Updater<T> = (state: T) => Partial<T>;
 
 export class Store<T extends object> {
+  private hmrId: string | null = null;
   private state: T;
   private subscribers: Set<Subscriber<T>> = new Set();
   private selectorSubscribers: Map<Selector<T, unknown>, Set<(value: unknown) => void>> = new Map();
@@ -62,6 +65,38 @@ export class Store<T extends object> {
    */
   reset(initialState: T): void {
     this.setState(initialState);
+  }
+
+  /**
+   * Enable HMR for this store
+   * State will be preserved across module updates
+   */
+  enableHmr(id: string): this {
+    this.hmrId = id;
+
+    // Try to restore state from HMR
+    const savedState = getHmrState<T>(`store:${id}`);
+    if (savedState !== undefined) {
+      this.state = { ...this.state, ...savedState };
+    }
+
+    // Register for future HMR cycles
+    registerStore(
+      id,
+      () => this.state,
+      (state) => this.setState(state as Partial<T>)
+    );
+
+    return this;
+  }
+
+  /**
+   * Save state for HMR before module disposal
+   */
+  saveForHmr(): void {
+    if (this.hmrId) {
+      saveHmrState(`store:${this.hmrId}`, this.state);
+    }
   }
 
   /**

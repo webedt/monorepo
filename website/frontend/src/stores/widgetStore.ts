@@ -302,4 +302,13 @@ class WidgetStore extends Store<WidgetState> {
   }
 }
 
-export const widgetStore = new WidgetStore();
+// Singleton instance with HMR support
+export const widgetStore = new WidgetStore().enableHmr('widget');
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    widgetStore.saveForHmr();
+  });
+}
