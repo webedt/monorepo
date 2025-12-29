@@ -30,4 +30,6 @@ export abstract class ASessionListBroadcaster extends AService implements ISessi
   abstract getSubscriberCount(userId: string): number;
 
   abstract getTotalSubscriberCount(): number;
+
+  abstract shutdown(): void;
 }

@@ -1,4 +1,3 @@
-import { EventEmitter } from 'events';
 import { ASessionEventBroadcaster } from './ASessionEventBroadcaster.js';
 import { metrics } from '../utils/monitoring/metrics.js';
 import { logger } from '../utils/logging/logger.js';
@@ -29,7 +28,6 @@ interface SessionSubscribers {
 }
 
 class SessionEventBroadcaster extends ASessionEventBroadcaster {
-  private emitter = new EventEmitter();
   private sessions: Map<string, SessionSubscribers> = new Map();
   private activeSessions: Set<string> = new Set();
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -38,7 +36,6 @@ class SessionEventBroadcaster extends ASessionEventBroadcaster {
 
   constructor() {
     super();
-    this.emitter.setMaxListeners(MAX_LISTENER_LIMIT);
     this.startCleanupInterval();
     this.startHeartbeatInterval();
   }
@@ -287,14 +284,25 @@ class SessionEventBroadcaster extends ASessionEventBroadcaster {
   }
 
   subscribe(sessionId: string, subscriberId: string, callback: (event: SessionEvent) => void): () => void {
-    const totalSubscribers = this.getTotalSubscriberCount();
+    let totalSubscribers = this.getTotalSubscriberCount();
     if (totalSubscribers >= MAX_LISTENER_LIMIT) {
-      logger.error(`Cannot add subscriber: at maximum capacity (${MAX_LISTENER_LIMIT})`, {
+      logger.warn(`SSE at maximum capacity (${MAX_LISTENER_LIMIT}), attempting eviction`, {
         component: 'SessionEventBroadcaster',
         sessionId,
         subscriberId,
       });
       this.evictLruSessions();
+      totalSubscribers = this.getTotalSubscriberCount();
+
+      if (totalSubscribers >= MAX_LISTENER_LIMIT) {
+        logger.error(`Cannot add subscriber: still at maximum capacity after eviction`, {
+          component: 'SessionEventBroadcaster',
+          sessionId,
+          subscriberId,
+          currentCount: totalSubscribers,
+        });
+        throw new Error('SSE subscriber limit exceeded');
+      }
     }
 
     const now = Date.now();

@@ -25,4 +25,6 @@ export abstract class ASessionEventBroadcaster extends AService implements ISess
   abstract getSubscriberCount(sessionId: string): number;
 
   abstract getTotalSubscriberCount(): number;
+
+  abstract shutdown(): void;
 }

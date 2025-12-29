@@ -1,4 +1,3 @@
-import { EventEmitter } from 'events';
 import { ASessionListBroadcaster } from './ASessionListBroadcaster.js';
 import { logger } from '../utils/logging/logger.js';
 import { metrics } from '../utils/monitoring/metrics.js';
@@ -31,7 +30,6 @@ interface UserSubscribers {
 }
 
 class SessionListBroadcaster extends ASessionListBroadcaster {
-  private emitter = new EventEmitter();
   private users: Map<string, UserSubscribers> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -39,7 +37,6 @@ class SessionListBroadcaster extends ASessionListBroadcaster {
 
   constructor() {
     super();
-    this.emitter.setMaxListeners(MAX_LISTENER_LIMIT);
     this.startCleanupInterval();
     this.startHeartbeatInterval();
   }
@@ -100,9 +97,11 @@ class SessionListBroadcaster extends ASessionListBroadcaster {
     if (this.isShuttingDown) return;
 
     const now = Date.now();
+    // Use a UUID-format sentinel that cannot be a real session ID
+    // The '00000000-0000-0000-0000-000000000000' format is reserved
     const heartbeatEvent: SessionListEvent = {
       type: 'updated' as SessionUpdateType,
-      session: { id: '__heartbeat__' },
+      session: { id: '00000000-0000-0000-0000-000000000000', _heartbeat: true } as Partial<ChatSession> & { id: string },
       timestamp: new Date(),
     };
 
@@ -183,7 +182,19 @@ class SessionListBroadcaster extends ASessionListBroadcaster {
       const userData = this.users.get(userId);
 
       if (userData) {
+        // Notify subscribers before eviction
+        const evictEvent: SessionListEvent = {
+          type: 'updated' as SessionUpdateType,
+          session: { id: '00000000-0000-0000-0000-000000000000', _evicted: true, _reason: 'server_capacity' } as Partial<ChatSession> & { id: string },
+          timestamp: new Date(),
+        };
+
         for (const sub of userData.subscribers) {
+          try {
+            sub.callback(evictEvent);
+          } catch {
+            // Ignore errors during eviction notification
+          }
           metrics.recordSseEviction(BROADCASTER_TYPE, 'lru_eviction');
         }
         this.users.delete(userId);
@@ -223,14 +234,25 @@ class SessionListBroadcaster extends ASessionListBroadcaster {
   }
 
   subscribe(userId: string, subscriberId: string, callback: (event: SessionListEvent) => void): () => void {
-    const totalSubscribers = this.getTotalSubscriberCount();
+    let totalSubscribers = this.getTotalSubscriberCount();
     if (totalSubscribers >= MAX_LISTENER_LIMIT) {
-      logger.error(`Cannot add subscriber: at maximum capacity (${MAX_LISTENER_LIMIT})`, {
+      logger.warn(`SSE at maximum capacity (${MAX_LISTENER_LIMIT}), attempting eviction`, {
         component: 'SessionListBroadcaster',
         userId,
         subscriberId,
       });
       this.evictLruUsers();
+      totalSubscribers = this.getTotalSubscriberCount();
+
+      if (totalSubscribers >= MAX_LISTENER_LIMIT) {
+        logger.error(`Cannot add subscriber: still at maximum capacity after eviction`, {
+          component: 'SessionListBroadcaster',
+          userId,
+          subscriberId,
+          currentCount: totalSubscribers,
+        });
+        throw new Error('SSE subscriber limit exceeded');
+      }
     }
 
     const now = Date.now();

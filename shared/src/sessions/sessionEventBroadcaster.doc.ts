@@ -196,4 +196,19 @@ export interface ISessionEventBroadcasterDocumentation {
    * ```
    */
   getTotalSubscriberCount(): number;
+
+  /**
+   * Gracefully shutdown the broadcaster.
+   *
+   * Stops cleanup and heartbeat intervals, notifies all subscribers,
+   * and clears all internal state.
+   *
+   * @example
+   * ```typescript
+   * process.on('SIGTERM', () => {
+   *   sessionEventBroadcaster.shutdown();
+   * });
+   * ```
+   */
+  shutdown(): void;
 }
