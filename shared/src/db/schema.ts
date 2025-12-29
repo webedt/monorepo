@@ -128,9 +128,13 @@ export const events = pgTable('events', {
   chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
-});
+}, (table) => [
+  // Index for efficient UUID-based deduplication queries
+  uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),
+]);
 
 // Live Chat messages - branch-based chat messages for workspace collaboration
 export const liveChatMessages = pgTable('live_chat_messages', {

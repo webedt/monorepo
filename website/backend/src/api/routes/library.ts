@@ -3,6 +3,37 @@
  * Handles user's game library management
  */
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     LibraryItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         userId:
+ *           type: string
+ *         gameId:
+ *           type: string
+ *         acquiredAt:
+ *           type: string
+ *           format: date-time
+ *         lastPlayedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         playtimeMinutes:
+ *           type: integer
+ *         installStatus:
+ *           type: string
+ *           enum: [not_installed, installing, installed]
+ *         favorite:
+ *           type: boolean
+ *         hidden:
+ *           type: boolean
+ */
+
 import { Router, Request, Response } from 'express';
 import { db, games, userLibrary, purchases, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -14,7 +45,50 @@ const router = Router();
 // All routes require authentication
 router.use(requireAuth);
 
-// Get recently played games (must be before /:gameId to avoid being treated as gameId)
+/**
+ * @openapi
+ * /api/library/recent:
+ *   get:
+ *     tags: [Library]
+ *     summary: Get recently played games
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *           maximum: 20
+ *     responses:
+ *       200:
+ *         description: Recently played games list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/LibraryItem'
+ *                           - type: object
+ *                             properties:
+ *                               game:
+ *                                 $ref: '#/components/schemas/Game'
+ *                     total:
+ *                       type: integer
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/recent', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -57,7 +131,43 @@ router.get('/recent', async (req: Request, res: Response) => {
   }
 });
 
-// Get hidden games (must be before /:gameId to avoid being treated as gameId)
+/**
+ * @openapi
+ * /api/library/hidden/all:
+ *   get:
+ *     tags: [Library]
+ *     summary: Get hidden games
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Hidden games list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/LibraryItem'
+ *                           - type: object
+ *                             properties:
+ *                               game:
+ *                                 $ref: '#/components/schemas/Game'
+ *                     total:
+ *                       type: integer
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/hidden/all', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -93,7 +203,42 @@ router.get('/hidden/all', async (req: Request, res: Response) => {
   }
 });
 
-// Get library statistics (must be before /:gameId to avoid being treated as gameId)
+/**
+ * @openapi
+ * /api/library/stats/summary:
+ *   get:
+ *     tags: [Library]
+ *     summary: Get library statistics
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Library statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalGames:
+ *                       type: integer
+ *                     installedGames:
+ *                       type: integer
+ *                     favoriteGames:
+ *                       type: integer
+ *                     totalPlaytimeMinutes:
+ *                       type: integer
+ *                     totalPlaytimeHours:
+ *                       type: integer
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/stats/summary', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -129,7 +274,81 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
   }
 });
 
-// Get user's library
+/**
+ * @openapi
+ * /api/library:
+ *   get:
+ *     tags: [Library]
+ *     summary: Get user's game library
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [acquiredAt, title, lastPlayed, playtime]
+ *           default: acquiredAt
+ *       - in: query
+ *         name: order
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *       - in: query
+ *         name: favorite
+ *         schema:
+ *           type: boolean
+ *       - in: query
+ *         name: installed
+ *         schema:
+ *           type: boolean
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 200
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: User's game library
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/LibraryItem'
+ *                           - type: object
+ *                             properties:
+ *                               game:
+ *                                 $ref: '#/components/schemas/Game'
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -219,7 +438,44 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// Get specific library item
+/**
+ * @openapi
+ * /api/library/{gameId}:
+ *   get:
+ *     tags: [Library]
+ *     summary: Get specific library item
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Library item details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/LibraryItem'
+ *                     - type: object
+ *                       properties:
+ *                         game:
+ *                           $ref: '#/components/schemas/Game'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         description: Game not in library
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/:gameId', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -258,7 +514,42 @@ router.get('/:gameId', async (req: Request, res: Response) => {
   }
 });
 
-// Toggle favorite
+/**
+ * @openapi
+ * /api/library/{gameId}/favorite:
+ *   post:
+ *     tags: [Library]
+ *     summary: Toggle favorite status
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Updated library item
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     item:
+ *                       $ref: '#/components/schemas/LibraryItem'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         description: Game not in library
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.post('/:gameId/favorite', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -298,7 +589,51 @@ router.post('/:gameId/favorite', async (req: Request, res: Response) => {
   }
 });
 
-// Hide/unhide game from library
+/**
+ * @openapi
+ * /api/library/{gameId}/hide:
+ *   post:
+ *     tags: [Library]
+ *     summary: Hide or unhide game from library
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               hidden:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Updated library item
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     item:
+ *                       $ref: '#/components/schemas/LibraryItem'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         description: Game not in library
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.post('/:gameId/hide', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -339,7 +674,56 @@ router.post('/:gameId/hide', async (req: Request, res: Response) => {
   }
 });
 
-// Update install status
+/**
+ * @openapi
+ * /api/library/{gameId}/install-status:
+ *   post:
+ *     tags: [Library]
+ *     summary: Update game install status
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - status
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [not_installed, installing, installed]
+ *     responses:
+ *       200:
+ *         description: Updated library item
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     item:
+ *                       $ref: '#/components/schemas/LibraryItem'
+ *       400:
+ *         description: Invalid install status
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         description: Game not in library
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.post('/:gameId/install-status', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -385,7 +769,57 @@ router.post('/:gameId/install-status', async (req: Request, res: Response) => {
   }
 });
 
-// Update playtime
+/**
+ * @openapi
+ * /api/library/{gameId}/playtime:
+ *   post:
+ *     tags: [Library]
+ *     summary: Update game playtime
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - minutes
+ *             properties:
+ *               minutes:
+ *                 type: number
+ *                 minimum: 0
+ *                 description: Minutes to add to playtime
+ *     responses:
+ *       200:
+ *         description: Updated library item with new playtime
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     item:
+ *                       $ref: '#/components/schemas/LibraryItem'
+ *       400:
+ *         description: Invalid playtime value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         description: Game not in library
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.post('/:gameId/playtime', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;

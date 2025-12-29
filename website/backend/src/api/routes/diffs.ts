@@ -1,4 +1,9 @@
 /**
+ * @openapi
+ * tags:
+ *   - name: Diffs
+ *     description: File diff operations and comparison between Git branches
+ *
  * Diff Routes
  * Provides diff visualization comparing current branch against base branch
  */
@@ -46,7 +51,44 @@ function normalizeFileStatus(status: string): FileChange['status'] {
   return 'modified';
 }
 
-// Get diff comparison between head and base branch
+/**
+ * @openapi
+ * /api/diffs/repos/{owner}/{repo}/compare/{base}/{head}:
+ *   get:
+ *     tags:
+ *       - Diffs
+ *     summary: Get diff comparison between branches
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: base
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: head
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Diff comparison with parsed and raw diff data
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -137,7 +179,44 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: R
   }
 });
 
-// Get list of changed files between branches
+/**
+ * @openapi
+ * /api/diffs/repos/{owner}/{repo}/changed-files/{base}/{head}:
+ *   get:
+ *     tags:
+ *       - Diffs
+ *     summary: Get list of changed files between branches
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: base
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: head
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of changed files with status and statistics
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -190,7 +269,49 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
   }
 });
 
-// Get diff for a specific file
+/**
+ * @openapi
+ * /api/diffs/repos/{owner}/{repo}/file-diff/{base}/{head}/{filePath}:
+ *   get:
+ *     tags:
+ *       - Diffs
+ *     summary: Get diff for a specific file
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: base
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: head
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: filePath
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: File diff with patch and statistics
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -263,7 +384,44 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, async (re
   }
 });
 
-// Get diff stats only (lightweight)
+/**
+ * @openapi
+ * /api/diffs/repos/{owner}/{repo}/stats/{base}/{head}:
+ *   get:
+ *     tags:
+ *       - Diffs
+ *     summary: Get diff statistics (lightweight)
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: base
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: head
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Diff statistics without patches
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
