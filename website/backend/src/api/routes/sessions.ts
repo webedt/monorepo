@@ -253,10 +253,12 @@ router.get('/shared/:token', shareTokenValidationRateLimiter, async (req: Reques
     const authResult = authService.verifyShareTokenAccess(session, shareToken);
 
     if (!authResult.authorized) {
-      // Log failed access
+      // Log failed access only if we have a valid session (FK constraint requires valid session_id)
       const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
         : authResult.statusCode === 404 ? 'not_found' : 'invalid';
-      await logShareAccess(session?.id ?? 'unknown', shareToken, 'view', req, false, failureReason);
+      if (session) {
+        await logShareAccess(session.id, shareToken, 'view', req, false, failureReason);
+      }
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
@@ -327,10 +329,12 @@ router.get('/shared/:token/events', shareTokenValidationRateLimiter, async (req:
     const authResult = authService.verifyShareTokenAccess(session, shareToken);
 
     if (!authResult.authorized) {
-      // Log failed access
+      // Log failed access only if we have a valid session (FK constraint requires valid session_id)
       const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
         : authResult.statusCode === 404 ? 'not_found' : 'invalid';
-      await logShareAccess(session?.id ?? 'unknown', shareToken, 'events', req, false, failureReason);
+      if (session) {
+        await logShareAccess(session.id, shareToken, 'events', req, false, failureReason);
+      }
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
@@ -395,10 +399,12 @@ router.get('/shared/:token/events/stream', shareTokenValidationRateLimiter, asyn
     const authResult = authService.verifyShareTokenAccess(session, shareToken);
 
     if (!authResult.authorized) {
-      // Log failed access
+      // Log failed access only if we have a valid session (FK constraint requires valid session_id)
       const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
         : authResult.statusCode === 404 ? 'not_found' : 'invalid';
-      await logShareAccess(session?.id ?? 'unknown', shareToken, 'stream', req, false, failureReason);
+      if (session) {
+        await logShareAccess(session.id, shareToken, 'stream', req, false, failureReason);
+      }
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }

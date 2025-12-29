@@ -146,18 +146,45 @@ export class ShareTokenAccessLogService extends AShareTokenAccessLogService {
 
     const whereClause = and(...conditions);
 
-    // Get all matching logs for aggregation
-    const logs = await db
-      .select()
+    // Use SQL aggregations for efficiency instead of loading all logs into memory
+    // Get basic counts
+    const [basicStats] = await db
+      .select({
+        totalAccesses: count(),
+        successfulAccesses: sql<number>`cast(sum(case when ${shareTokenAccessLog.success} = true then 1 else 0 end) as int)`,
+        failedAccesses: sql<number>`cast(sum(case when ${shareTokenAccessLog.success} = false then 1 else 0 end) as int)`,
+        uniqueIps: sql<number>`cast(count(distinct ${shareTokenAccessLog.ipAddress}) as int)`,
+      })
       .from(shareTokenAccessLog)
       .where(whereClause);
 
-    // Calculate statistics
+    // Get counts by access type
+    const accessTypeCounts = await db
+      .select({
+        accessType: shareTokenAccessLog.accessType,
+        count: count(),
+      })
+      .from(shareTokenAccessLog)
+      .where(whereClause)
+      .groupBy(shareTokenAccessLog.accessType);
+
+    // Get counts by failure reason (only for failed accesses)
+    const failedConditions = [...conditions, eq(shareTokenAccessLog.success, false)];
+    const failureReasonCounts = await db
+      .select({
+        failureReason: shareTokenAccessLog.failureReason,
+        count: count(),
+      })
+      .from(shareTokenAccessLog)
+      .where(and(...failedConditions))
+      .groupBy(shareTokenAccessLog.failureReason);
+
+    // Build result object
     const stats: AccessLogStats = {
-      totalAccesses: logs.length,
-      successfulAccesses: logs.filter(l => l.success).length,
-      failedAccesses: logs.filter(l => !l.success).length,
-      uniqueIps: new Set(logs.map(l => l.ipAddress).filter(Boolean)).size,
+      totalAccesses: basicStats.totalAccesses ?? 0,
+      successfulAccesses: basicStats.successfulAccesses ?? 0,
+      failedAccesses: basicStats.failedAccesses ?? 0,
+      uniqueIps: basicStats.uniqueIps ?? 0,
       accessesByType: {
         view: 0,
         events: 0,
@@ -171,17 +198,20 @@ export class ShareTokenAccessLogService extends AShareTokenAccessLogService {
       },
     };
 
-    // Count by type and failure reason
-    for (const log of logs) {
-      const accessType = log.accessType as ShareTokenAccessType;
+    // Populate access type counts
+    for (const row of accessTypeCounts) {
+      const accessType = row.accessType as ShareTokenAccessType;
       if (accessType in stats.accessesByType) {
-        stats.accessesByType[accessType]++;
+        stats.accessesByType[accessType] = row.count;
       }
+    }
 
-      if (!log.success && log.failureReason) {
-        const reason = log.failureReason as ShareTokenFailureReason;
+    // Populate failure reason counts
+    for (const row of failureReasonCounts) {
+      if (row.failureReason) {
+        const reason = row.failureReason as ShareTokenFailureReason;
         if (reason in stats.failuresByReason) {
-          stats.failuresByReason[reason]++;
+          stats.failuresByReason[reason] = row.count;
         }
       }
     }

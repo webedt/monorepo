@@ -194,16 +194,26 @@ export function calculateShareTokenExpiration(expiresInDays?: number): Date {
 }
 
 /**
+ * Get the IP hash salt from environment variable or use default
+ * The salt should be set via IP_HASH_SALT environment variable for production deployments
+ * to ensure consistent hashing across restarts while keeping it configurable
+ */
+function getIpHashSalt(): string {
+  return process.env.IP_HASH_SALT || 'webedt-share-audit-default';
+}
+
+/**
  * Hash an IP address for privacy-preserving logging
  * Uses SHA-256 to anonymize IPs while still allowing pattern detection
  *
  * @param ipAddress - The IP address to hash
- * @param salt - Optional salt for the hash (should be constant per deployment)
+ * @param salt - Optional salt for the hash (defaults to IP_HASH_SALT env var or fallback)
  * @returns A truncated hash of the IP address
  */
-export function hashIpAddress(ipAddress: string, salt = 'webedt-share-audit'): string {
+export function hashIpAddress(ipAddress: string, salt?: string): string {
+  const effectiveSalt = salt ?? getIpHashSalt();
   const hash = createHash('sha256');
-  hash.update(salt + ipAddress);
+  hash.update(effectiveSalt + ipAddress);
   // Return first 16 characters of hex hash (still unique enough for pattern detection)
   return hash.digest('hex').substring(0, 16);
 }
