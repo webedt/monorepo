@@ -8,7 +8,7 @@ import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc,
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, type ClaudeWebClientConfig } from '@webedt/shared';
 import { publicShareRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -2738,40 +2738,58 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
   const _shouldStream = req.query.stream === 'true';
   const _limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
-  logger.info('Starting session sync using shared syncUserSessions', {
-    component: 'SessionSync',
-    userId,
-    // Log query params for debugging, even though shared sync may not use them all
-    queryParams: { activeOnly: _activeOnly, shouldStream: _shouldStream, limit: _limit },
+  // Use request deduplicator to prevent duplicate concurrent sync requests
+  // This handles the case where users rapidly click the "Sync" button
+  const deduplicator = requestDeduplicatorRegistry.get('sessions-sync', {
+    defaultTtlMs: 30000, // 30 second TTL for sync operations
   });
 
-  try {
-    // Get user's Claude auth
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+  const requestKey = generateRequestKey(userId, 'sessions-sync');
 
-    if (!user?.claudeAuth) {
-      return res.status(400).json({
-        success: false,
-        error: 'Claude authentication not configured. Please connect your Claude account in settings.'
+  try {
+    const { data: result, wasDeduplicated } = await deduplicator.deduplicate(
+      requestKey,
+      async () => {
+        logger.info('Starting session sync using shared syncUserSessions', {
+          component: 'SessionSync',
+          userId,
+          queryParams: { activeOnly: _activeOnly, shouldStream: _shouldStream, limit: _limit },
+        });
+
+        // Get user's Claude auth
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+
+        if (!user?.claudeAuth) {
+          throw new Error('Claude authentication not configured. Please connect your Claude account in settings.');
+        }
+
+        // Use syncUserSessions from shared package
+        // This provides sophisticated duplicate prevention and session linking logic
+        const syncResult = await syncUserSessions(userId, user.claudeAuth);
+
+        logger.info('Session sync completed using shared syncUserSessions', {
+          component: 'SessionSync',
+          userId,
+          imported: syncResult.imported,
+          updated: syncResult.updated,
+          errors: syncResult.errors,
+          skipped: syncResult.skipped,
+        });
+
+        return syncResult;
+      }
+    );
+
+    if (wasDeduplicated) {
+      logger.info('Session sync request was deduplicated (concurrent request detected)', {
+        component: 'SessionSync',
+        userId,
       });
     }
-
-    // Use syncUserSessions from shared package
-    // This provides sophisticated duplicate prevention and session linking logic
-    const result = await syncUserSessions(userId, user.claudeAuth);
-
-    logger.info('Session sync completed using shared syncUserSessions', {
-      component: 'SessionSync',
-      userId,
-      imported: result.imported,
-      updated: result.updated,
-      errors: result.errors,
-      skipped: result.skipped,
-    });
 
     // Return response with both new fields and backward-compatible structure
     // Note: Some detailed fields from the old API are no longer available
@@ -2787,11 +2805,22 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
         // Backward-compatible fields (best-effort mapping)
         alreadyExists: result.skipped,
         runningSessions: result.updated,
+        // Indicate if this was a deduplicated response
+        wasDeduplicated,
       }
     });
 
   } catch (error) {
     logger.error('Session sync failed', error as Error, { component: 'SessionSync' });
+
+    // Handle auth configuration error specifically
+    if (error instanceof Error && error.message.includes('Claude authentication not configured')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to sync sessions'
@@ -2822,115 +2851,135 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     return res.status(401).json({ success: false, error: 'Not authenticated' });
   }
 
+  // Use request deduplicator to prevent duplicate concurrent event sync requests
+  const deduplicator = requestDeduplicatorRegistry.get('session-sync-events', {
+    defaultTtlMs: 30000, // 30 second TTL for sync operations
+  });
+
+  const requestKey = generateRequestKey(userId, sessionId, 'sync-events');
+
   try {
-    // Verify session belongs to user and is not deleted
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          eq(chatSessions.userId, userId),
-          isNull(chatSessions.deletedAt)
-        )
-      )
-      .limit(1);
+    const { data: responseData, wasDeduplicated } = await deduplicator.deduplicate(
+      requestKey,
+      async () => {
+        // Verify session belongs to user and is not deleted
+        const [session] = await db
+          .select()
+          .from(chatSessions)
+          .where(
+            and(
+              eq(chatSessions.id, sessionId),
+              eq(chatSessions.userId, userId),
+              isNull(chatSessions.deletedAt)
+            )
+          )
+          .limit(1);
 
-    if (!session) {
-      return res.status(404).json({ success: false, error: 'Session not found' });
-    }
+        if (!session) {
+          throw Object.assign(new Error('Session not found'), { statusCode: 404 });
+        }
 
-    if (!session.remoteSessionId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Session is not a Claude Remote session'
+        if (!session.remoteSessionId) {
+          throw Object.assign(new Error('Session is not a Claude Remote session'), { statusCode: 400 });
+        }
+
+        // Get user's Claude auth
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+
+        if (!user?.claudeAuth) {
+          throw Object.assign(new Error('Claude authentication not configured'), { statusCode: 400 });
+        }
+
+        // Count existing events before sync for backward-compatible response
+        // Use COUNT(*) instead of fetching all eventData for better performance
+        const [{ count: existingEventsCount }] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(events)
+          .where(eq(events.chatSessionId, sessionId));
+
+        // Use SessionService.sync() from shared package via ServiceProvider
+        // This provides proper event deduplication, transaction safety, and status mapping
+        const sessionService = ServiceProvider.get(ASession);
+        const syncResult = await sessionService.sync(sessionId, {
+          claudeAuth: user.claudeAuth,
+          environmentId: CLAUDE_ENVIRONMENT_ID,
+        });
+
+        // Count events after sync to calculate new events imported
+        // Use COUNT(*) instead of fetching all eventData for better performance
+        const [{ count: totalEventsCount }] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(events)
+          .where(eq(events.chatSessionId, sessionId));
+        const newEventsImported = totalEventsCount - existingEventsCount;
+
+        // Map local status back to remote status for backward compatibility
+        const statusToRemoteStatus: Record<string, string> = {
+          'completed': 'idle',
+          'running': 'running',
+          'error': 'failed',
+          'pending': 'idle',
+        };
+        const remoteStatus = statusToRemoteStatus[syncResult.status] || 'idle';
+
+        logger.info(`Synced session using SessionService.sync()`, {
+          component: 'SessionSync',
+          sessionId,
+          remoteSessionId: session.remoteSessionId,
+          existingEvents: existingEventsCount,
+          newEvents: newEventsImported,
+          status: syncResult.status,
+          remoteStatus,
+        });
+
+        return {
+          sessionId: syncResult.id,
+          remoteSessionId: syncResult.remoteSessionId,
+          existingEvents: existingEventsCount,
+          newEventsImported,
+          totalEvents: totalEventsCount,
+          remoteStatus,
+          localStatus: syncResult.status,
+          status: syncResult.status,
+          totalCost: syncResult.totalCost,
+          branch: syncResult.branch,
+          completedAt: syncResult.completedAt,
+        };
+      }
+    );
+
+    if (wasDeduplicated) {
+      logger.info('Session event sync request was deduplicated (concurrent request detected)', {
+        component: 'SessionSync',
+        sessionId,
+        userId,
       });
     }
-
-    // Get user's Claude auth
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    if (!user?.claudeAuth) {
-      return res.status(400).json({
-        success: false,
-        error: 'Claude authentication not configured'
-      });
-    }
-
-    // Count existing events before sync for backward-compatible response
-    // Use COUNT(*) instead of fetching all eventData for better performance
-    const [{ count: existingEventsCount }] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(events)
-      .where(eq(events.chatSessionId, sessionId));
-
-    // Use SessionService.sync() from shared package via ServiceProvider
-    // This provides proper event deduplication, transaction safety, and status mapping
-    const sessionService = ServiceProvider.get(ASession);
-    const syncResult = await sessionService.sync(sessionId, {
-      claudeAuth: user.claudeAuth,
-      environmentId: CLAUDE_ENVIRONMENT_ID,
-    });
-
-    // Count events after sync to calculate new events imported
-    // Use COUNT(*) instead of fetching all eventData for better performance
-    const [{ count: totalEventsCount }] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(events)
-      .where(eq(events.chatSessionId, sessionId));
-    const newEventsImported = totalEventsCount - existingEventsCount;
-
-    // Map local status back to remote status for backward compatibility
-    const statusToRemoteStatus: Record<string, string> = {
-      'completed': 'idle',
-      'running': 'running',
-      'error': 'failed',
-      'pending': 'idle',
-    };
-    const remoteStatus = statusToRemoteStatus[syncResult.status] || 'idle';
-
-    logger.info(`Synced session using SessionService.sync()`, {
-      component: 'SessionSync',
-      sessionId,
-      remoteSessionId: session.remoteSessionId,
-      existingEvents: existingEventsCount,
-      newEvents: newEventsImported,
-      status: syncResult.status,
-      remoteStatus,
-    });
 
     // Return response with both new fields and backward-compatible structure
     return res.json({
       success: true,
       data: {
-        sessionId: syncResult.id,
-        remoteSessionId: syncResult.remoteSessionId,
-        // Backward-compatible fields
-        existingEvents: existingEventsCount,
-        newEventsImported,
-        totalEvents: totalEventsCount,
-        remoteStatus,
-        localStatus: syncResult.status,
-        // New fields from sync result
-        status: syncResult.status,
-        totalCost: syncResult.totalCost,
-        branch: syncResult.branch,
-        completedAt: syncResult.completedAt,
+        ...responseData,
+        wasDeduplicated,
       }
     });
 
   } catch (error) {
-    logger.error('Event sync failed', error as Error, {
+    const err = error as Error & { statusCode?: number };
+    logger.error('Event sync failed', err, {
       component: 'SessionSync',
       sessionId
     });
-    return res.status(500).json({
+
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to sync events'
+      error: err.message || 'Failed to sync events'
     });
   }
 });
