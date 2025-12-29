@@ -761,9 +761,9 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
         // Extract user request from first user event or title
         let userRequest = remoteSession.title || 'Synced session';
-        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && (e.message as any)?.content);
-        const firstUserMessage = firstUserEvent?.message as { content?: unknown } | undefined;
-        if (firstUserMessage?.content) {
+        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && e.message?.content !== undefined);
+        const firstUserMessage = firstUserEvent?.message;
+        if (firstUserMessage?.content !== undefined) {
           const content = firstUserMessage.content;
           userRequest = typeof content === 'string'
             ? content.slice(0, 500)
@@ -772,9 +772,9 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
         // Extract total cost from result event
         let totalCost: string | undefined;
-        const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd);
-        if (resultEvent?.total_cost_usd) {
-          totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+        const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd !== undefined);
+        if (resultEvent?.total_cost_usd !== undefined) {
+          totalCost = resultEvent.total_cost_usd.toFixed(6);
         }
 
         const [importedSession] = await db.insert(chatSessions).values({

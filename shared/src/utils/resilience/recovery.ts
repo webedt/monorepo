@@ -179,6 +179,13 @@ export async function attemptRecovery(
           data: options.fallbackValue,
         };
       }
+      // No fallback value provided, fall through to skip behavior
+      return {
+        recovered: false,
+        strategy: 'skip',
+        message: `Error is not recoverable: ${classification.type}`,
+        shouldRetry: false,
+      };
 
     case 'skip':
     default:
