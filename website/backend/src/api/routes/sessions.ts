@@ -23,8 +23,9 @@ import {
   sendUnauthorized,
 } from '../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../middleware/sessionMiddleware.js';
-import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, extractEventUuid, type ClaudeWebClientConfig } from '@webedt/shared';
-import { publicShareRateLimiter, syncOperationRateLimiter, sseRateLimiter } from '../middleware/rateLimit.js';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, extractEventUuid, type ClaudeWebClientConfig, generateSecureShareToken, calculateShareTokenExpiration, isValidShareToken, SHARE_TOKEN_CONFIG, shareTokenAccessLogService } from '@webedt/shared';
+import type { ShareTokenAccessType, ShareTokenFailureReason } from '@webedt/shared';
+import { publicShareRateLimiter, syncOperationRateLimiter, sseRateLimiter, shareTokenValidationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
@@ -37,6 +38,49 @@ import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 function sseWrite(res: Response, data: string): boolean {
   const sseHelper = ServiceProvider.get(ASseHelper);
   return sseHelper.write(res, data);
+}
+
+/**
+ * Extract client IP address from request, handling proxied requests.
+ */
+function getClientIp(req: Request): string {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (forwardedFor) {
+    const ips = (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor).split(',');
+    return ips[0].trim();
+  }
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+/**
+ * Log share token access for audit trail
+ */
+async function logShareAccess(
+  sessionId: string,
+  shareToken: string,
+  accessType: ShareTokenAccessType,
+  req: Request,
+  success: boolean,
+  failureReason?: ShareTokenFailureReason
+): Promise<void> {
+  try {
+    await shareTokenAccessLogService.logAccess({
+      sessionId,
+      shareToken,
+      accessType,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent'],
+      success,
+      failureReason,
+    });
+  } catch (error) {
+    // Log error but don't block the request
+    logger.error('Failed to log share token access', error as Error, {
+      component: 'Sessions',
+      sessionId,
+      accessType,
+    });
+  }
 }
 
 /**
@@ -177,12 +221,18 @@ router.use((req: Request, res: Response, next) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/shared/:token', publicShareRateLimiter, async (req: Request, res: Response) => {
-  try {
-    const shareToken = req.params.token;
+router.get('/shared/:token', shareTokenValidationRateLimiter, async (req: Request, res: Response) => {
+  const shareToken = req.params.token;
 
+  try {
     if (!shareToken) {
       res.status(400).json({ success: false, error: 'Share token is required' });
+      return;
+    }
+
+    // Validate token format before database lookup
+    if (!isValidShareToken(shareToken)) {
+      res.status(400).json({ success: false, error: 'Invalid share token format' });
       return;
     }
 
@@ -203,9 +253,16 @@ router.get('/shared/:token', publicShareRateLimiter, async (req: Request, res: R
     const authResult = authService.verifyShareTokenAccess(session, shareToken);
 
     if (!authResult.authorized) {
+      // Log failed access
+      const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
+        : authResult.statusCode === 404 ? 'not_found' : 'invalid';
+      await logShareAccess(session?.id ?? 'unknown', shareToken, 'view', req, false, failureReason);
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
+
+    // Log successful access
+    await logShareAccess(session.id, shareToken, 'view', req, true);
 
     // Get preview URL if applicable
     const previewUrl = await getPreviewUrlFromSession(session);
@@ -238,12 +295,18 @@ router.get('/shared/:token', publicShareRateLimiter, async (req: Request, res: R
  * Public endpoint to get events for a shared session
  * Rate limited to prevent enumeration attacks
  */
-router.get('/shared/:token/events', publicShareRateLimiter, async (req: Request, res: Response) => {
-  try {
-    const shareToken = req.params.token;
+router.get('/shared/:token/events', shareTokenValidationRateLimiter, async (req: Request, res: Response) => {
+  const shareToken = req.params.token;
 
+  try {
     if (!shareToken) {
       res.status(400).json({ success: false, error: 'Share token is required' });
+      return;
+    }
+
+    // Validate token format before database lookup
+    if (!isValidShareToken(shareToken)) {
+      res.status(400).json({ success: false, error: 'Invalid share token format' });
       return;
     }
 
@@ -264,9 +327,16 @@ router.get('/shared/:token/events', publicShareRateLimiter, async (req: Request,
     const authResult = authService.verifyShareTokenAccess(session, shareToken);
 
     if (!authResult.authorized) {
+      // Log failed access
+      const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
+        : authResult.statusCode === 404 ? 'not_found' : 'invalid';
+      await logShareAccess(session?.id ?? 'unknown', shareToken, 'events', req, false, failureReason);
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
+
+    // Log successful access
+    await logShareAccess(session.id, shareToken, 'events', req, true);
 
     // Get events ordered by timestamp
     const sessionEvents = await db
@@ -293,12 +363,18 @@ router.get('/shared/:token/events', publicShareRateLimiter, async (req: Request,
  * Public SSE endpoint to stream events for a shared session
  * Rate limited to prevent enumeration attacks
  */
-router.get('/shared/:token/events/stream', publicShareRateLimiter, async (req: Request, res: Response) => {
-  try {
-    const shareToken = req.params.token;
+router.get('/shared/:token/events/stream', shareTokenValidationRateLimiter, async (req: Request, res: Response) => {
+  const shareToken = req.params.token;
 
+  try {
     if (!shareToken) {
       res.status(400).json({ success: false, error: 'Share token is required' });
+      return;
+    }
+
+    // Validate token format before database lookup
+    if (!isValidShareToken(shareToken)) {
+      res.status(400).json({ success: false, error: 'Invalid share token format' });
       return;
     }
 
@@ -319,9 +395,16 @@ router.get('/shared/:token/events/stream', publicShareRateLimiter, async (req: R
     const authResult = authService.verifyShareTokenAccess(session, shareToken);
 
     if (!authResult.authorized) {
+      // Log failed access
+      const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
+        : authResult.statusCode === 404 ? 'not_found' : 'invalid';
+      await logShareAccess(session?.id ?? 'unknown', shareToken, 'stream', req, false, failureReason);
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
+
+    // Log successful access
+    await logShareAccess(session.id, shareToken, 'stream', req, true);
 
     // Check if session is actively streaming
     const isActive = sessionEventBroadcaster.isSessionActive(session.id);
@@ -1070,8 +1153,8 @@ router.post('/:id/favorite', requireAuth, validateSessionId, requireSessionOwner
 /**
  * POST /api/sessions/:id/share
  * Generate a share token for a session (public but unlisted - shareable if you know the link)
- * Optional body: { expiresInDays?: number } - defaults to preserving existing expiration or no expiration
- * Max expiration: 365 days
+ * Optional body: { expiresInDays?: number } - defaults to 7 days (security best practice)
+ * Min: 1 day, Max: 365 days
  */
 router.post('/:id/share', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -1080,8 +1163,10 @@ router.post('/:id/share', requireAuth, validateSessionId, asyncHandler(async (re
 
   // Validate expiresInDays if provided
   if (expiresInDays !== undefined) {
-    if (typeof expiresInDays !== 'number' || expiresInDays < 1 || expiresInDays > 365) {
-      sendBadRequest(res, 'expiresInDays must be between 1 and 365');
+    if (typeof expiresInDays !== 'number' ||
+        expiresInDays < SHARE_TOKEN_CONFIG.MIN_EXPIRATION_DAYS ||
+        expiresInDays > SHARE_TOKEN_CONFIG.MAX_EXPIRATION_DAYS) {
+      sendBadRequest(res, `expiresInDays must be between ${SHARE_TOKEN_CONFIG.MIN_EXPIRATION_DAYS} and ${SHARE_TOKEN_CONFIG.MAX_EXPIRATION_DAYS}`);
       return;
     }
   }
@@ -1108,16 +1193,23 @@ router.post('/:id/share', requireAuth, validateSessionId, asyncHandler(async (re
     return;
   }
 
-  // Generate new share token (or reuse existing if already shared)
-  const shareToken = session.shareToken || uuidv4();
+  // Generate new share token using crypto-secure generation (or reuse existing if already shared)
+  // New tokens use 256-bit entropy (base64url encoded) instead of UUID v4
+  const shareToken = session.shareToken || generateSecureShareToken();
 
   // Calculate expiration date:
   // - If expiresInDays is explicitly provided, use it
-  // - Otherwise, preserve existing expiration (or null if never set)
-  let shareExpiresAt: Date | null = session.shareExpiresAt;
+  // - If creating a new share (no existing token), default to 7 days
+  // - If extending an existing share without specifying days, preserve existing expiration
+  let shareExpiresAt: Date | null;
   if (expiresInDays !== undefined) {
-    shareExpiresAt = new Date();
-    shareExpiresAt.setDate(shareExpiresAt.getDate() + expiresInDays);
+    shareExpiresAt = calculateShareTokenExpiration(expiresInDays);
+  } else if (!session.shareToken) {
+    // New share: apply default 7-day expiration for security
+    shareExpiresAt = calculateShareTokenExpiration(SHARE_TOKEN_CONFIG.DEFAULT_EXPIRATION_DAYS);
+  } else {
+    // Existing share without new expiration: preserve current setting
+    shareExpiresAt = session.shareExpiresAt;
   }
 
   // Update session with share token
@@ -1132,6 +1224,7 @@ router.post('/:id/share', requireAuth, validateSessionId, asyncHandler(async (re
   logger.info(`Session ${sessionId} share token generated`, {
     component: 'Sessions',
     sessionId,
+    tokenFormat: shareToken.includes('-') ? 'uuid' : 'base64url',
     hasExpiration: !!shareExpiresAt,
     expiresAt: shareExpiresAt?.toISOString(),
   });
@@ -1236,6 +1329,183 @@ router.get('/:id/share', requireAuth, validateSessionId, asyncHandler(async (req
     isExpired: session.shareToken ? !isValid : false,
   });
 }, { errorMessage: 'Failed to get share status' }));
+
+/**
+ * POST /api/sessions/:id/share/regenerate
+ * Rotate the share token for a session (invalidates old token, generates new one)
+ * Security feature to prevent continued access after sharing with someone
+ * Optional body: { expiresInDays?: number } - defaults to 7 days
+ */
+router.post('/:id/share/regenerate', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
+  const { expiresInDays } = req.body as { expiresInDays?: number };
+
+  // Validate expiresInDays if provided
+  if (expiresInDays !== undefined) {
+    if (typeof expiresInDays !== 'number' ||
+        expiresInDays < SHARE_TOKEN_CONFIG.MIN_EXPIRATION_DAYS ||
+        expiresInDays > SHARE_TOKEN_CONFIG.MAX_EXPIRATION_DAYS) {
+      sendBadRequest(res, `expiresInDays must be between ${SHARE_TOKEN_CONFIG.MIN_EXPIRATION_DAYS} and ${SHARE_TOKEN_CONFIG.MAX_EXPIRATION_DAYS}`);
+      return;
+    }
+  }
+
+  // Verify session ownership (include deletedAt check for share operations)
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  if (!session.shareToken) {
+    sendBadRequest(res, 'Session is not currently shared. Use POST /share to create a share link first.');
+    return;
+  }
+
+  // Generate new secure token (always new - this is rotation, not reuse)
+  const newShareToken = generateSecureShareToken();
+  const shareExpiresAt = calculateShareTokenExpiration(expiresInDays ?? SHARE_TOKEN_CONFIG.DEFAULT_EXPIRATION_DAYS);
+
+  // Update session with new share token
+  await db
+    .update(chatSessions)
+    .set({
+      shareToken: newShareToken,
+      shareExpiresAt,
+    })
+    .where(eq(chatSessions.id, sessionId));
+
+  logger.info(`Session ${sessionId} share token rotated`, {
+    component: 'Sessions',
+    sessionId,
+    expiresAt: shareExpiresAt.toISOString(),
+  });
+
+  sendData(res, {
+    shareToken: newShareToken,
+    shareUrl: `/sessions/shared/${newShareToken}`,
+    expiresAt: shareExpiresAt.toISOString(),
+    message: 'Share link regenerated. Previous link is now invalid.',
+  });
+}, { errorMessage: 'Failed to regenerate share token' }));
+
+/**
+ * GET /api/sessions/:id/share/access-logs
+ * Get access logs for a shared session (audit trail)
+ * Query params: limit (default 50), offset (default 0), success (optional filter)
+ */
+router.get('/:id/share/access-logs', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
+  const { limit = '50', offset = '0', success } = req.query;
+
+  // Parse query params
+  const parsedLimit = Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 100);
+  const parsedOffset = Math.max(parseInt(offset as string, 10) || 0, 0);
+  const successFilter = success === 'true' ? true : success === 'false' ? false : undefined;
+
+  // Verify session ownership
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  // Get access logs
+  const { logs, total } = await shareTokenAccessLogService.getAccessLogs({
+    sessionId,
+    limit: parsedLimit,
+    offset: parsedOffset,
+    success: successFilter,
+  });
+
+  sendData(res, {
+    logs,
+    total,
+    limit: parsedLimit,
+    offset: parsedOffset,
+    hasMore: parsedOffset + logs.length < total,
+  });
+}, { errorMessage: 'Failed to get share access logs' }));
+
+/**
+ * GET /api/sessions/:id/share/access-stats
+ * Get access statistics for a shared session
+ * Query params: startDate (optional ISO date), endDate (optional ISO date)
+ */
+router.get('/:id/share/access-stats', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
+  const { startDate, endDate } = req.query;
+
+  // Parse date params
+  const start = startDate ? new Date(startDate as string) : undefined;
+  const end = endDate ? new Date(endDate as string) : undefined;
+
+  // Validate dates if provided
+  if ((start && isNaN(start.getTime())) || (end && isNaN(end.getTime()))) {
+    sendBadRequest(res, 'Invalid date format. Use ISO 8601 format (e.g., 2025-01-01T00:00:00Z)');
+    return;
+  }
+
+  // Verify session ownership
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  // Get access stats
+  const stats = await shareTokenAccessLogService.getAccessStats(sessionId, start, end);
+
+  sendData(res, stats);
+}, { errorMessage: 'Failed to get share access stats' }));
 
 // Abort a running session
 router.post('/:id/abort', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {

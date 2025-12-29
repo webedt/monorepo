@@ -49,6 +49,17 @@ export {
 } from './ASessionAuthorizationService.js';
 export { SessionAuthorizationService, sessionAuthorizationService } from './SessionAuthorizationService.js';
 
+// Share token access logging service
+export {
+  AShareTokenAccessLogService,
+  type LogAccessParams,
+  type AccessLogQueryParams,
+  type AccessLogStats,
+  type ShareTokenAccessType,
+  type ShareTokenFailureReason,
+} from './AShareTokenAccessLogService.js';
+export { ShareTokenAccessLogService, shareTokenAccessLogService } from './ShareTokenAccessLogService.js';
+
 // Implementations
 export * from './claudeSessionSync.js';
 export * from './sessionEventBroadcaster.js';

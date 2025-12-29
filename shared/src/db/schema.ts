@@ -1198,3 +1198,27 @@ export type SnippetCollection = typeof snippetCollections.$inferSelect;
 export type NewSnippetCollection = typeof snippetCollections.$inferInsert;
 export type SnippetInCollection = typeof snippetsInCollections.$inferSelect;
 export type NewSnippetInCollection = typeof snippetsInCollections.$inferInsert;
+
+// ============================================================================
+// SHARE TOKEN ACCESS LOG - Audit trail for shared session access
+// ============================================================================
+
+// Share Token Access Log - Tracks access to shared sessions for security auditing
+export const shareTokenAccessLog = pgTable('share_token_access_log', {
+  id: text('id').primaryKey(), // UUID
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  shareToken: text('share_token').notNull(), // Token used (for audit even if rotated)
+  accessType: text('access_type').notNull(), // 'view' | 'events' | 'stream'
+  ipAddress: text('ip_address'), // Requester IP (hashed for privacy)
+  userAgent: text('user_agent'), // Browser/client info
+  country: text('country'), // Geo-location (if available)
+  success: boolean('success').notNull().default(true), // Whether access was granted
+  failureReason: text('failure_reason'), // If !success: 'expired' | 'invalid' | 'rate_limited'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Type exports for Share Token Access Log
+export type ShareTokenAccessLog = typeof shareTokenAccessLog.$inferSelect;
+export type NewShareTokenAccessLog = typeof shareTokenAccessLog.$inferInsert;

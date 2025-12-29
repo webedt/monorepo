@@ -48,7 +48,8 @@ export type RateLimitTier =
   | 'search'
   | 'collaboration'
   | 'sse'
-  | 'file';
+  | 'file'
+  | 'shareToken';
 
 /**
  * Rate limit configuration from environment variables
@@ -96,6 +97,11 @@ const config = {
   fileWindowMs: parseInt(process.env.RATE_LIMIT_FILE_WINDOW_MS || '60000', 10),
   fileMaxRequests: parseInt(process.env.RATE_LIMIT_FILE_MAX || '100', 10),
 
+  // Share token validation limits (default: 10 requests per minute - stricter to prevent enumeration)
+  // Applies to: share token validation endpoints
+  shareTokenWindowMs: parseInt(process.env.RATE_LIMIT_SHARE_TOKEN_WINDOW_MS || '60000', 10),
+  shareTokenMaxRequests: parseInt(process.env.RATE_LIMIT_SHARE_TOKEN_MAX || '10', 10),
+
   // Whether to skip rate limiting (for testing/development)
   skipRateLimiting: process.env.SKIP_RATE_LIMITING === 'true',
 
@@ -133,6 +139,7 @@ const rateLimitMetrics: RateLimitMetrics = {
     collaboration: 0,
     sse: 0,
     file: 0,
+    shareToken: 0,
   },
   hitsByPath: {},
   hitsByUser: {},
@@ -154,6 +161,7 @@ const stores: Record<RateLimitTier, SlidingWindowStore> = {
   collaboration: createSlidingWindowStore(config.collaborationWindowMs),
   sse: createSlidingWindowStore(config.sseWindowMs),
   file: createSlidingWindowStore(config.fileWindowMs),
+  shareToken: createSlidingWindowStore(config.shareTokenWindowMs),
 };
 
 /**
@@ -221,6 +229,7 @@ export function resetRateLimitMetrics(): void {
     collaboration: 0,
     sse: 0,
     file: 0,
+    shareToken: 0,
   };
   rateLimitMetrics.hitsByPath = {};
   rateLimitMetrics.hitsByUser = {};
@@ -584,6 +593,25 @@ export const sseRateLimiter = createEnhancedRateLimiter(
 );
 
 /**
+ * Share token validation rate limiter
+ *
+ * Applies to:
+ * - GET /api/sessions/shared/:token (View shared session)
+ * - GET /api/sessions/shared/:token/events (Get shared session events)
+ * - GET /api/sessions/shared/:token/events/stream (Stream shared session events)
+ *
+ * Default: 10 requests per minute per IP
+ * Stricter limits to prevent token enumeration attacks.
+ * Uses IP-based key generator (no authentication) since these are public endpoints.
+ */
+export const shareTokenValidationRateLimiter = createEnhancedRateLimiter(
+  'shareToken',
+  config.shareTokenWindowMs,
+  config.shareTokenMaxRequests,
+  keyGenerator // IP-based only for public share token endpoints
+);
+
+/**
  * Create a custom rate limiter with specific settings
  *
  * @param windowMs - Time window in milliseconds
@@ -678,6 +706,11 @@ export function logRateLimitConfig(): void {
       windowMs: config.sseWindowMs,
       maxRequests: config.sseMaxRequests,
       description: 'SSE streaming endpoints - per session',
+    },
+    shareToken: {
+      windowMs: config.shareTokenWindowMs,
+      maxRequests: config.shareTokenMaxRequests,
+      description: 'Share token validation - anti-enumeration',
     },
   });
 }
