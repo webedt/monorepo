@@ -5,149 +5,28 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Store } from '../../src/lib/store';
 
-// Create a fresh WorkerStore class for testing (without HMR)
-interface WorkerState {
-  executingSessionId: string | null;
-  executionStartedAt: number | null;
-  hasActiveStream: boolean;
-  lastHeartbeat: number | null;
-}
+// Import the actual WorkerStore class
+import { WorkerStore } from '../../src/stores/workerStore';
 
 const STORAGE_KEY = 'workerStore';
 const STALE_THRESHOLD_MS = 30000; // 30 seconds
 const EXECUTION_RESTORE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
-class TestWorkerStore extends Store<WorkerState> {
-  private heartbeatTimeout: ReturnType<typeof setInterval> | null = null;
-
-  constructor(skipLoadFromStorage = false) {
-    super({
-      executingSessionId: null,
-      executionStartedAt: null,
-      hasActiveStream: false,
-      lastHeartbeat: null,
-    });
-
-    if (!skipLoadFromStorage) {
-      this.loadFromStorage();
-    }
-  }
-
-  private loadFromStorage(): void {
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Only restore if execution was recent (within 5 minutes)
-        if (parsed.executionStartedAt && Date.now() - parsed.executionStartedAt < EXECUTION_RESTORE_WINDOW_MS) {
-          this.setState(parsed);
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
-
-    // Save on changes
-    this.subscribe((state) => {
-      try {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch {
-        // Ignore storage errors
-      }
-    });
-  }
-
-  isExecuting(sessionId?: string): boolean {
-    const state = this.getState();
-    if (sessionId) {
-      return state.executingSessionId === sessionId;
-    }
-    return state.executingSessionId !== null;
-  }
-
-  startExecution(sessionId: string): void {
-    this.setState({
-      executingSessionId: sessionId,
-      executionStartedAt: Date.now(),
-      hasActiveStream: true,
-      lastHeartbeat: Date.now(),
-    });
-    this.startHeartbeatMonitor();
-  }
-
-  stopExecution(): void {
-    this.setState({
-      executingSessionId: null,
-      executionStartedAt: null,
-      hasActiveStream: false,
-      lastHeartbeat: null,
-    });
-    this.stopHeartbeatMonitor();
-  }
-
-  heartbeat(): void {
-    this.setState({ lastHeartbeat: Date.now() });
-  }
-
-  setStreamActive(active: boolean): void {
-    this.setState({ hasActiveStream: active });
-    if (active) {
-      this.heartbeat();
-    }
-  }
-
-  getExecutionDuration(): number | null {
-    const state = this.getState();
-    if (state.executionStartedAt) {
-      return Date.now() - state.executionStartedAt;
-    }
-    return null;
-  }
-
-  isStale(): boolean {
-    const state = this.getState();
-    if (!state.lastHeartbeat) return false;
-    // Consider stale if no heartbeat for 30 seconds
-    return Date.now() - state.lastHeartbeat > STALE_THRESHOLD_MS;
-  }
-
-  startHeartbeatMonitor(): void {
-    this.stopHeartbeatMonitor();
-    this.heartbeatTimeout = setInterval(() => {
-      if (this.isStale()) {
-        console.warn('[WorkerStore] Execution appears stale, stopping');
-        this.stopExecution();
-      }
-    }, 10000);
-  }
-
-  stopHeartbeatMonitor(): void {
-    if (this.heartbeatTimeout) {
-      clearInterval(this.heartbeatTimeout);
-      this.heartbeatTimeout = null;
-    }
-  }
-
-  // For testing: expose the timeout
-  getHeartbeatTimeout(): ReturnType<typeof setInterval> | null {
-    return this.heartbeatTimeout;
-  }
-}
-
 describe('WorkerStore', () => {
-  let workerStore: TestWorkerStore;
+  let workerStore: WorkerStore;
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     sessionStorage.clear();
-    workerStore = new TestWorkerStore(true); // Skip loading from storage for fresh state
+    // Create fresh instance - sessionStorage is empty so initial state is defaults
+    workerStore = new WorkerStore();
   });
 
   afterEach(() => {
-    workerStore.stopHeartbeatMonitor();
+    // Stop any running intervals by stopping execution
+    workerStore.stopExecution();
     vi.useRealTimers();
   });
 
@@ -188,10 +67,20 @@ describe('WorkerStore', () => {
       expect(workerStore.isExecuting('other-session')).toBe(false);
     });
 
-    it('should start heartbeat monitor', () => {
+    it('should start heartbeat monitor that stops stale execution', () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
       workerStore.startExecution('session-123');
 
-      expect(workerStore.getHeartbeatTimeout()).not.toBeNull();
+      // Advance time past stale threshold
+      vi.setSystemTime(now + STALE_THRESHOLD_MS + 1);
+
+      // Trigger the interval check
+      vi.advanceTimersByTime(10000);
+
+      // Monitor should have stopped the stale execution
+      expect(workerStore.isExecuting()).toBe(false);
     });
 
     it('should replace existing execution', () => {
@@ -218,9 +107,17 @@ describe('WorkerStore', () => {
     });
 
     it('should stop heartbeat monitor', () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
       workerStore.stopExecution();
 
-      expect(workerStore.getHeartbeatTimeout()).toBeNull();
+      // Advance time and trigger interval - no errors should occur
+      vi.setSystemTime(now + STALE_THRESHOLD_MS + 1);
+      vi.advanceTimersByTime(10000);
+
+      // Should remain stopped (monitor cleared)
+      expect(workerStore.isExecuting()).toBe(false);
     });
 
     it('should report not executing after stop', () => {
@@ -397,38 +294,53 @@ describe('WorkerStore', () => {
     });
 
     it('should clean up monitor on stop', () => {
-      workerStore.startExecution('session-123');
-      const timeout = workerStore.getHeartbeatTimeout();
+      const now = Date.now();
+      vi.setSystemTime(now);
 
+      workerStore.startExecution('session-123');
       workerStore.stopExecution();
 
-      expect(workerStore.getHeartbeatTimeout()).toBeNull();
-      expect(timeout).not.toBeNull();
+      // Start a new execution and let it go stale
+      workerStore.startExecution('session-456');
+
+      // The old monitor should not interfere
+      vi.setSystemTime(now + STALE_THRESHOLD_MS + 1);
+      vi.advanceTimersByTime(10000);
+
+      // New execution should be stopped by its own monitor
+      expect(workerStore.isExecuting()).toBe(false);
     });
 
     it('should restart monitor on new execution', () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
       workerStore.startExecution('session-1');
-      const timeout1 = workerStore.getHeartbeatTimeout();
 
+      // Advance time but not past stale threshold
+      vi.setSystemTime(now + 20000);
+      workerStore.heartbeat();
+
+      // Start new execution
       workerStore.startExecution('session-2');
-      const timeout2 = workerStore.getHeartbeatTimeout();
 
-      expect(timeout2).not.toBeNull();
-      // Note: With fake timers, we can't easily check if it's a different interval
+      // Advance time past stale threshold from new start
+      vi.setSystemTime(now + 20000 + STALE_THRESHOLD_MS + 1);
+      vi.advanceTimersByTime(10000);
+
+      // Should have stopped due to staleness
+      expect(workerStore.isExecuting()).toBe(false);
     });
   });
 
   describe('Session Storage Persistence', () => {
     it('should persist state to sessionStorage', () => {
-      const store = new TestWorkerStore();
       vi.setSystemTime(1000);
-      store.startExecution('session-123');
+      workerStore.startExecution('session-123');
 
       const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
       expect(stored.executingSessionId).toBe('session-123');
       expect(stored.hasActiveStream).toBe(true);
-
-      store.stopHeartbeatMonitor();
     });
 
     it('should restore recent execution from sessionStorage', () => {
@@ -442,12 +354,12 @@ describe('WorkerStore', () => {
         lastHeartbeat: now - 30000,
       }));
 
-      const store = new TestWorkerStore();
+      const store = new WorkerStore();
 
       expect(store.getState().executingSessionId).toBe('saved-session');
       expect(store.getState().hasActiveStream).toBe(true);
 
-      store.stopHeartbeatMonitor();
+      store.stopExecution();
     });
 
     it('should not restore old execution from sessionStorage', () => {
@@ -461,22 +373,22 @@ describe('WorkerStore', () => {
         lastHeartbeat: now - EXECUTION_RESTORE_WINDOW_MS,
       }));
 
-      const store = new TestWorkerStore();
+      const store = new WorkerStore();
 
       expect(store.getState().executingSessionId).toBeNull();
 
-      store.stopHeartbeatMonitor();
+      store.stopExecution();
     });
 
     it('should handle malformed sessionStorage data', () => {
       sessionStorage.setItem(STORAGE_KEY, 'invalid json{{{');
 
-      const store = new TestWorkerStore();
+      const store = new WorkerStore();
 
       // Should fall back to defaults
       expect(store.getState().executingSessionId).toBeNull();
 
-      store.stopHeartbeatMonitor();
+      store.stopExecution();
     });
   });
 
@@ -513,7 +425,6 @@ describe('WorkerStore', () => {
       }
 
       expect(workerStore.isExecuting()).toBe(false);
-      expect(workerStore.getHeartbeatTimeout()).toBeNull();
     });
 
     it('should handle stop without start', () => {

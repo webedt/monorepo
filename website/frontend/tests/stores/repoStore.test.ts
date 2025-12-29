@@ -5,122 +5,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Store } from '../../src/lib/store';
 
-// Create a fresh RepoStore class for testing (without HMR)
-interface RepoState {
-  selectedRepo: string;
-  selectedBranch: string;
-  isLocked: boolean;
-  recentRepos: string[];
-}
+// Import the actual RepoStore class
+import { RepoStore } from '../../src/stores/repoStore';
 
 const STORAGE_KEY = 'repoStore';
 const MAX_RECENT_REPOS = 10;
 
-class TestRepoStore extends Store<RepoState> {
-  constructor(skipLoadFromStorage = false) {
-    super({
-      selectedRepo: '',
-      selectedBranch: '',
-      isLocked: false,
-      recentRepos: [],
-    });
-
-    if (!skipLoadFromStorage) {
-      this.loadFromStorage();
-    }
-  }
-
-  private loadFromStorage(): void {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        this.setState({
-          selectedRepo: parsed.selectedRepo || '',
-          selectedBranch: parsed.selectedBranch || '',
-          isLocked: parsed.isLocked || false,
-          recentRepos: parsed.recentRepos || [],
-        });
-      }
-    } catch {
-      // Ignore parse errors
-    }
-
-    // Save on changes
-    this.subscribe((state) => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch {
-        // Ignore storage errors
-      }
-    });
-  }
-
-  selectRepo(repo: string, branch?: string): void {
-    const state = this.getState();
-
-    // Don't change if locked
-    if (state.isLocked && state.selectedRepo) {
-      return;
-    }
-
-    // Add to recent repos
-    const recentRepos = [repo, ...state.recentRepos.filter(r => r !== repo)]
-      .slice(0, MAX_RECENT_REPOS);
-
-    this.setState({
-      selectedRepo: repo,
-      selectedBranch: branch || '',
-      recentRepos,
-    });
-  }
-
-  selectBranch(branch: string): void {
-    this.setState({ selectedBranch: branch });
-  }
-
-  lock(): void {
-    this.setState({ isLocked: true });
-  }
-
-  unlock(): void {
-    this.setState({ isLocked: false });
-  }
-
-  clear(): void {
-    this.setState({
-      selectedRepo: '',
-      selectedBranch: '',
-      isLocked: false,
-    });
-  }
-
-  getParsedRepo(): { owner: string; name: string } | null {
-    const repo = this.getState().selectedRepo;
-    if (!repo) return null;
-
-    const [owner, name] = repo.split('/');
-    if (!owner || !name) return null;
-
-    return { owner, name };
-  }
-
-  getRepoUrl(): string | null {
-    const parsed = this.getParsedRepo();
-    if (!parsed) return null;
-    return `https://github.com/${parsed.owner}/${parsed.name}`;
-  }
-}
-
 describe('RepoStore', () => {
-  let repoStore: TestRepoStore;
+  let repoStore: RepoStore;
 
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    repoStore = new TestRepoStore(true); // Skip loading from storage for fresh state
+    // Create fresh instance - localStorage is empty so initial state is defaults
+    repoStore = new RepoStore();
   });
 
   describe('Initial State', () => {
@@ -331,7 +230,7 @@ describe('RepoStore', () => {
 
   describe('Local Storage Persistence', () => {
     it('should persist state to localStorage on changes', () => {
-      const store = new TestRepoStore();
+      const store = new RepoStore();
       store.selectRepo('owner/repo', 'main');
 
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -347,7 +246,7 @@ describe('RepoStore', () => {
         recentRepos: ['saved/repo', 'another/repo'],
       }));
 
-      const store = new TestRepoStore();
+      const store = new RepoStore();
 
       const state = store.getState();
       expect(state.selectedRepo).toBe('saved/repo');
@@ -359,7 +258,7 @@ describe('RepoStore', () => {
     it('should handle malformed localStorage data', () => {
       localStorage.setItem(STORAGE_KEY, 'invalid json{{{');
 
-      const store = new TestRepoStore();
+      const store = new RepoStore();
 
       // Should fall back to defaults
       expect(store.getState().selectedRepo).toBe('');
@@ -371,7 +270,7 @@ describe('RepoStore', () => {
         // Missing other fields
       }));
 
-      const store = new TestRepoStore();
+      const store = new RepoStore();
 
       expect(store.getState().selectedRepo).toBe('owner/repo');
       expect(store.getState().selectedBranch).toBe('');

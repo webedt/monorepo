@@ -6,337 +6,283 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Import actual production classes
+import { UndoRedoStack } from '../../src/lib/undoRedo';
+import { UndoRedoManager } from '../../src/stores/undoRedoStore';
+
 import type { UndoRedoState } from '../../src/lib/undoRedo';
 
-interface TabContentState {
-  content: string;
-  cursorPosition?: number;
-}
-
-// Create a test version of the undo/redo stack and manager
-class TestUndoRedoStack<T> {
-  private past: T[] = [];
-  private present: T | null = null;
-  private future: T[] = [];
-  private maxSize: number;
-  private debounceMs: number;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingState: T | null = null;
-  private subscribers: Set<(state: UndoRedoState<T>) => void> = new Set();
-
-  constructor(options: { maxSize?: number; debounceMs?: number } = {}) {
-    this.maxSize = options.maxSize ?? 100;
-    this.debounceMs = options.debounceMs ?? 500;
-  }
-
-  initialize(state: T): void {
-    this.present = this.clone(state);
-    this.past = [];
-    this.future = [];
-    this.notifySubscribers();
-  }
-
-  push(state: T): void {
-    this.pendingState = this.clone(state);
-
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
-
-    this.debounceTimer = setTimeout(() => {
-      this.commitPending();
-    }, this.debounceMs);
-  }
-
-  flush(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    this.commitPending();
-  }
-
-  private commitPending(): void {
-    if (this.pendingState === null) return;
-
-    // Don't push if state is the same as current present
-    if (this.present !== null && this.isEqual(this.present, this.pendingState)) {
-      this.pendingState = null;
-      return;
-    }
-
-    // Push current present to past (if exists)
-    if (this.present !== null) {
-      this.past.push(this.present);
-
-      // Trim history if exceeds max size
-      while (this.past.length > this.maxSize) {
-        this.past.shift();
-      }
-    }
-
-    // Update present
-    this.present = this.pendingState;
-    this.pendingState = null;
-
-    // Clear future (new timeline)
-    this.future = [];
-
-    this.notifySubscribers();
-  }
-
-  undo(): T | null {
-    this.flush();
-
-    if (this.past.length === 0) {
-      return null;
-    }
-
-    // Move present to future
-    if (this.present !== null) {
-      this.future.unshift(this.present);
-    }
-
-    // Pop from past to present
-    this.present = this.past.pop()!;
-    this.notifySubscribers();
-
-    return this.clone(this.present);
-  }
-
-  redo(): T | null {
-    this.flush();
-
-    if (this.future.length === 0) {
-      return null;
-    }
-
-    // Move present to past
-    if (this.present !== null) {
-      this.past.push(this.present);
-    }
-
-    // Pop from future to present
-    this.present = this.future.shift()!;
-    this.notifySubscribers();
-
-    return this.clone(this.present);
-  }
-
-  getCurrent(): T | null {
-    return this.present ? this.clone(this.present) : null;
-  }
-
-  canUndo(): boolean {
-    return this.past.length > 0;
-  }
-
-  canRedo(): boolean {
-    return this.future.length > 0;
-  }
-
-  getState(): UndoRedoState<T> {
-    return {
-      canUndo: this.canUndo(),
-      canRedo: this.canRedo(),
-      historyLength: this.past.length,
-      futureLength: this.future.length,
-    };
-  }
-
-  clear(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    this.past = [];
-    this.future = [];
-    this.pendingState = null;
-    this.notifySubscribers();
-  }
-
-  reset(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    this.past = [];
-    this.present = null;
-    this.future = [];
-    this.pendingState = null;
-    this.notifySubscribers();
-  }
-
-  subscribe(subscriber: (state: UndoRedoState<T>) => void): () => void {
-    this.subscribers.add(subscriber);
-    subscriber(this.getState());
-    return () => this.subscribers.delete(subscriber);
-  }
-
-  private notifySubscribers(): void {
-    const state = this.getState();
-    for (const subscriber of this.subscribers) {
-      subscriber(state);
-    }
-  }
-
-  private clone(state: T): T {
-    if (typeof state === 'string') {
-      return state;
-    }
-    return JSON.parse(JSON.stringify(state));
-  }
-
-  private isEqual(a: T, b: T): boolean {
-    if (typeof a === 'string' && typeof b === 'string') {
-      return a === b;
-    }
-    return JSON.stringify(a) === JSON.stringify(b);
-  }
-}
-
-// Test version of UndoRedoManager
-class TestUndoRedoManager {
-  private stacks: Map<string, TestUndoRedoStack<TabContentState>> = new Map();
-  private subscribers: Map<string, Set<(state: UndoRedoState<TabContentState>) => void>> = new Map();
-
-  private getStack(tabPath: string): TestUndoRedoStack<TabContentState> {
-    if (!this.stacks.has(tabPath)) {
-      const stack = new TestUndoRedoStack<TabContentState>({
-        maxSize: 100,
-        debounceMs: 500,
-      });
-
-      stack.subscribe((state) => {
-        const tabSubscribers = this.subscribers.get(tabPath);
-        if (tabSubscribers) {
-          for (const subscriber of tabSubscribers) {
-            subscriber(state);
-          }
-        }
-      });
-
-      this.stacks.set(tabPath, stack);
-    }
-    return this.stacks.get(tabPath)!;
-  }
-
-  initialize(tabPath: string, content: string, cursorPosition?: number): void {
-    const stack = this.getStack(tabPath);
-    stack.initialize({ content, cursorPosition });
-  }
-
-  pushChange(tabPath: string, content: string, cursorPosition?: number): void {
-    const stack = this.getStack(tabPath);
-    stack.push({ content, cursorPosition });
-  }
-
-  undo(tabPath: string): TabContentState | null {
-    const stack = this.stacks.get(tabPath);
-    if (!stack) return null;
-    return stack.undo();
-  }
-
-  redo(tabPath: string): TabContentState | null {
-    const stack = this.stacks.get(tabPath);
-    if (!stack) return null;
-    return stack.redo();
-  }
-
-  canUndo(tabPath: string): boolean {
-    const stack = this.stacks.get(tabPath);
-    return stack ? stack.canUndo() : false;
-  }
-
-  canRedo(tabPath: string): boolean {
-    const stack = this.stacks.get(tabPath);
-    return stack ? stack.canRedo() : false;
-  }
-
-  getState(tabPath: string): UndoRedoState<TabContentState> {
-    const stack = this.stacks.get(tabPath);
-    if (!stack) {
-      return {
-        canUndo: false,
-        canRedo: false,
-        historyLength: 0,
-        futureLength: 0,
-      };
-    }
-    return stack.getState();
-  }
-
-  subscribe(
-    tabPath: string,
-    subscriber: (state: UndoRedoState<TabContentState>) => void
-  ): () => void {
-    if (!this.subscribers.has(tabPath)) {
-      this.subscribers.set(tabPath, new Set());
-    }
-    this.subscribers.get(tabPath)!.add(subscriber);
-
-    subscriber(this.getState(tabPath));
-
-    return () => {
-      const tabSubscribers = this.subscribers.get(tabPath);
-      if (tabSubscribers) {
-        tabSubscribers.delete(subscriber);
-        if (tabSubscribers.size === 0) {
-          this.subscribers.delete(tabPath);
-        }
-      }
-    };
-  }
-
-  clearTab(tabPath: string): void {
-    const stack = this.stacks.get(tabPath);
-    if (stack) {
-      stack.clear();
-    }
-  }
-
-  removeTab(tabPath: string): void {
-    const stack = this.stacks.get(tabPath);
-    if (stack) {
-      stack.reset();
-    }
-    this.stacks.delete(tabPath);
-    this.subscribers.delete(tabPath);
-  }
-
-  clearAll(): void {
-    for (const stack of this.stacks.values()) {
-      stack.reset();
-    }
-    this.stacks.clear();
-    this.subscribers.clear();
-  }
-
-  flush(tabPath: string): void {
-    const stack = this.stacks.get(tabPath);
-    if (stack) {
-      stack.flush();
-    }
-  }
-
-  flushAll(): void {
-    for (const stack of this.stacks.values()) {
-      stack.flush();
-    }
-  }
-
-  // For testing
-  getStackCount(): number {
-    return this.stacks.size;
-  }
-}
-
-describe('UndoRedoStore', () => {
-  let undoRedoStore: TestUndoRedoManager;
+describe('UndoRedoStack', () => {
+  let stack: UndoRedoStack<string>;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    undoRedoStore = new TestUndoRedoManager();
+    stack = new UndoRedoStack<string>({ maxSize: 100, debounceMs: 500 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('Initial State', () => {
+    it('should have correct initial state', () => {
+      const state = stack.getState();
+
+      expect(state.canUndo).toBe(false);
+      expect(state.canRedo).toBe(false);
+      expect(state.historyLength).toBe(0);
+      expect(state.futureLength).toBe(0);
+    });
+
+    it('should return null for getCurrent before initialization', () => {
+      expect(stack.getCurrent()).toBeNull();
+    });
+  });
+
+  describe('Initialization', () => {
+    it('should initialize with a state', () => {
+      stack.initialize('initial content');
+
+      expect(stack.getCurrent()).toBe('initial content');
+      expect(stack.canUndo()).toBe(false);
+      expect(stack.canRedo()).toBe(false);
+    });
+
+    it('should clear history on re-initialization', () => {
+      stack.initialize('first');
+      stack.push('second');
+      vi.advanceTimersByTime(500);
+
+      stack.initialize('new start');
+
+      expect(stack.getCurrent()).toBe('new start');
+      expect(stack.canUndo()).toBe(false);
+    });
+  });
+
+  describe('Push and Debouncing', () => {
+    beforeEach(() => {
+      stack.initialize('initial');
+    });
+
+    it('should debounce rapid changes', () => {
+      stack.push('change 1');
+      stack.push('change 2');
+      stack.push('change 3');
+
+      // Before debounce timeout, still no history
+      expect(stack.canUndo()).toBe(false);
+
+      // After debounce
+      vi.advanceTimersByTime(500);
+
+      expect(stack.canUndo()).toBe(true);
+      expect(stack.getState().historyLength).toBe(1);
+    });
+
+    it('should commit change after debounce period', () => {
+      stack.push('new content');
+
+      vi.advanceTimersByTime(500);
+
+      expect(stack.canUndo()).toBe(true);
+      expect(stack.getCurrent()).toBe('new content');
+    });
+
+    it('should flush pending changes immediately', () => {
+      stack.push('new content');
+      stack.flush();
+
+      expect(stack.canUndo()).toBe(true);
+    });
+
+    it('should not add duplicate consecutive states', () => {
+      stack.push('same content');
+      vi.advanceTimersByTime(500);
+
+      stack.push('same content');
+      vi.advanceTimersByTime(500);
+
+      expect(stack.getState().historyLength).toBe(1);
+    });
+  });
+
+  describe('Undo', () => {
+    beforeEach(() => {
+      stack.initialize('initial');
+      stack.push('change 1');
+      vi.advanceTimersByTime(500);
+      stack.push('change 2');
+      vi.advanceTimersByTime(500);
+    });
+
+    it('should undo to previous state', () => {
+      const result = stack.undo();
+
+      expect(result).toBe('change 1');
+    });
+
+    it('should enable redo after undo', () => {
+      stack.undo();
+
+      expect(stack.canRedo()).toBe(true);
+    });
+
+    it('should undo multiple times', () => {
+      stack.undo();
+      const result = stack.undo();
+
+      expect(result).toBe('initial');
+      expect(stack.canUndo()).toBe(false);
+    });
+
+    it('should return null when nothing to undo', () => {
+      stack.undo();
+      stack.undo();
+      const result = stack.undo();
+
+      expect(result).toBeNull();
+    });
+
+    it('should flush pending changes before undo', () => {
+      stack.push('pending');
+      // Don't wait for debounce
+
+      const result = stack.undo();
+
+      expect(result).toBe('change 2');
+    });
+  });
+
+  describe('Redo', () => {
+    beforeEach(() => {
+      stack.initialize('initial');
+      stack.push('change 1');
+      vi.advanceTimersByTime(500);
+      stack.push('change 2');
+      vi.advanceTimersByTime(500);
+      stack.undo();
+    });
+
+    it('should redo to next state', () => {
+      const result = stack.redo();
+
+      expect(result).toBe('change 2');
+    });
+
+    it('should disable redo after all redos', () => {
+      stack.redo();
+
+      expect(stack.canRedo()).toBe(false);
+    });
+
+    it('should return null when nothing to redo', () => {
+      stack.redo();
+      const result = stack.redo();
+
+      expect(result).toBeNull();
+    });
+
+    it('should clear redo history on new change', () => {
+      stack.push('new branch');
+      vi.advanceTimersByTime(500);
+
+      expect(stack.canRedo()).toBe(false);
+    });
+  });
+
+  describe('History Limits', () => {
+    it('should respect max history size', () => {
+      stack.initialize('start');
+
+      // Push more than 100 changes
+      for (let i = 0; i < 150; i++) {
+        stack.push(`change ${i}`);
+        vi.advanceTimersByTime(500);
+      }
+
+      const state = stack.getState();
+      expect(state.historyLength).toBeLessThanOrEqual(100);
+    });
+  });
+
+  describe('Clear and Reset', () => {
+    beforeEach(() => {
+      stack.initialize('initial');
+      stack.push('change');
+      vi.advanceTimersByTime(500);
+    });
+
+    it('should clear history but keep current state', () => {
+      stack.clear();
+
+      expect(stack.canUndo()).toBe(false);
+      expect(stack.canRedo()).toBe(false);
+    });
+
+    it('should reset everything including current state', () => {
+      stack.reset();
+
+      expect(stack.getCurrent()).toBeNull();
+      expect(stack.canUndo()).toBe(false);
+      expect(stack.canRedo()).toBe(false);
+    });
+  });
+
+  describe('Subscriptions', () => {
+    it('should notify subscriber immediately with current state', () => {
+      stack.initialize('initial');
+      const subscriber = vi.fn();
+
+      stack.subscribe(subscriber);
+
+      expect(subscriber).toHaveBeenCalledWith(
+        expect.objectContaining({
+          canUndo: false,
+          canRedo: false,
+        })
+      );
+    });
+
+    it('should notify subscriber on state changes', () => {
+      stack.initialize('initial');
+      const subscriber = vi.fn();
+      stack.subscribe(subscriber);
+
+      subscriber.mockClear();
+
+      stack.push('new content');
+      vi.advanceTimersByTime(500);
+
+      expect(subscriber).toHaveBeenCalledWith(
+        expect.objectContaining({
+          canUndo: true,
+        })
+      );
+    });
+
+    it('should unsubscribe correctly', () => {
+      stack.initialize('initial');
+      const subscriber = vi.fn();
+      const unsubscribe = stack.subscribe(subscriber);
+
+      unsubscribe();
+      subscriber.mockClear();
+
+      stack.push('new content');
+      vi.advanceTimersByTime(500);
+
+      expect(subscriber).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('UndoRedoManager', () => {
+  let undoRedoStore: UndoRedoManager;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    undoRedoStore = new UndoRedoManager();
   });
 
   afterEach(() => {
@@ -381,7 +327,12 @@ describe('UndoRedoStore', () => {
       undoRedoStore.initialize('tab1', 'content 1');
       undoRedoStore.initialize('tab2', 'content 2');
 
-      expect(undoRedoStore.getStackCount()).toBe(2);
+      // Verify tabs are independent by modifying one
+      undoRedoStore.pushChange('tab1', 'changed');
+      vi.advanceTimersByTime(500);
+
+      expect(undoRedoStore.canUndo('tab1')).toBe(true);
+      expect(undoRedoStore.canUndo('tab2')).toBe(false);
     });
   });
 
@@ -566,9 +517,13 @@ describe('UndoRedoStore', () => {
     });
 
     it('should remove tab entirely', () => {
+      undoRedoStore.pushChange('tab1', 'change');
+      vi.advanceTimersByTime(500);
+
       undoRedoStore.removeTab('tab1');
 
-      expect(undoRedoStore.getStackCount()).toBe(1);
+      // Tab is gone, returns default state
+      expect(undoRedoStore.getState('tab1').historyLength).toBe(0);
     });
 
     it('should clear all tabs', () => {
@@ -578,7 +533,8 @@ describe('UndoRedoStore', () => {
 
       undoRedoStore.clearAll();
 
-      expect(undoRedoStore.getStackCount()).toBe(0);
+      expect(undoRedoStore.canUndo('tab1')).toBe(false);
+      expect(undoRedoStore.canUndo('tab2')).toBe(false);
     });
 
     it('should flush all tabs', () => {

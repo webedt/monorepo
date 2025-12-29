@@ -5,143 +5,23 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Store } from '../../src/lib/store';
 
 import type { User } from '../../src/types';
 
-// Mock the API module
-const mockAuthApi = {
+// Use vi.hoisted to ensure mocks are available when vi.mock runs
+const mockAuthApi = vi.hoisted(() => ({
   getSession: vi.fn(),
   login: vi.fn(),
   logout: vi.fn(),
   register: vi.fn(),
-};
+}));
 
 vi.mock('../../src/lib/api', () => ({
   authApi: mockAuthApi,
 }));
 
-// Create a fresh AuthStore class for testing
-interface AuthState {
-  user: User | null;
-  isLoading: boolean;
-  isInitialized: boolean;
-  error: string | null;
-}
-
-class TestAuthStore extends Store<AuthState> {
-  constructor() {
-    super({
-      user: null,
-      isLoading: true,
-      isInitialized: false,
-      error: null,
-    });
-  }
-
-  isAuthenticated(): boolean {
-    return this.getState().user !== null;
-  }
-
-  getUser(): User | null {
-    return this.getState().user;
-  }
-
-  async initialize(): Promise<void> {
-    if (this.getState().isInitialized) {
-      return;
-    }
-
-    this.setState({ isLoading: true, error: null });
-
-    try {
-      const response = await mockAuthApi.getSession();
-      this.setState({
-        user: response?.user ?? null,
-        isLoading: false,
-        isInitialized: true,
-      });
-    } catch (error) {
-      this.setState({
-        user: null,
-        isLoading: false,
-        isInitialized: true,
-        error: error instanceof Error ? error.message : 'Failed to check session',
-      });
-    }
-  }
-
-  async login(email: string, password: string, rememberMe = false): Promise<void> {
-    this.setState({ isLoading: true, error: null });
-
-    try {
-      const response = await mockAuthApi.login(email, password, rememberMe);
-      const sessionCheck = await mockAuthApi.getSession();
-
-      this.setState({
-        user: sessionCheck?.user ?? response?.user ?? null,
-        isLoading: false,
-      });
-    } catch (error) {
-      this.setState({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Login failed',
-      });
-      throw error;
-    }
-  }
-
-  async register(email: string, password: string): Promise<void> {
-    this.setState({ isLoading: true, error: null });
-
-    try {
-      const response = await mockAuthApi.register(email, password);
-      const sessionCheck = await mockAuthApi.getSession();
-
-      this.setState({
-        user: sessionCheck?.user ?? response?.user ?? null,
-        isLoading: false,
-      });
-    } catch (error) {
-      this.setState({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Registration failed',
-      });
-      throw error;
-    }
-  }
-
-  async logout(): Promise<void> {
-    this.setState({ isLoading: true, error: null });
-
-    try {
-      await mockAuthApi.logout();
-      this.setState({
-        user: null,
-        isLoading: false,
-      });
-    } catch (error) {
-      this.setState({
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Logout failed',
-      });
-      throw error;
-    }
-  }
-
-  updateUser(updates: Partial<User>): void {
-    const currentUser = this.getState().user;
-    if (currentUser) {
-      this.setState({
-        user: { ...currentUser, ...updates },
-      });
-    }
-  }
-
-  clearError(): void {
-    this.setState({ error: null });
-  }
-}
+// Import the actual AuthStore class after mocking
+import { AuthStore } from '../../src/stores/authStore';
 
 // Test user fixture
 const mockUser: User = {
@@ -153,11 +33,11 @@ const mockUser: User = {
 };
 
 describe('AuthStore', () => {
-  let authStore: TestAuthStore;
+  let authStore: AuthStore;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    authStore = new TestAuthStore();
+    authStore = new AuthStore();
   });
 
   describe('Initial State', () => {
