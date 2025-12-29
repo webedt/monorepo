@@ -6,7 +6,7 @@
  * without database access. Integration tests would require a test database.
  */
 
-import { describe, it, mock, beforeEach, afterEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 describe('Auth Routes - Input Validation', () => {

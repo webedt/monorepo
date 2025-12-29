@@ -104,6 +104,6 @@ export function createMockSession(userId: string = 'test-user-id'): Session {
   };
 }
 
-export function createMockNext(): jest.Mock {
-  return (() => {}) as unknown as jest.Mock;
+export function createMockNext(): () => void {
+  return () => {};
 }
