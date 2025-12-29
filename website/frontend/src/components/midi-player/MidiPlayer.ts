@@ -28,6 +28,10 @@ export class MidiPlayer extends Component {
   private importDialog: MidiImportDialog | null = null;
   private progressBar: HTMLElement | null = null;
   private isDragging = false;
+  private lastRenderedFileInfo: string | null = null;
+  private timeCurrentEl: HTMLElement | null = null;
+  private progressFillEl: HTMLElement | null = null;
+  private progressHandleEl: HTMLElement | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
@@ -280,6 +284,11 @@ export class MidiPlayer extends Component {
       this.progressBar.addEventListener('keydown', (e) => this.handleProgressKeyDown(e as KeyboardEvent));
     }
 
+    // Cache element references for efficient updates
+    this.timeCurrentEl = this.element.querySelector('.midi-player-time-current');
+    this.progressFillEl = this.element.querySelector('.midi-player-progress-fill');
+    this.progressHandleEl = this.element.querySelector('.midi-player-progress-handle');
+
     // Volume slider
     const volumeSlider = this.element.querySelector('.midi-player-volume-slider') as HTMLInputElement;
     if (volumeSlider) {
@@ -408,9 +417,49 @@ export class MidiPlayer extends Component {
     return div.innerHTML;
   }
 
+  /**
+   * Update only the time-sensitive elements (progress bar and time display)
+   */
+  private updateTimeDisplay(state: MidiStoreState): void {
+    if (this.timeCurrentEl) {
+      this.timeCurrentEl.textContent = this.formatTime(state.currentTime);
+    }
+
+    const progress = state.progress * 100;
+    if (this.progressFillEl) {
+      this.progressFillEl.style.width = `${progress}%`;
+    }
+    if (this.progressHandleEl) {
+      this.progressHandleEl.style.left = `${progress}%`;
+    }
+    if (this.progressBar) {
+      this.progressBar.setAttribute('aria-valuenow', String(Math.round(progress)));
+    }
+  }
+
+  /**
+   * Check if a full re-render is needed
+   */
+  private needsFullRender(state: MidiStoreState): boolean {
+    const fileKey = state.fileInfo
+      ? `${state.fileInfo.fileName}-${state.isLoaded}-${state.settings.loop}-${JSON.stringify(state.fileInfo.tracks.map((t) => t.isMuted))}`
+      : 'empty';
+
+    if (fileKey !== this.lastRenderedFileInfo) {
+      this.lastRenderedFileInfo = fileKey;
+      return true;
+    }
+    return false;
+  }
+
   protected onMount(): void {
-    this.unsubscribe = midiStore.subscribe(() => {
-      this.render();
+    this.unsubscribe = midiStore.subscribe((state) => {
+      if (this.needsFullRender(state)) {
+        this.render();
+      } else {
+        // Only update time-sensitive elements
+        this.updateTimeDisplay(state);
+      }
     });
   }
 
