@@ -115,6 +115,11 @@
   color: var(--color-text-muted);
 }
 
+.connection-description {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
 /* Claude Auth Form */
 .claude-auth-form {
   margin-top: var(--spacing-md);
