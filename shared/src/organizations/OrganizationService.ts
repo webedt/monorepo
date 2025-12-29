@@ -8,7 +8,9 @@ import {
   organizationRepositories,
   organizationInvitations,
   users,
+  withTransactionOrThrow,
 } from '../db/index.js';
+import type { TransactionContext } from '../db/index.js';
 
 import type { Organization } from '../db/schema.js';
 import type { OrganizationMember } from '../db/schema.js';
@@ -241,22 +243,29 @@ export class OrganizationService extends AOrganizationService {
   }
 
   async addRepository(params: AddRepositoryParams): Promise<OrganizationRepository> {
-    if (params.isDefault) {
-      await db
-        .update(organizationRepositories)
-        .set({ isDefault: false })
-        .where(eq(organizationRepositories.organizationId, params.organizationId));
-    }
+    // Use transaction to ensure default flag update and insert are atomic
+    const repo = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      if (params.isDefault) {
+        await tx
+          .update(organizationRepositories)
+          .set({ isDefault: false })
+          .where(eq(organizationRepositories.organizationId, params.organizationId));
+      }
 
-    const [repo] = await db.insert(organizationRepositories).values({
-      id: randomUUID(),
-      organizationId: params.organizationId,
-      repositoryOwner: params.repositoryOwner,
-      repositoryName: params.repositoryName,
-      isDefault: params.isDefault ?? false,
-      addedBy: params.addedBy,
-      addedAt: new Date(),
-    }).returning();
+      const [newRepo] = await tx.insert(organizationRepositories).values({
+        id: randomUUID(),
+        organizationId: params.organizationId,
+        repositoryOwner: params.repositoryOwner,
+        repositoryName: params.repositoryName,
+        isDefault: params.isDefault ?? false,
+        addedBy: params.addedBy,
+        addedAt: new Date(),
+      }).returning();
+
+      return newRepo;
+    }, {
+      context: { operation: 'addRepository', organizationId: params.organizationId, isDefault: params.isDefault },
+    });
 
     return repo;
   }
@@ -285,22 +294,30 @@ export class OrganizationService extends AOrganizationService {
     repositoryOwner: string,
     repositoryName: string
   ): Promise<boolean> {
-    await db
-      .update(organizationRepositories)
-      .set({ isDefault: false })
-      .where(eq(organizationRepositories.organizationId, organizationId));
+    // Use transaction to ensure both updates are atomic
+    // This prevents a window where no repository is marked as default
+    const updated = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .update(organizationRepositories)
+        .set({ isDefault: false })
+        .where(eq(organizationRepositories.organizationId, organizationId));
 
-    const updated = await db
-      .update(organizationRepositories)
-      .set({ isDefault: true })
-      .where(
-        and(
-          eq(organizationRepositories.organizationId, organizationId),
-          eq(organizationRepositories.repositoryOwner, repositoryOwner),
-          eq(organizationRepositories.repositoryName, repositoryName)
+      const result = await tx
+        .update(organizationRepositories)
+        .set({ isDefault: true })
+        .where(
+          and(
+            eq(organizationRepositories.organizationId, organizationId),
+            eq(organizationRepositories.repositoryOwner, repositoryOwner),
+            eq(organizationRepositories.repositoryName, repositoryName)
+          )
         )
-      )
-      .returning({ id: organizationRepositories.id });
+        .returning({ id: organizationRepositories.id });
+
+      return result;
+    }, {
+      context: { operation: 'setDefaultRepository', organizationId, repositoryOwner, repositoryName },
+    });
 
     return updated.length > 0;
   }
