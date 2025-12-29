@@ -8,6 +8,7 @@
  * 4. Wait for in-flight requests to complete (with timeout)
  * 5. Close database connections
  *
+ * Uses the centralized ShutdownManager for service coordination.
  * Configurable shutdown timeout (default 30s)
  */
 
@@ -20,6 +21,11 @@ import {
   sessionEventBroadcaster,
   sessionListBroadcaster,
   closeDatabase,
+  shutdownManager,
+  ShutdownPriority,
+  createShutdownHandler,
+  trashCleanupService,
+  requestDeduplicatorRegistry,
 } from '@webedt/shared';
 
 import { connectionTracker } from './api/middleware/connectionTracker.js';
@@ -71,6 +77,16 @@ const state: ShutdownState = {
   shutdownReason: null,
 };
 
+// Track orphan cleanup interval for shutdown
+let orphanCleanupIntervalId: NodeJS.Timeout | null = null;
+
+/**
+ * Set the orphan cleanup interval ID for shutdown tracking
+ */
+export function setOrphanCleanupInterval(intervalId: NodeJS.Timeout): void {
+  orphanCleanupIntervalId = intervalId;
+}
+
 /**
  * Check if a graceful shutdown is in progress
  */
@@ -83,6 +99,108 @@ export function isShuttingDown(): boolean {
  */
 export function getShutdownState(): Readonly<ShutdownState> {
   return { ...state };
+}
+
+/**
+ * Register all background services with the ShutdownManager.
+ * Services are registered with appropriate priorities to ensure
+ * orderly shutdown.
+ */
+export function registerBackgroundServices(): void {
+  // Priority 100: Stop accepting new work
+  shutdownManager.register(
+    createShutdownHandler(
+      'connectionTracker',
+      () => connectionTracker.startShutdown(),
+      ShutdownPriority.STOP_ACCEPTING
+    )
+  );
+
+  // Priority 200: Stop background tasks
+  shutdownManager.register(
+    createShutdownHandler(
+      'healthMonitor',
+      () => healthMonitor.stopPeriodicChecks(),
+      ShutdownPriority.STOP_BACKGROUND
+    )
+  );
+
+  shutdownManager.register(
+    createShutdownHandler(
+      'claudeSessionSync',
+      () => stopBackgroundSync(),
+      ShutdownPriority.STOP_BACKGROUND
+    )
+  );
+
+  shutdownManager.register(
+    createShutdownHandler(
+      'trashCleanupService',
+      async () => trashCleanupService.dispose(),
+      ShutdownPriority.STOP_BACKGROUND
+    )
+  );
+
+  shutdownManager.register(
+    createShutdownHandler(
+      'orphanCleanupInterval',
+      () => {
+        if (orphanCleanupIntervalId) {
+          clearInterval(orphanCleanupIntervalId);
+          orphanCleanupIntervalId = null;
+        }
+      },
+      ShutdownPriority.STOP_BACKGROUND
+    )
+  );
+
+  // Priority 300: Notify clients
+  shutdownManager.register(
+    createShutdownHandler(
+      'sessionEventBroadcaster',
+      () => sessionEventBroadcaster.shutdown(),
+      ShutdownPriority.NOTIFY_CLIENTS
+    )
+  );
+
+  shutdownManager.register(
+    createShutdownHandler(
+      'sessionListBroadcaster',
+      () => sessionListBroadcaster.shutdown(),
+      ShutdownPriority.NOTIFY_CLIENTS
+    )
+  );
+
+  // Priority 600: Cleanup caches and resources
+  shutdownManager.register(
+    createShutdownHandler(
+      'rateLimitStores',
+      () => cleanupRateLimitStores(),
+      ShutdownPriority.CLEANUP
+    )
+  );
+
+  shutdownManager.register(
+    createShutdownHandler(
+      'requestDeduplicator',
+      async () => requestDeduplicatorRegistry.dispose(),
+      ShutdownPriority.CLEANUP
+    )
+  );
+
+  // Priority 900: Close database (must be last)
+  shutdownManager.register(
+    createShutdownHandler(
+      'database',
+      async () => closeDatabase(),
+      ShutdownPriority.CLOSE_DATABASE
+    )
+  );
+
+  logger.info('Background services registered with ShutdownManager', {
+    component: 'GracefulShutdown',
+    stats: shutdownManager.getStats(),
+  });
 }
 
 /**
@@ -126,18 +244,22 @@ export async function gracefulShutdown(
   });
 
   try {
-    // Step 1: Mark as shutting down - reject new requests
-    connectionTracker.startShutdown();
+    // Phase 1: Execute all registered shutdown handlers
+    const result = await shutdownManager.shutdown(reason, {
+      totalTimeoutMs: settings.shutdownTimeoutMs,
+      handlerTimeoutMs: 5000,
+      continueOnError: true,
+    });
 
-    // Step 2: Stop health monitoring (causes /ready to fail, load balancer stops routing)
-    logger.info('Stopping health monitoring', { component: 'GracefulShutdown' });
-    healthMonitor.stopPeriodicChecks();
+    logger.info('ShutdownManager completed', {
+      component: 'GracefulShutdown',
+      success: result.success,
+      successCount: result.successCount,
+      failureCount: result.failureCount,
+      timeoutCount: result.timeoutCount,
+    });
 
-    // Step 3: Stop background sync service
-    logger.info('Stopping background sync', { component: 'GracefulShutdown' });
-    stopBackgroundSync();
-
-    // Step 4: Brief delay to allow load balancer to detect unhealthy status
+    // Phase 2: Wait for load balancer to detect unhealthy status
     if (settings.loadBalancerDrainDelayMs > 0) {
       logger.info('Waiting for load balancer drain detection', {
         component: 'GracefulShutdown',
@@ -146,25 +268,13 @@ export async function gracefulShutdown(
       await sleep(settings.loadBalancerDrainDelayMs);
     }
 
-    // Step 5: Notify SSE clients of shutdown and close broadcaster intervals
-    logger.info('Shutting down SSE broadcasters', { component: 'GracefulShutdown' });
-
-    // shutdown() is defined in the abstract base classes ASessionEventBroadcaster and ASessionListBroadcaster
-    sessionEventBroadcaster.shutdown();
-    sessionListBroadcaster.shutdown();
-
-    // Step 5.5: Clean up rate limit stores
-    logger.info('Cleaning up rate limit stores', { component: 'GracefulShutdown' });
-    cleanupRateLimitStores();
-
-    // Step 6: Stop accepting new connections on the server
+    // Phase 3: Close HTTP server
     logger.info('Closing HTTP server to new connections', { component: 'GracefulShutdown' });
     await closeServer(server);
 
-    // Step 7: Wait for existing connections to drain
-    const drainTimeout = Math.max(0, settings.shutdownTimeoutMs - settings.loadBalancerDrainDelayMs);
+    // Phase 4: Wait for existing connections to drain
+    const drainTimeout = Math.max(0, settings.shutdownTimeoutMs - settings.loadBalancerDrainDelayMs - result.durationMs);
 
-    // Warn if drain timeout is very short due to configuration
     if (drainTimeout < 5000) {
       logger.warn('Drain timeout is very short - connections may not have time to complete', {
         component: 'GracefulShutdown',
@@ -189,10 +299,6 @@ export async function gracefulShutdown(
       });
     }
 
-    // Step 8: Close database pool
-    logger.info('Closing database connections', { component: 'GracefulShutdown' });
-    await closeDatabase();
-
     // Calculate shutdown duration
     const duration = Date.now() - (state.shutdownStartTime || Date.now());
 
@@ -201,9 +307,11 @@ export async function gracefulShutdown(
       reason,
       durationMs: duration,
       drained,
+      handlersSuccess: result.successCount,
+      handlersFailure: result.failureCount,
     });
 
-    // Step 9: Exit process if configured
+    // Exit process if configured
     if (settings.exitProcess) {
       process.exit(settings.exitCode);
     }
@@ -229,6 +337,9 @@ export function registerShutdownHandlers(
   server: Server,
   config: GracefulShutdownConfig = {}
 ): void {
+  // Register all background services with the ShutdownManager
+  registerBackgroundServices();
+
   // Handle SIGTERM (Docker, Kubernetes, systemd stop)
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received', { component: 'GracefulShutdown' });
