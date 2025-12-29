@@ -2171,3 +2171,54 @@ export const importApi = {
       body: { url, sessionPath, targetPath },
     }),
 };
+
+// ============================================================================
+// MIDI API
+// ============================================================================
+
+/**
+ * MIDI file validation result
+ */
+export interface MidiValidationResult {
+  valid: boolean;
+  fileName?: string;
+  contentType?: string;
+  size?: number;
+  error?: string;
+}
+
+export const midiApi = {
+  /**
+   * Validate a MIDI file URL before importing
+   * Checks if the URL is accessible and appears to be a MIDI file
+   */
+  validateUrl: async (url: string): Promise<{ success: boolean; data: MidiValidationResult }> => {
+    const result = await fetchApi<{ success: boolean; data: UrlValidationResult }>('/api/import/validate', {
+      method: 'POST',
+      body: { url },
+    });
+
+    // Check if it looks like a MIDI file
+    const fileName = result.data.suggestedFilename || url.split('/').pop() || '';
+    const isMidi = Boolean(
+      fileName.toLowerCase().endsWith('.mid') ||
+      fileName.toLowerCase().endsWith('.midi') ||
+      result.data.contentType?.includes('audio/midi') ||
+      result.data.contentType?.includes('audio/x-midi')
+    );
+
+    const isValid = Boolean(result.data.valid) && isMidi;
+    const hasSuccess = Boolean(result.success);
+
+    return {
+      success: hasSuccess && isValid,
+      data: {
+        valid: isValid,
+        fileName: result.data.suggestedFilename,
+        contentType: result.data.contentType,
+        size: result.data.contentLength,
+        error: !isMidi ? 'Not a valid MIDI file' : result.data.error,
+      },
+    };
+  },
+};

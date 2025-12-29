@@ -194,30 +194,14 @@ export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
 export { SceneTabs } from './scene-tabs';
 export type { SceneTabsOptions } from './scene-tabs';
 
-// ConstraintEditor
-export { ConstraintEditor } from './constraint-editor';
-export type { ConstraintEditorOptions } from './constraint-editor';
+// MidiImportDialog
+export { MidiImportDialog } from './midi-import-dialog';
+export type { MidiImportDialogOptions } from './midi-import-dialog';
 
-// EditModeToolbar
-export { EditModeToolbar } from './edit-mode-toolbar';
-export type { EditModeToolbarOptions } from './edit-mode-toolbar';
+// MidiPlayer
+export { MidiPlayer } from './midi-player';
+export type { MidiPlayerOptions } from './midi-player';
 
-// DebugOutputPanel
-export { DebugOutputPanel } from './debug-output';
-export type { DebugOutputPanelOptions } from './debug-output';
-
-// SceneViewport
-export { SceneViewport } from './scene-viewport';
-export type { SceneViewportOptions } from './scene-viewport';
-
-// SceneHierarchyPanel
-export { SceneHierarchyPanel } from './scene-hierarchy-panel';
-export type { SceneHierarchyPanelOptions } from './scene-hierarchy-panel';
-
-// WaveformEditor
-export { WaveformEditor } from './waveform-editor';
-export type { WaveformEditorOptions, AudioSelection } from './waveform-editor';
-
-// SynthesizerPanel
-export { SynthesizerPanel } from './synthesizer-panel';
-export type { SynthesizerPanelOptions } from './synthesizer-panel';
+// MidiPianoRoll
+export { MidiPianoRoll } from './midi-piano-roll';
+export type { MidiPianoRollOptions } from './midi-piano-roll';
