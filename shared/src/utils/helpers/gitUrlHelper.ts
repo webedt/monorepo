@@ -178,17 +178,9 @@ export function parseGitUrl(urlString: string): ParsedGitUrl | ParsedGitUrlError
     return { isValid: false, error: `Invalid repository name: ${repo}. Must be alphanumeric with hyphens, underscores, or dots.` };
   }
 
-  // Check for injection attempts in the URL (anything beyond owner/repo)
-  // Extra path segments could indicate injection attempts
-  if (pathParts.length > 2) {
-    // Only warn - this could be legitimate (e.g., github.com/owner/repo/tree/branch)
-    // But for git clone operations, we only need owner/repo
-  }
-
-  // Check for query strings or fragments that might be injection attempts
-  if (url.search || url.hash) {
-    // Query strings and hashes are stripped - log but don't fail
-  }
+  // Note: Extra path segments (e.g., github.com/owner/repo/tree/branch) and
+  // query strings/fragments are intentionally ignored. We extract only owner/repo
+  // and the URL constructor already handles proper parsing and sanitization.
 
   return { owner, repo, isValid: true };
 }
@@ -267,10 +259,7 @@ export function validateBranchName(branchName: string): void {
     throw new Error(`Invalid branch name: ${branchName}. Must start with alphanumeric and contain only alphanumeric, dots, underscores, hyphens, and slashes.`);
   }
 
-  // Additional check: no consecutive dots (could be used for traversal)
-  if (/\.\./.test(branchName)) {
-    throw new Error(`Invalid branch name: ${branchName}. Contains consecutive dots which could indicate path traversal.`);
-  }
+  // Note: Consecutive dots (..) are already checked in DANGEROUS_BRANCH_PATTERNS
 }
 
 /**
