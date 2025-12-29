@@ -9,34 +9,46 @@
  * - Pagination and filtering logic
  * - Edge cases: deleted sessions, non-existent IDs, empty results
  * - listByIds with various ID arrays
+ * - getByIdWithPreview with preview URL generation
+ * - Search with special character escaping
  *
- * Note: These tests use mock data to test query logic patterns.
- * For integration tests with a real database, see the CLI test scenarios.
+ * IMPORTANT: These tests use a MockSessionQueryService that mirrors the expected
+ * behavior of the real SessionQueryService. This approach tests query logic patterns
+ * without requiring a database connection. However, the mock could potentially drift
+ * from the actual implementation over time. For integration tests with a real database
+ * that verify actual Drizzle ORM behavior, see the CLI test scenarios.
+ *
+ * Key behaviors that must stay synchronized with SessionQueryService:
+ * - Authorization checks (userId filtering)
+ * - Pagination defaults (limit: 100 for active, 50 for deleted/search)
+ * - Sort order (createdAt desc for active, deletedAt desc for deleted)
+ * - Search escape behavior (%, _, \ are escaped for ILIKE)
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import type { ChatSession } from '../../src/db/schema.js';
-import type { SessionQueryOptions, PaginatedResult, SessionSearchOptions } from '../../src/sessions/ASessionQueryService.js';
+import type { SessionQueryOptions, PaginatedResult, SessionSearchOptions, SessionWithPreview } from '../../src/sessions/ASessionQueryService.js';
 
 /**
  * Test helper to create mock chat session data
+ * Uses 'in' operator to distinguish between explicit null and missing keys
  */
 function createMockChatSession(overrides: Partial<ChatSession> = {}): ChatSession {
   const now = new Date();
   return {
     id: overrides.id || `session-${Math.random().toString(36).substring(7)}`,
     userId: overrides.userId || 'user-123',
-    organizationId: overrides.organizationId ?? null,
-    sessionPath: overrides.sessionPath ?? null,
-    repositoryOwner: overrides.repositoryOwner ?? 'owner',
-    repositoryName: overrides.repositoryName ?? 'repo',
+    organizationId: 'organizationId' in overrides ? overrides.organizationId! : null,
+    sessionPath: 'sessionPath' in overrides ? overrides.sessionPath! : null,
+    repositoryOwner: 'repositoryOwner' in overrides ? overrides.repositoryOwner! : 'owner',
+    repositoryName: 'repositoryName' in overrides ? overrides.repositoryName! : 'repo',
     userRequest: overrides.userRequest || 'Test request',
     status: overrides.status || 'completed',
-    repositoryUrl: overrides.repositoryUrl ?? 'https://github.com/owner/repo',
-    baseBranch: overrides.baseBranch ?? 'main',
-    branch: overrides.branch ?? 'claude/test-branch',
+    repositoryUrl: 'repositoryUrl' in overrides ? overrides.repositoryUrl! : 'https://github.com/owner/repo',
+    baseBranch: 'baseBranch' in overrides ? overrides.baseBranch! : 'main',
+    branch: 'branch' in overrides ? overrides.branch! : 'claude/test-branch',
     provider: overrides.provider ?? 'claude',
     providerSessionId: overrides.providerSessionId ?? null,
     remoteSessionId: overrides.remoteSessionId ?? null,
@@ -86,6 +98,24 @@ class MockSessionQueryService {
       s => s.id === sessionId && s.userId === userId
     );
     return session || null;
+  }
+
+  /**
+   * Get session by ID with user authorization and preview URL
+   * Includes previewUrl when repository info is complete
+   */
+  getByIdWithPreview(sessionId: string, userId: string): SessionWithPreview | null {
+    const session = this.getByIdForUser(sessionId, userId);
+    if (!session) return null;
+
+    // Generate preview URL if repository info is complete
+    let previewUrl: string | undefined;
+    if (session.repositoryOwner && session.repositoryName && session.branch) {
+      // Mock preview URL generation (real implementation uses getPreviewUrl helper)
+      previewUrl = `https://preview.example.com/${session.repositoryOwner}/${session.repositoryName}/${session.branch}`;
+    }
+
+    return { ...session, previewUrl };
   }
 
   /**
@@ -160,6 +190,15 @@ class MockSessionQueryService {
 
   /**
    * Search sessions by query
+   * Mirrors the real SessionQueryService behavior including ILIKE escape handling
+   *
+   * NOTE: The real implementation escapes SQL special characters (%, _, \) using:
+   *   query.replace(/[%_\\]/g, '\\$&')
+   * This prevents wildcard injection in ILIKE patterns.
+   *
+   * In this mock, we use JavaScript's includes() which already treats all
+   * characters as literals (no wildcards), so the behavior is equivalent
+   * to the escaped SQL ILIKE pattern.
    */
   search(userId: string, options: SessionSearchOptions): PaginatedResult<ChatSession> {
     const { query, limit = 50, offset = 0, status, favorite } = options;
@@ -169,7 +208,8 @@ class MockSessionQueryService {
       return { items: [], total: 0, hasMore: false };
     }
 
-    // Escape special characters (simulates ILIKE pattern matching)
+    // In JavaScript, includes() treats all characters as literals
+    // This matches the behavior of escaped ILIKE in SQL
     const lowerQuery = query.toLowerCase();
 
     let filtered = this.sessions.filter(s => {
@@ -177,6 +217,7 @@ class MockSessionQueryService {
       if (s.userId !== userId || s.deletedAt !== null) return false;
 
       // Search in userRequest, repositoryOwner, repositoryName, branch
+      // includes() treats %, _, \ as literal characters (same as escaped ILIKE)
       const matches = (
         (s.userRequest?.toLowerCase().includes(lowerQuery)) ||
         (s.repositoryOwner?.toLowerCase().includes(lowerQuery)) ||
@@ -287,6 +328,123 @@ describe('SessionQueryService Authorization', () => {
       const result = service.getById('non-existent');
 
       assert.strictEqual(result, null);
+    });
+  });
+
+  describe('getByIdWithPreview - Authorization and Preview URL', () => {
+    it('should return null for non-owned session', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        repositoryOwner: 'owner',
+        repositoryName: 'repo',
+        branch: 'main'
+      }));
+
+      const result = service.getByIdWithPreview('s1', 'user-b');
+
+      assert.strictEqual(result, null);
+    });
+
+    it('should return null for non-existent session', () => {
+      const service = new MockSessionQueryService();
+
+      const result = service.getByIdWithPreview('non-existent', 'user-a');
+
+      assert.strictEqual(result, null);
+    });
+
+    it('should include previewUrl when repository info is complete', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        repositoryOwner: 'webedt',
+        repositoryName: 'monorepo',
+        branch: 'claude/feature-branch'
+      }));
+
+      const result = service.getByIdWithPreview('s1', 'user-a');
+
+      assert.ok(result);
+      assert.strictEqual(result.id, 's1');
+      assert.ok(result.previewUrl);
+      assert.ok(result.previewUrl.includes('webedt'));
+      assert.ok(result.previewUrl.includes('monorepo'));
+      assert.ok(result.previewUrl.includes('claude/feature-branch'));
+    });
+
+    it('should exclude previewUrl when repositoryOwner is missing', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        repositoryOwner: null,
+        repositoryName: 'repo',
+        branch: 'main'
+      }));
+
+      const result = service.getByIdWithPreview('s1', 'user-a');
+
+      assert.ok(result);
+      assert.strictEqual(result.previewUrl, undefined);
+    });
+
+    it('should exclude previewUrl when repositoryName is missing', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        repositoryOwner: 'owner',
+        repositoryName: null,
+        branch: 'main'
+      }));
+
+      const result = service.getByIdWithPreview('s1', 'user-a');
+
+      assert.ok(result);
+      assert.strictEqual(result.previewUrl, undefined);
+    });
+
+    it('should exclude previewUrl when branch is missing', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        repositoryOwner: 'owner',
+        repositoryName: 'repo',
+        branch: null
+      }));
+
+      const result = service.getByIdWithPreview('s1', 'user-a');
+
+      assert.ok(result);
+      assert.strictEqual(result.previewUrl, undefined);
+    });
+
+    it('should preserve all session fields in the response', () => {
+      const service = new MockSessionQueryService();
+      const originalSession = createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        userRequest: 'Test request',
+        status: 'completed',
+        repositoryOwner: 'owner',
+        repositoryName: 'repo',
+        branch: 'main',
+        favorite: true
+      });
+      service.addSession(originalSession);
+
+      const result = service.getByIdWithPreview('s1', 'user-a');
+
+      assert.ok(result);
+      assert.strictEqual(result.id, originalSession.id);
+      assert.strictEqual(result.userId, originalSession.userId);
+      assert.strictEqual(result.userRequest, originalSession.userRequest);
+      assert.strictEqual(result.status, originalSession.status);
+      assert.strictEqual(result.favorite, originalSession.favorite);
     });
   });
 
@@ -762,7 +920,30 @@ describe('SessionQueryService listByIds', () => {
       const results = service.listByIds(['s1', 's1', 's1'], 'user-a');
 
       // Should only return one instance
+      // Note: The actual SessionQueryService uses inArray() which also deduplicates
       assert.strictEqual(results.length, 1);
+    });
+
+    it('should return sessions (order not guaranteed)', () => {
+      const service = new MockSessionQueryService();
+
+      service.addSession(createMockChatSession({ id: 's1', userId: 'user-a' }));
+      service.addSession(createMockChatSession({ id: 's2', userId: 'user-a' }));
+      service.addSession(createMockChatSession({ id: 's3', userId: 'user-a' }));
+
+      // Request IDs in a specific order
+      const results = service.listByIds(['s3', 's1', 's2'], 'user-a');
+
+      // All requested sessions should be returned
+      assert.strictEqual(results.length, 3);
+
+      // Note: Order of results is NOT guaranteed to match input order
+      // The actual SessionQueryService with inArray() may return in any order
+      // Tests should verify presence, not order
+      const ids = new Set(results.map(s => s.id));
+      assert.ok(ids.has('s1'));
+      assert.ok(ids.has('s2'));
+      assert.ok(ids.has('s3'));
     });
   });
 
@@ -905,6 +1086,101 @@ describe('SessionQueryService Search', () => {
       const result = service.search('user-a', { query: 'authentication' });
 
       assert.strictEqual(result.items.length, 1);
+    });
+  });
+
+  describe('Search Special Character Escaping', () => {
+    /**
+     * These tests verify that SQL special characters (%, _, \) are treated as
+     * literal characters in search queries, not as wildcards.
+     *
+     * In PostgreSQL ILIKE:
+     * - % matches any sequence of characters (wildcard)
+     * - _ matches any single character (wildcard)
+     * - \ is the escape character
+     *
+     * The real SessionQueryService escapes these using: query.replace(/[%_\\]/g, '\\$&')
+     * This ensures users can search for strings containing these characters literally.
+     *
+     * In the mock, JavaScript's includes() already treats all characters as literals,
+     * so the behavior is equivalent to properly escaped ILIKE patterns.
+     */
+
+    it('should treat % as literal character not wildcard', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        userRequest: 'Fix 100% complete bug'
+      }));
+      service.addSession(createMockChatSession({
+        id: 's2',
+        userId: 'user-a',
+        userRequest: 'Fix testing bug'
+      }));
+
+      // Search for '100%' should find only the exact match
+      // In unescaped ILIKE, '100%' would match '100' followed by anything
+      // With escaping, '100%' matches only the literal '100%'
+      const result = service.search('user-a', { query: '100%' });
+
+      assert.strictEqual(result.items.length, 1);
+      assert.strictEqual(result.items[0].id, 's1');
+    });
+
+    it('should treat _ as literal character not single-char wildcard', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        userRequest: 'Fix my_variable naming'
+      }));
+      service.addSession(createMockChatSession({
+        id: 's2',
+        userId: 'user-a',
+        userRequest: 'Fix myvariable naming'
+      }));
+
+      // Search for 'my_variable' should match only the literal underscore
+      // In unescaped ILIKE, '_' would match any single character
+      const result = service.search('user-a', { query: 'my_variable' });
+
+      assert.strictEqual(result.items.length, 1);
+      assert.strictEqual(result.items[0].id, 's1');
+    });
+
+    it('should treat backslash as literal character', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        userRequest: 'Fix path\\to\\file issue'
+      }));
+      service.addSession(createMockChatSession({
+        id: 's2',
+        userId: 'user-a',
+        userRequest: 'Fix pathtofile issue'
+      }));
+
+      // Search for 'path\\to' should find only the one with backslashes
+      const result = service.search('user-a', { query: 'path\\to' });
+
+      assert.strictEqual(result.items.length, 1);
+      assert.strictEqual(result.items[0].id, 's1');
+    });
+
+    it('should handle multiple special characters in query', () => {
+      const service = new MockSessionQueryService();
+      service.addSession(createMockChatSession({
+        id: 's1',
+        userId: 'user-a',
+        userRequest: 'Handle 50%_discount\\promo code'
+      }));
+
+      const result = service.search('user-a', { query: '50%_discount\\promo' });
+
+      assert.strictEqual(result.items.length, 1);
+      assert.strictEqual(result.items[0].id, 's1');
     });
   });
 
