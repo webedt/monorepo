@@ -4,6 +4,7 @@
  */
 
 import { SNIPPET_LANGUAGES, SNIPPET_CATEGORIES } from '../../db/index.js';
+import type { SnippetLanguage, SnippetCategory } from '../../db/index.js';
 
 // =============================================================================
 // REGEX PATTERNS
@@ -47,8 +48,8 @@ export function isValidIcon(value: unknown): value is ValidIcon {
  * @param value - The value to validate
  * @returns True if the value is a valid snippet language
  */
-export function isValidLanguage(value: unknown): value is string {
-  return typeof value === 'string' && SNIPPET_LANGUAGES.includes(value as typeof SNIPPET_LANGUAGES[number]);
+export function isValidLanguage(value: unknown): value is SnippetLanguage {
+  return typeof value === 'string' && SNIPPET_LANGUAGES.includes(value as SnippetLanguage);
 }
 
 /**
@@ -56,6 +57,6 @@ export function isValidLanguage(value: unknown): value is string {
  * @param value - The value to validate
  * @returns True if the value is a valid snippet category
  */
-export function isValidCategory(value: unknown): value is string {
-  return typeof value === 'string' && SNIPPET_CATEGORIES.includes(value as typeof SNIPPET_CATEGORIES[number]);
+export function isValidCategory(value: unknown): value is SnippetCategory {
+  return typeof value === 'string' && SNIPPET_CATEGORIES.includes(value as SnippetCategory);
 }
