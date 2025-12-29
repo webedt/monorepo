@@ -4,16 +4,207 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { z } from 'zod';
+import { db, users, eq, validateRequest } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { shouldRefreshClaudeToken, refreshClaudeToken, type ClaudeAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
 
+// ============================================================================
+// Validation Schemas
+// ============================================================================
+
+const claudeAuthSchema = {
+  body: z.object({
+    claudeAuth: z.object({
+      accessToken: z.string().min(1, 'accessToken is required'),
+      refreshToken: z.string().min(1, 'refreshToken is required'),
+      expiresAt: z.number().optional(),
+    }).optional(),
+    accessToken: z.string().optional(),
+    refreshToken: z.string().optional(),
+    claudeAiOauth: z.object({
+      accessToken: z.string(),
+      refreshToken: z.string(),
+    }).optional(),
+  }).refine(
+    (data) => {
+      // At least one valid format must be present
+      const hasClaudeAuth = data.claudeAuth?.accessToken && data.claudeAuth?.refreshToken;
+      const hasDirectTokens = data.accessToken && data.refreshToken;
+      const hasClaudeAiOauth = data.claudeAiOauth?.accessToken && data.claudeAiOauth?.refreshToken;
+      return hasClaudeAuth || hasDirectTokens || hasClaudeAiOauth;
+    },
+    { message: 'Invalid Claude auth. Must include accessToken and refreshToken.' }
+  ),
+};
+
+const codexAuthSchema = {
+  body: z.object({
+    codexAuth: z.object({
+      apiKey: z.string().optional(),
+      accessToken: z.string().optional(),
+    }).optional(),
+    apiKey: z.string().optional(),
+    accessToken: z.string().optional(),
+  }).refine(
+    (data) => {
+      const hasApiKey = data.codexAuth?.apiKey || data.apiKey;
+      const hasAccessToken = data.codexAuth?.accessToken || data.accessToken;
+      return hasApiKey || hasAccessToken;
+    },
+    { message: 'Invalid Codex auth. Must include either apiKey or accessToken.' }
+  ),
+};
+
+const geminiAuthSchema = {
+  body: z.object({
+    geminiAuth: z.object({
+      accessToken: z.string().optional(),
+      access_token: z.string().optional(),
+      refreshToken: z.string().optional(),
+      refresh_token: z.string().optional(),
+    }).optional(),
+    accessToken: z.string().optional(),
+    access_token: z.string().optional(),
+    refreshToken: z.string().optional(),
+    refresh_token: z.string().optional(),
+  }).refine(
+    (data) => {
+      const accessToken = data.geminiAuth?.accessToken || data.geminiAuth?.access_token || data.accessToken || data.access_token;
+      const refreshToken = data.geminiAuth?.refreshToken || data.geminiAuth?.refresh_token || data.refreshToken || data.refresh_token;
+      return accessToken && refreshToken;
+    },
+    { message: 'Invalid Gemini auth. Must include OAuth tokens (accessToken/access_token and refreshToken/refresh_token).' }
+  ),
+};
+
+const preferredProviderSchema = {
+  body: z.object({
+    provider: z.enum(['claude', 'codex', 'copilot', 'gemini'], {
+      errorMap: () => ({ message: 'Invalid provider. Must be one of: claude, codex, copilot, gemini' }),
+    }),
+  }),
+};
+
+const imageResizeSchema = {
+  body: z.object({
+    maxDimension: z.enum(['512', '1024', '2048', '4096', '8000'] as const).transform(Number).or(
+      z.literal(512).or(z.literal(1024)).or(z.literal(2048)).or(z.literal(4096)).or(z.literal(8000))
+    ),
+  }),
+};
+
+const displayNameSchema = {
+  body: z.object({
+    displayName: z.string().max(100, 'Display name must be 100 characters or less').nullable().optional(),
+  }),
+};
+
+const voiceKeywordsSchema = {
+  body: z.object({
+    keywords: z.array(z.string()).max(20, 'Maximum of 20 keywords allowed'),
+  }),
+};
+
+const stopListeningSchema = {
+  body: z.object({
+    stopAfterSubmit: z.boolean({ required_error: 'stopAfterSubmit must be a boolean' }),
+  }),
+};
+
+const landingPageSchema = {
+  body: z.object({
+    landingPage: z.enum(['store', 'library', 'community', 'sessions'], {
+      errorMap: () => ({ message: 'Invalid landing page. Must be one of: store, library, community, sessions' }),
+    }),
+  }),
+};
+
+const preferredModelSchema = {
+  body: z.object({
+    preferredModel: z.enum(['', 'opus', 'sonnet']).nullable().optional(),
+  }),
+};
+
+const chatVerbositySchema = {
+  body: z.object({
+    verbosityLevel: z.enum(['minimal', 'normal', 'verbose'], {
+      errorMap: () => ({ message: 'Invalid verbosity level. Must be one of: minimal, normal, verbose' }),
+    }),
+  }),
+};
+
+const openrouterApiKeySchema = {
+  body: z.object({
+    apiKey: z.string().min(1, 'Invalid API key. Must be a non-empty string.').refine(
+      (val) => val.startsWith('sk-or-'),
+      { message: 'Invalid OpenRouter API key format. Keys should start with "sk-or-".' }
+    ),
+  }),
+};
+
+const autocompleteSettingsSchema = {
+  body: z.object({
+    enabled: z.boolean().optional(),
+    model: z.enum([
+      'openai/gpt-oss-120b:cerebras',
+      'openai/gpt-oss-120b',
+      'deepseek/deepseek-coder',
+      'anthropic/claude-3-haiku',
+    ]).optional(),
+  }).refine(
+    (data) => data.enabled !== undefined || data.model !== undefined,
+    { message: 'No valid settings to update' }
+  ),
+};
+
+const imageAiKeysSchema = {
+  body: z.object({
+    imageAiKeys: z.record(z.string()).refine(
+      (keys) => {
+        const allowedProviders = ['openrouter', 'cometapi', 'google'];
+        return Object.keys(keys).every((k) => allowedProviders.includes(k));
+      },
+      { message: 'Invalid imageAiKeys. Only allowed providers: openrouter, cometapi, google' }
+    ),
+  }),
+};
+
+const imageAiProviderSchema = {
+  body: z.object({
+    provider: z.enum(['openrouter', 'cometapi', 'google'], {
+      errorMap: () => ({ message: 'Invalid provider. Must be one of: openrouter, cometapi, google' }),
+    }),
+  }),
+};
+
+const imageAiModelSchema = {
+  body: z.object({
+    model: z.enum(['google/gemini-2.5-flash-image', 'google/gemini-3-pro-image-preview'], {
+      errorMap: () => ({ message: 'Invalid model. Must be one of: google/gemini-2.5-flash-image, google/gemini-3-pro-image-preview' }),
+    }),
+  }),
+};
+
+const spendingLimitsSchema = {
+  body: z.object({
+    enabled: z.boolean().optional(),
+    monthlyBudgetCents: z.number().nonnegative('Monthly budget must be a non-negative number').optional(),
+    perTransactionLimitCents: z.number().nonnegative('Per-transaction limit must be a non-negative number').optional(),
+    resetDay: z.number().int().min(1).max(31, 'Reset day must be between 1 and 31').optional(),
+    limitAction: z.enum(['warn', 'block']).optional(),
+  }).refine(
+    (data) => Object.keys(data).length > 0,
+    { message: 'No valid settings to update' }
+  ),
+};
+
 const router = Router();
 
 // Update Claude authentication
-router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => {
+router.post('/claude-auth', requireAuth, validateRequest(claudeAuthSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     let claudeAuth = req.body.claudeAuth || req.body;
@@ -21,15 +212,6 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
     // Handle wrapped format: extract from claudeAiOauth if present
     if (claudeAuth.claudeAiOauth) {
       claudeAuth = claudeAuth.claudeAiOauth;
-    }
-
-    // Validate Claude auth structure
-    if (!claudeAuth || !claudeAuth.accessToken || !claudeAuth.refreshToken) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid Claude auth. Must include accessToken and refreshToken.',
-      });
-      return;
     }
 
     // Update user with Claude auth
@@ -200,19 +382,10 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
 });
 
 // Update Codex authentication (OpenAI)
-router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
+router.post('/codex-auth', requireAuth, validateRequest(codexAuthSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     let codexAuth = req.body.codexAuth || req.body;
-
-    // Validate Codex auth structure - must have either apiKey or accessToken
-    if (!codexAuth || (!codexAuth.apiKey && !codexAuth.accessToken)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid Codex auth. Must include either apiKey or accessToken.',
-      });
-      return;
-    }
 
     // Update user with Codex auth
     await db
@@ -251,7 +424,7 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
 });
 
 // Update Gemini authentication (OAuth only - from ~/.gemini/oauth_creds.json)
-router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
+router.post('/gemini-auth', requireAuth, validateRequest(geminiAuthSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     let geminiAuth = req.body.geminiAuth || req.body;
@@ -260,15 +433,6 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
     const accessToken = geminiAuth.accessToken || geminiAuth.access_token;
     const refreshToken = geminiAuth.refreshToken || geminiAuth.refresh_token;
     const expiresAt = geminiAuth.expiresAt || geminiAuth.expiry_date;
-
-    // Validate OAuth credentials are present
-    if (!accessToken || !refreshToken) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid Gemini auth. Must include OAuth tokens (accessToken/access_token and refreshToken/refresh_token). Run `gemini auth login` locally and paste the contents of ~/.gemini/oauth_creds.json',
-      });
-      return;
-    }
 
     // Normalize the auth object to our format
     const normalizedAuth = {
@@ -316,20 +480,10 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
 });
 
 // Update preferred AI provider
-router.post('/preferred-provider', requireAuth, async (req: Request, res: Response) => {
+router.post('/preferred-provider', requireAuth, validateRequest(preferredProviderSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { provider } = req.body;
-
-    // Validate provider is one of the valid options
-    const validProviders = ['claude', 'codex', 'copilot', 'gemini'];
-    if (!validProviders.includes(provider)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be one of: claude, codex, copilot, gemini',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -347,20 +501,10 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
 });
 
 // Update image resize max dimension
-router.post('/image-resize-setting', requireAuth, async (req: Request, res: Response) => {
+router.post('/image-resize-setting', requireAuth, validateRequest(imageResizeSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { maxDimension } = req.body;
-
-    // Validate that maxDimension is a valid number
-    const validDimensions = [512, 1024, 2048, 4096, 8000];
-    if (!validDimensions.includes(maxDimension)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid max dimension. Must be one of: 512, 1024, 2048, 4096, 8000',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -378,29 +522,10 @@ router.post('/image-resize-setting', requireAuth, async (req: Request, res: Resp
 });
 
 // Update display name
-router.post('/display-name', requireAuth, async (req: Request, res: Response) => {
+router.post('/display-name', requireAuth, validateRequest(displayNameSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { displayName } = req.body;
-
-    // Validate display name (optional field, but if provided should be reasonable)
-    if (displayName !== null && displayName !== undefined && displayName !== '') {
-      if (typeof displayName !== 'string') {
-        res.status(400).json({
-          success: false,
-          error: 'Display name must be a string',
-        });
-        return;
-      }
-
-      if (displayName.length > 100) {
-        res.status(400).json({
-          success: false,
-          error: 'Display name must be 100 characters or less',
-        });
-        return;
-      }
-    }
 
     // Set to null if empty string
     const finalDisplayName = displayName === '' ? null : displayName;
@@ -421,36 +546,16 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
 });
 
 // Update voice command keywords
-router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Response) => {
+router.post('/voice-command-keywords', requireAuth, validateRequest(voiceKeywordsSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { keywords } = req.body;
 
-    // Validate keywords is an array
-    if (!Array.isArray(keywords)) {
-      res.status(400).json({
-        success: false,
-        error: 'Keywords must be an array',
-      });
-      return;
-    }
-
-    // Validate all items are non-empty strings and normalize them
-    const normalizedKeywords = keywords
-      .filter((k: unknown): k is string => typeof k === 'string' && (k as string).trim().length > 0)
+    // Normalize: trim, lowercase, and remove duplicates
+    const normalizedKeywords: string[] = keywords
+      .filter((k: string): k is string => typeof k === 'string' && k.trim().length > 0)
       .map((k: string) => k.trim().toLowerCase());
-
-    // Remove duplicates
-    const uniqueKeywords = [...new Set(normalizedKeywords)];
-
-    // Limit to 20 keywords max
-    if (uniqueKeywords.length > 20) {
-      res.status(400).json({
-        success: false,
-        error: 'Maximum of 20 keywords allowed',
-      });
-      return;
-    }
+    const uniqueKeywords: string[] = [...new Set(normalizedKeywords)];
 
     await db
       .update(users)
@@ -468,19 +573,10 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
 });
 
 // Update stop listening after submit preference
-router.post('/stop-listening-after-submit', requireAuth, async (req: Request, res: Response) => {
+router.post('/stop-listening-after-submit', requireAuth, validateRequest(stopListeningSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { stopAfterSubmit } = req.body;
-
-    // Validate boolean
-    if (typeof stopAfterSubmit !== 'boolean') {
-      res.status(400).json({
-        success: false,
-        error: 'stopAfterSubmit must be a boolean',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -498,20 +594,10 @@ router.post('/stop-listening-after-submit', requireAuth, async (req: Request, re
 });
 
 // Update default landing page
-router.post('/default-landing-page', requireAuth, async (req: Request, res: Response) => {
+router.post('/default-landing-page', requireAuth, validateRequest(landingPageSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { landingPage } = req.body;
-
-    // Validate landing page is one of the valid options
-    const validPages = ['store', 'library', 'community', 'sessions'];
-    if (!validPages.includes(landingPage)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid landing page. Must be one of: store, library, community, sessions',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -529,20 +615,10 @@ router.post('/default-landing-page', requireAuth, async (req: Request, res: Resp
 });
 
 // Update preferred model
-router.post('/preferred-model', requireAuth, async (req: Request, res: Response) => {
+router.post('/preferred-model', requireAuth, validateRequest(preferredModelSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { preferredModel } = req.body;
-
-    // Validate preferred model is one of the valid options or null/empty
-    const validModels = ['', 'opus', 'sonnet'];
-    if (preferredModel !== null && preferredModel !== undefined && !validModels.includes(preferredModel)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid preferred model. Must be one of: (empty), opus, sonnet',
-      });
-      return;
-    }
 
     // Set to null if empty string
     const finalPreferredModel = preferredModel === '' ? null : preferredModel;
@@ -563,20 +639,10 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
 });
 
 // Update chat verbosity level
-router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) => {
+router.post('/chat-verbosity', requireAuth, validateRequest(chatVerbositySchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { verbosityLevel } = req.body;
-
-    // Validate verbosity level is one of the valid options
-    const validLevels = ['minimal', 'normal', 'verbose'];
-    if (!validLevels.includes(verbosityLevel)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid verbosity level. Must be one of: minimal, normal, verbose',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -594,27 +660,10 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
 });
 
 // Update OpenRouter API key (for autocomplete)
-router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Response) => {
+router.post('/openrouter-api-key', requireAuth, validateRequest(openrouterApiKeySchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { apiKey } = req.body;
-
-    // Validate API key format (OpenRouter keys start with sk-or-)
-    if (!apiKey || typeof apiKey !== 'string') {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid API key. Must be a non-empty string.',
-      });
-      return;
-    }
-
-    if (!apiKey.startsWith('sk-or-')) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid OpenRouter API key format. Keys should start with "sk-or-".',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -652,7 +701,7 @@ router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Resp
 });
 
 // Update autocomplete settings
-router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Response) => {
+router.post('/autocomplete-settings', requireAuth, validateRequest(autocompleteSettingsSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { enabled, model } = req.body;
@@ -663,30 +712,8 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
       updates.autocompleteEnabled = enabled;
     }
 
-    if (model && typeof model === 'string') {
-      // Validate model is from allowed list
-      const validModels = [
-        'openai/gpt-oss-120b:cerebras',
-        'openai/gpt-oss-120b',
-        'deepseek/deepseek-coder',
-        'anthropic/claude-3-haiku',
-      ];
-      if (!validModels.includes(model)) {
-        res.status(400).json({
-          success: false,
-          error: `Invalid model. Must be one of: ${validModels.join(', ')}`,
-        });
-        return;
-      }
+    if (model) {
       updates.autocompleteModel = model;
-    }
-
-    if (Object.keys(updates).length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'No valid settings to update',
-      });
-      return;
     }
 
     await db
@@ -705,32 +732,14 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
 });
 
 // Update image AI API keys
-router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) => {
+router.post('/image-ai-keys', requireAuth, validateRequest(imageAiKeysSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { imageAiKeys } = req.body;
 
-    // Validate structure
-    if (!imageAiKeys || typeof imageAiKeys !== 'object') {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid imageAiKeys. Must be an object with provider keys.',
-      });
-      return;
-    }
-
-    // Only allow known providers
-    const allowedProviders = ['openrouter', 'cometapi', 'google'];
-    const sanitizedKeys: Record<string, string> = {};
-    for (const [provider, key] of Object.entries(imageAiKeys)) {
-      if (allowedProviders.includes(provider) && typeof key === 'string') {
-        sanitizedKeys[provider] = key;
-      }
-    }
-
     await db
       .update(users)
-      .set({ imageAiKeys: sanitizedKeys })
+      .set({ imageAiKeys })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -744,19 +753,10 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
 });
 
 // Update image AI provider preference
-router.post('/image-ai-provider', requireAuth, async (req: Request, res: Response) => {
+router.post('/image-ai-provider', requireAuth, validateRequest(imageAiProviderSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { provider } = req.body;
-
-    const validProviders = ['openrouter', 'cometapi', 'google'];
-    if (!validProviders.includes(provider)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be one of: openrouter, cometapi, google',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -774,19 +774,10 @@ router.post('/image-ai-provider', requireAuth, async (req: Request, res: Respons
 });
 
 // Update image AI model preference
-router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) => {
+router.post('/image-ai-model', requireAuth, validateRequest(imageAiModelSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { model } = req.body;
-
-    const validModels = ['google/gemini-2.5-flash-image', 'google/gemini-3-pro-image-preview'];
-    if (!validModels.includes(model)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid model. Must be one of: google/gemini-2.5-flash-image, google/gemini-3-pro-image-preview',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -854,7 +845,7 @@ router.get('/spending-limits', requireAuth, async (req: Request, res: Response) 
 });
 
 // Update spending limits configuration
-router.post('/spending-limits', requireAuth, async (req: Request, res: Response) => {
+router.post('/spending-limits', requireAuth, validateRequest(spendingLimitsSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { enabled, monthlyBudgetCents, perTransactionLimitCents, resetDay, limitAction } = req.body;
@@ -867,69 +858,24 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
       spendingLimitAction?: string;
     } = {};
 
-    // Validate and set enabled flag
     if (typeof enabled === 'boolean') {
       updates.spendingLimitEnabled = enabled;
     }
 
-    // Validate and set monthly budget (in cents)
     if (monthlyBudgetCents !== undefined) {
-      const budget = Number(monthlyBudgetCents);
-      if (isNaN(budget) || budget < 0) {
-        res.status(400).json({
-          success: false,
-          error: 'Monthly budget must be a non-negative number',
-        });
-        return;
-      }
-      updates.monthlyBudgetCents = String(Math.round(budget));
+      updates.monthlyBudgetCents = String(Math.round(monthlyBudgetCents));
     }
 
-    // Validate and set per-transaction limit (in cents)
     if (perTransactionLimitCents !== undefined) {
-      const limit = Number(perTransactionLimitCents);
-      if (isNaN(limit) || limit < 0) {
-        res.status(400).json({
-          success: false,
-          error: 'Per-transaction limit must be a non-negative number',
-        });
-        return;
-      }
-      updates.perTransactionLimitCents = String(Math.round(limit));
+      updates.perTransactionLimitCents = String(Math.round(perTransactionLimitCents));
     }
 
-    // Validate and set reset day (1-31)
     if (resetDay !== undefined) {
-      const day = Number(resetDay);
-      if (isNaN(day) || day < 1 || day > 31) {
-        res.status(400).json({
-          success: false,
-          error: 'Reset day must be between 1 and 31',
-        });
-        return;
-      }
-      updates.spendingResetDay = day;
+      updates.spendingResetDay = resetDay;
     }
 
-    // Validate and set limit action
     if (limitAction !== undefined) {
-      const validActions = ['warn', 'block'];
-      if (!validActions.includes(limitAction)) {
-        res.status(400).json({
-          success: false,
-          error: 'Limit action must be one of: warn, block',
-        });
-        return;
-      }
       updates.spendingLimitAction = limitAction;
-    }
-
-    if (Object.keys(updates).length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'No valid settings to update',
-      });
-      return;
     }
 
     await db

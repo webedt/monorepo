@@ -4,14 +4,110 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { Octokit } from '@octokit/rest';
-import { db, users, chatSessions, events, eq, and, isNull } from '@webedt/shared';
+import { db, users, chatSessions, events, eq, and, isNull, validateRequest, CommonSchemas } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
 import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+
+// ============================================================================
+// Validation Schemas
+// ============================================================================
+
+const repoParamsSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+};
+
+const createBranchSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+  body: z.object({
+    branchName: CommonSchemas.nonEmptyString,
+    baseBranch: z.string().optional(),
+  }),
+};
+
+const createPullSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+  body: z.object({
+    title: z.string().optional(),
+    head: CommonSchemas.githubBranch,
+    base: CommonSchemas.githubBranch,
+    body: z.string().optional(),
+  }),
+};
+
+const generatePrContentSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+  body: z.object({
+    head: CommonSchemas.githubBranch,
+    base: CommonSchemas.githubBranch,
+    userRequest: z.string().optional(),
+  }),
+};
+
+const mergeBaseSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+  body: z.object({
+    base: CommonSchemas.githubBranch,
+  }),
+};
+
+const autoPrSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+  body: z.object({
+    base: CommonSchemas.githubBranch,
+    title: z.string().optional(),
+    body: z.string().optional(),
+    sessionId: CommonSchemas.uuid.optional(),
+  }),
+};
+
+const commitFilesSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+  }),
+  body: z.object({
+    branch: CommonSchemas.githubBranch,
+    files: z.array(z.object({
+      path: z.string().min(1),
+      content: z.string(),
+      encoding: z.enum(['utf-8', 'base64']).optional(),
+    })).optional(),
+    images: z.array(z.object({
+      path: z.string().min(1),
+      content: z.string().min(1),
+      beforeContent: z.string().optional(),
+    })).optional(),
+    deletions: z.array(z.string().min(1)).optional(),
+    message: z.string().optional(),
+  }).refine(
+    (data) => (data.files?.length ?? 0) > 0 || (data.images?.length ?? 0) > 0 || (data.deletions?.length ?? 0) > 0,
+    { message: 'No files, images, or deletions to commit' }
+  ),
+};
 
 const router = Router();
 
@@ -274,19 +370,14 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
 });
 
 // Create a new branch
-router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res: Response) => {
+router.post('/repos/:owner/:repo/branches', requireAuth, validateRequest(createBranchSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo } = req.params;
+    const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
     const { branchName, baseBranch } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    if (!branchName) {
-      res.status(400).json({ success: false, error: 'Branch name is required' });
       return;
     }
 
@@ -561,19 +652,14 @@ router.get('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: R
 });
 
 // Generate PR title and description
-router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, async (req: Request, res: Response) => {
+router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, validateRequest(generatePrContentSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo } = req.params;
+    const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
     const { head, base, userRequest } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    if (!head || !base) {
-      res.status(400).json({ success: false, error: 'Head and base branches are required' });
       return;
     }
 
@@ -678,19 +764,14 @@ router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, async (req: 
 });
 
 // Create a pull request
-router.post('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: Response) => {
+router.post('/repos/:owner/:repo/pulls', requireAuth, validateRequest(createPullSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo } = req.params;
+    const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
     const { title, head, base, body } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    if (!head || !base) {
-      res.status(400).json({ success: false, error: 'Head and base branches are required' });
       return;
     }
 
@@ -782,20 +863,15 @@ router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (
 });
 
 // Merge base branch into feature branch
-router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req: Request, res: Response) => {
+router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, validateRequest(mergeBaseSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo } = req.params;
+    const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
     const branch = req.params[0];
     const { base } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    if (!base) {
-      res.status(400).json({ success: false, error: 'Base branch is required' });
       return;
     }
 
@@ -840,20 +916,15 @@ router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req
 });
 
 // Auto PR - Automatically create/update PR, merge base, and merge PR
-router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: Request, res: Response) => {
+router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, validateRequest(autoPrSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo } = req.params;
+    const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
     const branch = req.params[0];
     const { base, title, body, sessionId } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    if (!base) {
-      res.status(400).json({ success: false, error: 'Base branch is required' });
       return;
     }
 
@@ -1451,7 +1522,7 @@ router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request
 
 // Commit files to GitHub - used by Code and Images editors
 // This creates a commit directly via the GitHub API (no local git repo needed)
-router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res: Response) => {
+router.post('/repos/:owner/:repo/commit', requireAuth, validateRequest(commitFilesSchema), async (req: Request, res: Response) => {
   // Log that we received the request (for debugging 404 issues)
   logger.info('Commit endpoint hit', {
     component: 'GitHub',
@@ -1463,7 +1534,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
 
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo } = req.params;
+    const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
     const {
       branch,
       files, // Array of { path, content, encoding? } for code files
@@ -1477,19 +1548,9 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
       return;
     }
 
-    if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
-      return;
-    }
-
     const hasFiles = files && Array.isArray(files) && files.length > 0;
     const hasImages = images && Array.isArray(images) && images.length > 0;
     const hasDeletions = deletions && Array.isArray(deletions) && deletions.length > 0;
-
-    if (!hasFiles && !hasImages && !hasDeletions) {
-      res.status(400).json({ success: false, error: 'No files, images, or deletions to commit' });
-      return;
-    }
 
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
 

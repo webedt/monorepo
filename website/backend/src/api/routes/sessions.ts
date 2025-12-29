@@ -4,7 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql } from '@webedt/shared';
+import { z } from 'zod';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql, validateRequest, CommonSchemas } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -14,6 +15,165 @@ import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+
+// ============================================================================
+// Validation Schemas
+// ============================================================================
+
+// Common session ID param schema
+const sessionIdParamSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+};
+
+// Share token param schema
+const shareTokenParamSchema = {
+  params: z.object({
+    token: CommonSchemas.uuid,
+  }),
+};
+
+// Create code session schema
+const createCodeSessionSchema = {
+  body: z.object({
+    title: z.string().optional(),
+    repositoryOwner: CommonSchemas.githubOwner,
+    repositoryName: CommonSchemas.githubRepo,
+    baseBranch: CommonSchemas.githubBranch,
+    branch: CommonSchemas.githubBranch,
+  }),
+};
+
+// Search sessions schema
+const searchSessionsSchema = {
+  query: z.object({
+    q: CommonSchemas.nonEmptyString,
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+    status: z.enum(['pending', 'running', 'completed', 'error']).optional(),
+    favorite: z.enum(['true', 'false']).transform(val => val === 'true').optional(),
+  }),
+};
+
+// Pagination query schema
+const paginationQuerySchema = {
+  query: z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    offset: z.coerce.number().int().min(0).default(0),
+  }),
+};
+
+// Create event schema
+const createEventSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    eventData: z.unknown(),
+  }),
+};
+
+// Create message schema
+const createMessageSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    type: z.enum(['user', 'assistant', 'system', 'error']),
+    content: CommonSchemas.nonEmptyString,
+  }),
+};
+
+// Update session schema
+const updateSessionSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    userRequest: z.string().min(1).optional(),
+    branch: z.string().min(1).optional(),
+  }).refine(
+    (data) => data.userRequest !== undefined || data.branch !== undefined,
+    { message: 'At least one field (userRequest or branch) must be provided' }
+  ),
+};
+
+// Set favorite schema
+const setFavoriteSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    favorite: z.boolean().optional(),
+  }),
+};
+
+// Share session schema
+const shareSessionSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    enabled: z.boolean(),
+  }),
+};
+
+// Sync sessions schema
+const syncSessionsSchema = {
+  body: z.object({
+    force: z.boolean().optional().default(false),
+  }),
+};
+
+// Batch delete schema
+const batchDeleteSchema = {
+  body: z.object({
+    sessionIds: z.array(CommonSchemas.uuid).min(1, 'At least one session ID is required'),
+    permanent: z.boolean().optional().default(false),
+    deleteBranch: z.boolean().optional().default(false),
+    archiveRemote: z.boolean().optional().default(false),
+  }),
+};
+
+// Batch restore schema
+const batchRestoreSchema = {
+  body: z.object({
+    sessionIds: z.array(CommonSchemas.uuid).min(1, 'At least one session ID is required'),
+  }),
+};
+
+// Delete session query schema
+const deleteSessionQuerySchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  query: z.object({
+    permanent: z.enum(['true', 'false']).optional().transform(val => val === 'true'),
+    deleteBranch: z.enum(['true', 'false']).optional().transform(val => val === 'true'),
+    archiveRemote: z.enum(['true', 'false']).optional().transform(val => val === 'true'),
+  }),
+};
+
+// Share session schema with expiration
+const generateShareTokenSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    expiresInDays: z.number().int().min(1).max(365).optional(),
+  }),
+};
+
+// Send message schema
+const sendMessageSchema = {
+  params: z.object({
+    id: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    content: CommonSchemas.nonEmptyString,
+  }),
+};
 
 /**
  * Helper to write SSE data safely using the shared SSE helper service.
@@ -89,14 +249,9 @@ router.use((req: Request, res: Response, next) => {
  * Public endpoint to access a shared session via share token
  * No authentication required - anyone with the link can view
  */
-router.get('/shared/:token', async (req: Request, res: Response) => {
+router.get('/shared/:token', validateRequest(shareTokenParamSchema), async (req: Request, res: Response) => {
   try {
-    const shareToken = req.params.token;
-
-    if (!shareToken) {
-      res.status(400).json({ success: false, error: 'Share token is required' });
-      return;
-    }
+    const { token: shareToken } = (req as Request & { validatedParams: { token: string } }).validatedParams;
 
     // Find session by share token
     const [session] = await db
@@ -149,14 +304,9 @@ router.get('/shared/:token', async (req: Request, res: Response) => {
  * GET /api/sessions/shared/:token/events
  * Public endpoint to get events for a shared session
  */
-router.get('/shared/:token/events', async (req: Request, res: Response) => {
+router.get('/shared/:token/events', validateRequest(shareTokenParamSchema), async (req: Request, res: Response) => {
   try {
-    const shareToken = req.params.token;
-
-    if (!shareToken) {
-      res.status(400).json({ success: false, error: 'Share token is required' });
-      return;
-    }
+    const { token: shareToken } = (req as Request & { validatedParams: { token: string } }).validatedParams;
 
     // Find session by share token
     const [session] = await db
@@ -203,14 +353,9 @@ router.get('/shared/:token/events', async (req: Request, res: Response) => {
  * GET /api/sessions/shared/:token/events/stream
  * Public SSE endpoint to stream events for a shared session
  */
-router.get('/shared/:token/events/stream', async (req: Request, res: Response) => {
+router.get('/shared/:token/events/stream', validateRequest(shareTokenParamSchema), async (req: Request, res: Response) => {
   try {
-    const shareToken = req.params.token;
-
-    if (!shareToken) {
-      res.status(400).json({ success: false, error: 'Share token is required' });
-      return;
-    }
+    const { token: shareToken } = (req as Request & { validatedParams: { token: string } }).validatedParams;
 
     // Find session by share token
     const [session] = await db
@@ -330,7 +475,7 @@ router.get('/shared/:token/events/stream', async (req: Request, res: Response) =
 // ============================================================================
 
 // Create a new code session
-router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
+router.post('/create-code-session', requireAuth, validateRequest(createCodeSessionSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const {
@@ -340,15 +485,6 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       baseBranch,
       branch,
     } = req.body;
-
-    // Validate required fields
-    if (!repositoryOwner || !repositoryName || !baseBranch || !branch) {
-      res.status(400).json({
-        success: false,
-        error: 'Missing required fields: repositoryOwner, repositoryName, baseBranch, branch',
-      });
-      return;
-    }
 
     // Generate session ID
     const sessionId = uuidv4();
@@ -416,37 +552,15 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Search sessions by query string
-router.get('/search', requireAuth, async (req: Request, res: Response) => {
+router.get('/search', requireAuth, validateRequest(searchSessionsSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const queryService = ServiceProvider.get(ASessionQueryService);
 
-    // Parse query parameters
-    const query = (req.query.q as string) || '';
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
-    const statusParam = req.query.status as string | undefined;
-    const favorite = req.query.favorite === 'true' ? true : req.query.favorite === 'false' ? false : undefined;
-
-    // Validate status parameter if provided
-    const validStatuses = ['pending', 'running', 'completed', 'error'];
-    let status: string | undefined;
-    if (statusParam) {
-      if (!validStatuses.includes(statusParam)) {
-        res.status(400).json({
-          success: false,
-          error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
-        });
-        return;
-      }
-      status = statusParam;
-    }
-
-    // Require a query string
-    if (!query.trim()) {
-      res.status(400).json({ success: false, error: 'Search query (q) is required' });
-      return;
-    }
+    // Parse validated query parameters
+    const { q: query, limit, offset, status, favorite } = (req as Request & {
+      validatedQuery: { q: string; limit: number; offset: number; status?: string; favorite?: boolean }
+    }).validatedQuery;
 
     const result = await queryService.search(authReq.user!.id, {
       query: query.trim(),
@@ -567,14 +681,14 @@ router.get('/updates', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Get all deleted chat sessions for user (with pagination)
-router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
+router.get('/deleted', requireAuth, validateRequest(paginationQuerySchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const queryService = ServiceProvider.get(ASessionQueryService);
 
-    // Parse pagination params
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 per request
-    const offset = parseInt(req.query.offset as string) || 0;
+    const { limit, offset } = (req as Request & {
+      validatedQuery: { limit: number; offset: number }
+    }).validatedQuery;
 
     const result = await queryService.listDeleted(authReq.user!.id, { limit, offset });
 
@@ -595,15 +709,10 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Get specific chat session
-router.get('/:id', requireAuth, async (req: Request, res: Response) => {
+router.get('/:id', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     const queryService = ServiceProvider.get(ASessionQueryService);
     const session = await queryService.getByIdWithPreview(sessionId, authReq.user!.id);
@@ -624,20 +733,14 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Create an event for a session
-router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/events', requireAuth, validateRequest(createEventSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
     const { eventData } = req.body;
 
-    const authService = ServiceProvider.get(ASessionAuthorizationService);
-    const validation = authService.validateRequiredFields({ sessionId, eventData }, ['sessionId', 'eventData']);
-    if (!validation.valid) {
-      res.status(400).json({ success: false, error: validation.error });
-      return;
-    }
-
     // Verify session ownership
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
     const queryService = ServiceProvider.get(ASessionQueryService);
     const session = await queryService.getById(sessionId);
     const authResult = authService.verifyOwnership(session, authReq.user!.id);
@@ -664,28 +767,11 @@ router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Create a message for a session
-router.post('/:id/messages', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/messages', requireAuth, validateRequest(createMessageSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
     const { type, content } = req.body;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (!type || !content) {
-      res.status(400).json({ success: false, error: 'Type and content are required' });
-      return;
-    }
-
-    // Validate message type
-    const validTypes = ['user', 'assistant', 'system', 'error'];
-    if (!validTypes.includes(type)) {
-      res.status(400).json({ success: false, error: 'Invalid message type' });
-      return;
-    }
 
     // Verify session ownership
     const [session] = await db
@@ -722,15 +808,10 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
 });
 
 // Get messages for a session
-router.get('/:id/messages', requireAuth, async (req: Request, res: Response) => {
+router.get('/:id/messages', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     // Verify session ownership
     const [session] = await db
@@ -770,21 +851,16 @@ router.get('/:id/messages', requireAuth, async (req: Request, res: Response) => 
 });
 
 // Get events for a session
-router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
+router.get('/:id/events', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     logger.info('Getting events for session', {
       component: 'Sessions',
       sessionId,
       userId: authReq.user?.id
     });
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
 
     // Verify session ownership
     const [session] = await db
@@ -834,25 +910,11 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Update a chat session
-router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+router.patch('/:id', requireAuth, validateRequest(updateSessionSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
     const { userRequest, branch } = req.body;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // At least one field must be provided
-    const hasUserRequest = userRequest && typeof userRequest === 'string' && userRequest.trim().length > 0;
-    const hasBranch = branch && typeof branch === 'string' && branch.trim().length > 0;
-
-    if (!hasUserRequest && !hasBranch) {
-      res.status(400).json({ success: false, error: 'At least one field (userRequest or branch) must be provided' });
-      return;
-    }
 
     // Verify session ownership
     const [session] = await db
@@ -873,10 +935,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     // Build update object with only provided fields
     const updateData: { userRequest?: string; branch?: string } = {};
-    if (hasUserRequest) {
+    if (userRequest) {
       updateData.userRequest = userRequest.trim();
     }
-    if (hasBranch) {
+    if (branch) {
       updateData.branch = branch.trim();
     }
 
@@ -895,15 +957,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Unlock a chat session
-router.post('/:id/unlock', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/unlock', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     // Verify session ownership
     const [session] = await db
@@ -937,15 +994,10 @@ router.post('/:id/unlock', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Toggle favorite status for a chat session
-router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/favorite', requireAuth, validateRequest(setFavoriteSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     // Verify session ownership
     const [session] = await db
@@ -994,24 +1046,11 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
  * Optional body: { expiresInDays?: number } - defaults to preserving existing expiration or no expiration
  * Max expiration: 365 days
  */
-router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/share', requireAuth, validateRequest(generateShareTokenSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
     const { expiresInDays } = req.body as { expiresInDays?: number };
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // Validate expiresInDays if provided
-    if (expiresInDays !== undefined) {
-      if (typeof expiresInDays !== 'number' || expiresInDays < 1 || expiresInDays > 365) {
-        res.status(400).json({ success: false, error: 'expiresInDays must be between 1 and 365' });
-        return;
-      }
-    }
 
     // Verify session ownership
     const [session] = await db
@@ -1081,15 +1120,10 @@ router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
  * DELETE /api/sessions/:id/share
  * Revoke the share token for a session (stop sharing)
  */
-router.delete('/:id/share', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:id/share', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     // Verify session ownership
     const [session] = await db
@@ -1146,15 +1180,10 @@ router.delete('/:id/share', requireAuth, async (req: Request, res: Response) => 
  * GET /api/sessions/:id/share
  * Get the current share status for a session
  */
-router.get('/:id/share', requireAuth, async (req: Request, res: Response) => {
+router.get('/:id/share', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     // Verify session ownership
     const [session] = await db
@@ -1198,15 +1227,10 @@ router.get('/:id/share', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Abort a running session
-router.post('/:id/abort', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/abort', requireAuth, validateRequest(sessionIdParamSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
 
     // Verify session ownership
     const [session] = await db
@@ -1250,21 +1274,11 @@ router.post('/:id/abort', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Send a follow-up message to an existing session (triggers resume via internal sessions)
-router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/send', requireAuth, validateRequest(sendMessageSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+    const { id: sessionId } = (req as Request & { validatedParams: { id: string } }).validatedParams;
     const { content } = req.body;
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (!content || typeof content !== 'string') {
-      res.status(400).json({ success: false, error: 'Message content is required' });
-      return;
-    }
 
     // Verify session exists and belongs to user
     const [session] = await db
