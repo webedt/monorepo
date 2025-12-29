@@ -4,8 +4,9 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, eq, and, or, isNull, isNotNull, inArray, ServiceProvider, ASessionQueryService, logger, decryptUserFields } from '@webedt/shared';
+import { db, chatSessions, users, eq, and, isNull, isNotNull, inArray, logger, decryptUserFields, executeBatch } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
+import type { BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import { sendBadRequest } from '../../middleware/sessionMiddleware.js';
@@ -15,7 +16,84 @@ import { deleteGitHubBranch, archiveClaudeRemoteSession } from './helpers.js';
 // Helper type for the database user schema
 type DbUser = typeof users.$inferSelect;
 
+// Session type from the database
+type ChatSession = typeof chatSessions.$inferSelect;
+
+// Result types for session operations
+interface SessionCleanupResult {
+  sessionId: string;
+  archived?: boolean;
+  branchDeleted?: boolean;
+  archiveError?: string;
+  branchError?: string;
+}
+
+interface SessionArchiveResult {
+  sessionId: string;
+  success: boolean;
+  message: string;
+}
+
 const router = Router();
+
+// Default concurrency for session operations
+const DEFAULT_SESSION_CONCURRENCY = 3;
+const MAX_BATCH_SIZE = 100;
+const MAX_ARCHIVE_BATCH_SIZE = 50;
+
+/**
+ * Helper to create a session cleanup operation
+ */
+function createCleanupOperation(
+  archiveRemote: boolean,
+  deleteGitBranch: boolean,
+  claudeAuth: ClaudeAuth | null,
+  githubToken?: string,
+  environmentId?: string
+): (session: ChatSession) => Promise<SessionCleanupResult> {
+  return async (session: ChatSession): Promise<SessionCleanupResult> => {
+    const result: SessionCleanupResult = { sessionId: session.id };
+
+    // Archive Claude Remote session if requested
+    if (archiveRemote && session.remoteSessionId && claudeAuth) {
+      try {
+        const archiveResult = await archiveClaudeRemoteSession(
+          session.remoteSessionId,
+          claudeAuth,
+          environmentId
+        );
+        result.archived = archiveResult.success;
+        if (!archiveResult.success) {
+          result.archiveError = archiveResult.message;
+        }
+      } catch (error) {
+        result.archived = false;
+        result.archiveError = (error as Error).message;
+      }
+    }
+
+    // Delete GitHub branch if requested
+    if (deleteGitBranch && githubToken && session.repositoryOwner && session.repositoryName && session.branch) {
+      try {
+        const branchResult = await deleteGitHubBranch(
+          githubToken,
+          session.repositoryOwner,
+          session.repositoryName,
+          session.branch
+        );
+        result.branchDeleted = branchResult.success;
+        if (!branchResult.success) {
+          result.branchError = branchResult.message;
+        }
+      } catch (error) {
+        result.branchDeleted = false;
+        result.branchError = (error as Error).message;
+      }
+    }
+
+    return result;
+  };
+}
 
 /**
  * POST /api/sessions/bulk-delete
@@ -39,8 +117,8 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
     }
 
     // Limit to reasonable batch size
-    if (sessionIds.length > 100) {
-      res.status(400).json({ success: false, error: 'Maximum 100 sessions per batch' });
+    if (sessionIds.length > MAX_BATCH_SIZE) {
+      res.status(400).json({ success: false, error: `Maximum ${MAX_BATCH_SIZE} sessions per batch` });
       return;
     }
 
@@ -70,62 +148,44 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    const deletedIds = validSessions.map(s => s.id);
-    const results: { sessionId: string; archived?: boolean; branchDeleted?: boolean; error?: string }[] = [];
-
     // Get Claude auth from user for archiving
     const decryptedFields = archiveRemote ? decryptUserFields(authReq.user as unknown as Partial<DbUser>) : null;
     const claudeAuth = decryptedFields?.claudeAuth ?? null;
 
-    // Process each session for cleanup operations
-    for (const session of validSessions) {
-      const result: { sessionId: string; archived?: boolean; branchDeleted?: boolean; error?: string } = { sessionId: session.id };
+    // Create cleanup operation
+    const cleanupOperation = createCleanupOperation(
+      archiveRemote,
+      deleteGitBranch,
+      claudeAuth as ClaudeAuth | null,
+      githubToken,
+      process.env.CLAUDE_ENVIRONMENT_ID
+    );
 
-      try {
-        // Archive Claude Remote session if requested
-        if (archiveRemote && session.remoteSessionId && claudeAuth) {
-          const archiveResult = await archiveClaudeRemoteSession(
-            session.remoteSessionId,
-            claudeAuth as ClaudeAuth,
-            process.env.CLAUDE_ENVIRONMENT_ID
-          );
-          result.archived = archiveResult.success;
-          if (!archiveResult.success) {
-            logger.warn(`Failed to archive remote session: ${archiveResult.message}`, {
-              component: 'Sessions',
-              sessionId: session.id,
-              remoteSessionId: session.remoteSessionId
-            });
-          }
-        }
+    // Execute batch cleanup operations with controlled concurrency
+    const batchConfig: BatchOperationConfig<ChatSession, SessionCleanupResult> = {
+      concurrency: DEFAULT_SESSION_CONCURRENCY,
+      maxBatchSize: MAX_BATCH_SIZE,
+      operationName: permanent ? 'bulk-permanent-delete' : 'bulk-soft-delete',
+      continueOnError: true, // Continue processing even if some cleanup fails
+    };
 
-        // Delete GitHub branch if requested
-        if (deleteGitBranch && githubToken && session.repositoryOwner && session.repositoryName && session.branch) {
-          const branchResult = await deleteGitHubBranch(
-            githubToken,
-            session.repositoryOwner,
-            session.repositoryName,
-            session.branch
-          );
-          result.branchDeleted = branchResult.success;
-          if (!branchResult.success) {
-            logger.warn(`Failed to delete branch: ${branchResult.message}`, {
-              component: 'Sessions',
-              sessionId: session.id,
-              branch: session.branch
-            });
-          }
-        }
-      } catch (error) {
-        result.error = (error as Error).message;
-        logger.error(`Error processing session cleanup`, error as Error, {
-          component: 'Sessions',
-          sessionId: session.id
-        });
+    const batchResult = await executeBatch(validSessions, cleanupOperation, batchConfig);
+
+    // Transform batch results to the expected format
+    const results: SessionCleanupResult[] = batchResult.results.map(itemResult => {
+      if (itemResult.success && itemResult.result) {
+        return itemResult.result;
       }
+      // If the batch item itself failed, return error info
+      return {
+        sessionId: itemResult.item.id,
+        archived: false,
+        branchDeleted: false,
+        archiveError: itemResult.error?.message,
+      };
+    });
 
-      results.push(result);
-    }
+    const deletedIds = validSessions.map(s => s.id);
 
     if (permanent) {
       // Permanently delete sessions
@@ -137,6 +197,8 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         component: 'Sessions',
         userId: authReq.user!.id,
         count: deletedIds.length,
+        batchSuccessCount: batchResult.successCount,
+        batchFailureCount: batchResult.failureCount,
       });
     } else {
       // Soft delete - set deletedAt
@@ -154,6 +216,8 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         component: 'Sessions',
         userId: authReq.user!.id,
         count: deletedIds.length,
+        batchSuccessCount: batchResult.successCount,
+        batchFailureCount: batchResult.failureCount,
       });
     }
 
@@ -163,6 +227,11 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         deleted: deletedIds.length,
         results,
         permanent,
+        batchStats: {
+          successCount: batchResult.successCount,
+          failureCount: batchResult.failureCount,
+          durationMs: batchResult.totalDurationMs,
+        },
       }
     });
   } catch (error) {
@@ -187,8 +256,8 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
     }
 
     // Limit to reasonable batch size
-    if (sessionIds.length > 100) {
-      res.status(400).json({ success: false, error: 'Maximum 100 sessions per batch' });
+    if (sessionIds.length > MAX_BATCH_SIZE) {
+      res.status(400).json({ success: false, error: `Maximum ${MAX_BATCH_SIZE} sessions per batch` });
       return;
     }
 
@@ -274,43 +343,40 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const results: { sessionId: string; archived?: boolean; branchDeleted?: boolean; error?: string }[] = [];
-
     // Get Claude auth from user for archiving
     const decryptedFieldsForArchive = shouldArchiveRemote ? decryptUserFields(authReq.user as unknown as Partial<DbUser>) : null;
     const claudeAuth = decryptedFieldsForArchive?.claudeAuth ?? null;
 
-    // Process each session for cleanup operations
-    for (const session of sessions) {
-      const result: { sessionId: string; archived?: boolean; branchDeleted?: boolean; error?: string } = { sessionId: session.id };
+    // Create cleanup operation
+    const cleanupOperation = createCleanupOperation(
+      shouldArchiveRemote,
+      shouldDeleteGitBranch,
+      claudeAuth as ClaudeAuth | null,
+      githubToken,
+      process.env.CLAUDE_ENVIRONMENT_ID
+    );
 
-      try {
-        // Archive Claude Remote session if requested
-        if (shouldArchiveRemote && session.remoteSessionId && claudeAuth) {
-          const archiveResult = await archiveClaudeRemoteSession(
-            session.remoteSessionId,
-            claudeAuth as ClaudeAuth,
-            process.env.CLAUDE_ENVIRONMENT_ID
-          );
-          result.archived = archiveResult.success;
-        }
+    // Execute batch cleanup with controlled concurrency
+    const batchConfig: BatchOperationConfig<ChatSession, SessionCleanupResult> = {
+      concurrency: DEFAULT_SESSION_CONCURRENCY,
+      operationName: 'empty-trash',
+      continueOnError: true,
+    };
 
-        // Delete GitHub branch if requested
-        if (shouldDeleteGitBranch && githubToken && session.repositoryOwner && session.repositoryName && session.branch) {
-          const branchResult = await deleteGitHubBranch(
-            githubToken,
-            session.repositoryOwner,
-            session.repositoryName,
-            session.branch
-          );
-          result.branchDeleted = branchResult.success;
-        }
-      } catch (error) {
-        result.error = (error as Error).message;
+    const batchResult = await executeBatch(sessions, cleanupOperation, batchConfig);
+
+    // Transform results
+    const results: SessionCleanupResult[] = batchResult.results.map(itemResult => {
+      if (itemResult.success && itemResult.result) {
+        return itemResult.result;
       }
-
-      results.push(result);
-    }
+      return {
+        sessionId: itemResult.item.id,
+        archived: false,
+        branchDeleted: false,
+        archiveError: itemResult.error?.message,
+      };
+    });
 
     // Permanently delete all trashed sessions
     const deletedIds = sessions.map(s => s.id);
@@ -322,6 +388,8 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
       component: 'Sessions',
       userId: authReq.user!.id,
       count: deletedIds.length,
+      batchSuccessCount: batchResult.successCount,
+      batchFailureCount: batchResult.failureCount,
     });
 
     res.json({
@@ -329,6 +397,11 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
       data: {
         deleted: deletedIds.length,
         results,
+        batchStats: {
+          successCount: batchResult.successCount,
+          failureCount: batchResult.failureCount,
+          durationMs: batchResult.totalDurationMs,
+        },
       }
     });
   } catch (error) {
@@ -356,8 +429,8 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
     }
 
     // Limit to reasonable batch size
-    if (sessionIds.length > 50) {
-      sendBadRequest(res, 'Maximum 50 sessions per batch');
+    if (sessionIds.length > MAX_ARCHIVE_BATCH_SIZE) {
+      sendBadRequest(res, `Maximum ${MAX_ARCHIVE_BATCH_SIZE} sessions per batch`);
       return;
     }
 
@@ -382,16 +455,14 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
         )
       );
 
-    const results: { sessionId: string; success: boolean; message: string }[] = [];
-
-    for (const session of sessions) {
+    // Create archive operation
+    const archiveOperation = async (session: ChatSession): Promise<SessionArchiveResult> => {
       if (!session.remoteSessionId) {
-        results.push({
+        return {
           sessionId: session.id,
           success: false,
           message: 'No remote session ID'
-        });
-        continue;
+        };
       }
 
       const archiveResult = await archiveClaudeRemoteSession(
@@ -399,12 +470,6 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
         claudeAuth as ClaudeAuth,
         process.env.CLAUDE_ENVIRONMENT_ID
       );
-
-      results.push({
-        sessionId: session.id,
-        success: archiveResult.success,
-        message: archiveResult.message
-      });
 
       // Optionally soft delete the local session too
       if (archiveResult.success && archiveLocal) {
@@ -415,7 +480,35 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
 
         sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, session.id);
       }
-    }
+
+      return {
+        sessionId: session.id,
+        success: archiveResult.success,
+        message: archiveResult.message
+      };
+    };
+
+    // Execute batch archive with controlled concurrency
+    const batchConfig: BatchOperationConfig<ChatSession, SessionArchiveResult> = {
+      concurrency: DEFAULT_SESSION_CONCURRENCY,
+      maxBatchSize: MAX_ARCHIVE_BATCH_SIZE,
+      operationName: 'bulk-archive-remote',
+      continueOnError: true,
+    };
+
+    const batchResult = await executeBatch(sessions, archiveOperation, batchConfig);
+
+    // Transform results
+    const results: SessionArchiveResult[] = batchResult.results.map(itemResult => {
+      if (itemResult.success && itemResult.result) {
+        return itemResult.result;
+      }
+      return {
+        sessionId: itemResult.item.id,
+        success: false,
+        message: itemResult.error?.message || 'Unknown error'
+      };
+    });
 
     const successCount = results.filter(r => r.success).length;
 
@@ -423,6 +516,8 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
       component: 'Sessions',
       userId: authReq.user!.id,
       archiveLocal,
+      batchSuccessCount: batchResult.successCount,
+      batchFailureCount: batchResult.failureCount,
     });
 
     res.json({
@@ -431,6 +526,11 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
         archived: successCount,
         total: sessions.length,
         results,
+        batchStats: {
+          successCount: batchResult.successCount,
+          failureCount: batchResult.failureCount,
+          durationMs: batchResult.totalDurationMs,
+        },
       }
     });
   } catch (error) {
@@ -458,8 +558,8 @@ router.post('/bulk-favorite', requireAuth, async (req: Request, res: Response) =
     }
 
     // Limit to reasonable batch size
-    if (sessionIds.length > 100) {
-      sendBadRequest(res, 'Maximum 100 sessions per batch');
+    if (sessionIds.length > MAX_BATCH_SIZE) {
+      sendBadRequest(res, `Maximum ${MAX_BATCH_SIZE} sessions per batch`);
       return;
     }
 
