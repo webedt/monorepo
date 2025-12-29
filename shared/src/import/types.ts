@@ -3,10 +3,7 @@
  * Type definitions for importing files from external URLs
  */
 
-import {
-  HTTP_REQUEST_TIMEOUT_MS,
-  IMPORT_MAX_FILE_SIZE_BYTES,
-} from '../config/env.js';
+import { TIMEOUTS, LIMITS } from '../config/constants.js';
 
 export interface UrlImportOptions {
   /** URL to fetch content from */
@@ -53,10 +50,10 @@ export interface UrlValidationResult {
 export const ALLOWED_PROTOCOLS = ['https:', 'http:'];
 
 /** Default maximum file size (configurable via IMPORT_MAX_FILE_SIZE_BYTES env var, default: 10MB) */
-export const DEFAULT_MAX_SIZE = IMPORT_MAX_FILE_SIZE_BYTES;
+export const DEFAULT_MAX_SIZE = LIMITS.IMPORT.MAX_FILE_SIZE;
 
 /** Default timeout (configurable via HTTP_REQUEST_TIMEOUT_MS env var, default: 30s) */
-export const DEFAULT_TIMEOUT = HTTP_REQUEST_TIMEOUT_MS;
+export const DEFAULT_TIMEOUT = TIMEOUTS.HTTP.REQUEST;
 
 /** Binary content types that should be base64 encoded */
 export const BINARY_CONTENT_TYPES = [

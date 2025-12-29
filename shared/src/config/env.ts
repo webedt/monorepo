@@ -331,6 +331,69 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
     warnings.push(`DB_MIN_CONNECTIONS (${DB_MIN_CONNECTIONS}) should not exceed DB_MAX_CONNECTIONS (${DB_MAX_CONNECTIONS})`);
   }
 
+  // Timeout values validation - ensure all timeouts are positive
+  if (HTTP_REQUEST_TIMEOUT_MS <= 0) {
+    errors.push('HTTP_REQUEST_TIMEOUT_MS must be a positive number');
+  }
+  if (HTTP_HEAD_TIMEOUT_MS <= 0) {
+    errors.push('HTTP_HEAD_TIMEOUT_MS must be a positive number');
+  }
+  if (HTTP_HEALTH_CHECK_TIMEOUT_MS <= 0) {
+    errors.push('HTTP_HEALTH_CHECK_TIMEOUT_MS must be a positive number');
+  }
+  if (SSE_STALE_TIMEOUT_MS <= 0) {
+    errors.push('SSE_STALE_TIMEOUT_MS must be a positive number');
+  }
+  if (DB_CONNECTION_TIMEOUT_MS <= 0) {
+    errors.push('DB_CONNECTION_TIMEOUT_MS must be a positive number');
+  }
+  if (DB_IDLE_TIMEOUT_MS <= 0) {
+    errors.push('DB_IDLE_TIMEOUT_MS must be a positive number');
+  }
+  if (DB_STATEMENT_TIMEOUT_MS <= 0) {
+    errors.push('DB_STATEMENT_TIMEOUT_MS must be a positive number');
+  }
+  if (CIRCUIT_BREAKER_RESET_TIMEOUT_MS <= 0) {
+    errors.push('CIRCUIT_BREAKER_RESET_TIMEOUT_MS must be a positive number');
+  }
+  if (WORKER_EXECUTION_TIMEOUT_MS <= 0) {
+    errors.push('WORKER_EXECUTION_TIMEOUT_MS must be a positive number');
+  }
+  if (WORKER_HEALTH_CHECK_TIMEOUT_MS <= 0) {
+    errors.push('WORKER_HEALTH_CHECK_TIMEOUT_MS must be a positive number');
+  }
+
+  // Interval values validation - ensure all intervals are positive
+  if (SSE_HEARTBEAT_INTERVAL_MS <= 0) {
+    errors.push('SSE_HEARTBEAT_INTERVAL_MS must be a positive number');
+  }
+  if (SSE_CLEANUP_INTERVAL_MS <= 0) {
+    errors.push('SSE_CLEANUP_INTERVAL_MS must be a positive number');
+  }
+  if (HEALTH_CHECK_INTERVAL_MS <= 0) {
+    errors.push('HEALTH_CHECK_INTERVAL_MS must be a positive number');
+  }
+  if (DB_HEALTH_CHECK_INTERVAL_MS <= 0) {
+    errors.push('DB_HEALTH_CHECK_INTERVAL_MS must be a positive number');
+  }
+  if (CRDT_SYNC_INTERVAL_MS <= 0) {
+    errors.push('CRDT_SYNC_INTERVAL_MS must be a positive number');
+  }
+
+  // Retry configuration validation
+  if (RETRY_MAX_ATTEMPTS <= 0) {
+    errors.push('RETRY_MAX_ATTEMPTS must be a positive number');
+  }
+  if (RETRY_BASE_DELAY_MS <= 0) {
+    errors.push('RETRY_BASE_DELAY_MS must be a positive number');
+  }
+  if (RETRY_MAX_DELAY_MS <= 0) {
+    errors.push('RETRY_MAX_DELAY_MS must be a positive number');
+  }
+  if (RETRY_BASE_DELAY_MS > RETRY_MAX_DELAY_MS) {
+    warnings.push(`RETRY_BASE_DELAY_MS (${RETRY_BASE_DELAY_MS}) should not exceed RETRY_MAX_DELAY_MS (${RETRY_MAX_DELAY_MS})`);
+  }
+
   return {
     valid: errors.length === 0,
     errors,
