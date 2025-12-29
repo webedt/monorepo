@@ -4,10 +4,11 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, collections, sessionCollections, chatSessions, eq, and, desc, asc, sql } from '@webedt/shared';
+import { db, collections, sessionCollections, chatSessions, eq, and, desc, asc, sql, withTransactionOrThrow } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import type { TransactionContext } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -132,14 +133,19 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
       return;
     }
 
-    // Add to new collections
-    await db.insert(sessionCollections).values(
-      newCollectionIds.map((collectionId: string) => ({
-        id: uuidv4(),
-        sessionId,
-        collectionId,
-      }))
-    );
+    // Use transaction to ensure all collection memberships are added atomically
+    // This prevents partial additions if some inserts fail
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx.insert(sessionCollections).values(
+        newCollectionIds.map((collectionId: string) => ({
+          id: uuidv4(),
+          sessionId,
+          collectionId,
+        }))
+      );
+    }, {
+      context: { operation: 'bulkAddToCollections', sessionId, collectionCount: newCollectionIds.length },
+    });
 
     logger.info(`Bulk added session ${sessionId} to ${newCollectionIds.length} collections`, {
       component: 'Collections',
@@ -175,17 +181,21 @@ router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
 
     const userCollectionIds = new Set(userCollections.map((c) => c.id));
 
-    // Update sort order for each collection
-    await Promise.all(
-      orderedIds.map(async (id: string, index: number) => {
+    // Use transaction to ensure all sort order updates are atomic
+    // This prevents inconsistent ordering if some updates fail
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      for (let index = 0; index < orderedIds.length; index++) {
+        const id = orderedIds[index] as string;
         if (userCollectionIds.has(id)) {
-          await db
+          await tx
             .update(collections)
             .set({ sortOrder: index, updatedAt: new Date() })
             .where(eq(collections.id, id));
         }
-      })
-    );
+      }
+    }, {
+      context: { operation: 'reorderCollections', userId: authReq.user!.id, collectionCount: orderedIds.length },
+    });
 
     logger.info(`Reordered collections`, {
       component: 'Collections',
@@ -314,28 +324,35 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     const newSortOrder = (maxOrder?.maxSort ?? -1) + 1;
+    const collectionId = uuidv4();
 
-    // If setting as default, unset any existing default
-    if (isDefault) {
-      await db
-        .update(collections)
-        .set({ isDefault: false, updatedAt: new Date() })
-        .where(and(eq(collections.userId, authReq.user!.id), eq(collections.isDefault, true)));
-    }
+    // Use transaction to ensure default flag changes and collection creation are atomic
+    // This prevents having multiple defaults or no default when expected
+    const [collection] = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      // If setting as default, unset any existing default
+      if (isDefault) {
+        await tx
+          .update(collections)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(and(eq(collections.userId, authReq.user!.id), eq(collections.isDefault, true)));
+      }
 
-    const [collection] = await db
-      .insert(collections)
-      .values({
-        id: uuidv4(),
-        userId: authReq.user!.id,
-        name: name.trim(),
-        description: description?.trim() || null,
-        color: color || null,
-        icon: icon || null,
-        sortOrder: newSortOrder,
-        isDefault: isDefault || false,
-      })
-      .returning();
+      return tx
+        .insert(collections)
+        .values({
+          id: collectionId,
+          userId: authReq.user!.id,
+          name: name.trim(),
+          description: description?.trim() || null,
+          color: color || null,
+          icon: icon || null,
+          sortOrder: newSortOrder,
+          isDefault: isDefault || false,
+        })
+        .returning();
+    }, {
+      context: { operation: 'createCollection', collectionId, userId: authReq.user!.id },
+    });
 
     logger.info(`Created collection ${collection.id}`, {
       component: 'Collections',
@@ -396,14 +413,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
-    // If setting as default, unset any existing default
-    if (isDefault && !existing.isDefault) {
-      await db
-        .update(collections)
-        .set({ isDefault: false, updatedAt: new Date() })
-        .where(and(eq(collections.userId, authReq.user!.id), eq(collections.isDefault, true)));
-    }
-
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
@@ -412,11 +421,25 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
     if (isDefault !== undefined) updateData.isDefault = isDefault;
 
-    const [collection] = await db
-      .update(collections)
-      .set(updateData)
-      .where(eq(collections.id, id))
-      .returning();
+    // Use transaction to ensure default flag changes and collection update are atomic
+    // This prevents having multiple defaults or inconsistent state
+    const [collection] = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      // If setting as default, unset any existing default
+      if (isDefault && !existing.isDefault) {
+        await tx
+          .update(collections)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(and(eq(collections.userId, authReq.user!.id), eq(collections.isDefault, true)));
+      }
+
+      return tx
+        .update(collections)
+        .set(updateData)
+        .where(eq(collections.id, id))
+        .returning();
+    }, {
+      context: { operation: 'updateCollection', collectionId: id, userId: authReq.user!.id },
+    });
 
     logger.info(`Updated collection ${id}`, {
       component: 'Collections',
