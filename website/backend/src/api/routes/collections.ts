@@ -4,10 +4,24 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, collections, sessionCollections, chatSessions, eq, and, desc, asc, sql, withTransactionOrThrow } from '@webedt/shared';
+import {
+  db,
+  collections,
+  sessionCollections,
+  chatSessions,
+  eq,
+  and,
+  desc,
+  asc,
+  sql,
+  withTransactionOrThrow,
+  logger,
+  isValidHexColor,
+  isValidIcon,
+  VALID_ICONS,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
 import type { TransactionContext } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -19,19 +33,6 @@ const router = Router();
  *   - name: Collections
  *     description: User-created organizational folders for sessions
  */
-
-// Validation constants
-const VALID_ICONS = ['folder', 'star', 'code', 'bookmark', 'archive'] as const;
-const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
-
-// Validation helpers
-function isValidHexColor(color: unknown): color is string {
-  return typeof color === 'string' && HEX_COLOR_REGEX.test(color);
-}
-
-function isValidIcon(icon: unknown): icon is string {
-  return typeof icon === 'string' && VALID_ICONS.includes(icon as (typeof VALID_ICONS)[number]);
-}
 
 // ===========================================================================
 // IMPORTANT: Routes with specific paths must be defined BEFORE parameterized

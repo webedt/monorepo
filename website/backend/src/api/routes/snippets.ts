@@ -23,36 +23,25 @@ import {
   sql,
   ilike,
   or,
+  logger,
+  isValidHexColor,
+  isValidLanguage,
+  isValidCategory,
 } from '@webedt/shared';
 import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
 import { isDatabaseError, isUniqueConstraintError } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 // Validation constants
-const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
 const MAX_TITLE_LENGTH = 100;
 const MAX_DESCRIPTION_LENGTH = 500;
 const MAX_CODE_LENGTH = 50000;
 const MAX_TAGS = 10;
 const MAX_TAG_LENGTH = 30;
-
-// Validation helpers
-function isValidHexColor(color: unknown): color is string {
-  return typeof color === 'string' && HEX_COLOR_REGEX.test(color);
-}
-
-function isValidLanguage(lang: unknown): lang is SnippetLanguage {
-  return typeof lang === 'string' && (SNIPPET_LANGUAGES as readonly string[]).includes(lang);
-}
-
-function isValidCategory(cat: unknown): cat is SnippetCategory {
-  return typeof cat === 'string' && (SNIPPET_CATEGORIES as readonly string[]).includes(cat);
-}
 
 function validateTags(tags: unknown): string[] {
   if (!Array.isArray(tags)) return [];

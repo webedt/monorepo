@@ -19,6 +19,7 @@ import {
   asc,
   desc,
   inArray,
+  isValidHexColor,
 } from '@webedt/shared';
 import type {
   Taxonomy,
@@ -43,11 +44,6 @@ const VALID_STATUSES = ['active', 'archived'] as const;
 // Helper to validate status field
 function isValidStatus(status: string): boolean {
   return VALID_STATUSES.includes(status as typeof VALID_STATUSES[number]);
-}
-
-// Helper to validate hex color (prevents CSS injection)
-function isValidHexColor(color: string): boolean {
-  return /^#[0-9A-Fa-f]{6}$/.test(color);
 }
 
 // ============================================================================
