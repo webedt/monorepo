@@ -27,6 +27,13 @@ import {
   registerActiveStream,
   unregisterActiveStream,
 } from '../activeStreamManager.js';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendUnauthorized,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -184,14 +191,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Validate request
     if (!userRequest && !websiteSessionId) {
-      res.status(400).json({ success: false, error: 'userRequest or websiteSessionId is required' });
+      sendError(res, 'userRequest or websiteSessionId is required', 400);
       return;
     }
 
     // For resume requests, we may not have github.repoUrl - will get it from existing session
     // Only validate repoUrl for new sessions (no websiteSessionId)
     if (!repoUrl && !websiteSessionId) {
-      res.status(400).json({ success: false, error: 'github.repoUrl is required for new sessions' });
+      sendError(res, 'github.repoUrl is required for new sessions', 400);
       return;
     }
 
@@ -211,7 +218,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     if (preferredProvider === 'gemini') {
       // Use Gemini provider
       if (!userData?.geminiAuth || !isValidGeminiAuth(userData.geminiAuth)) {
-        res.status(400).json({ success: false, error: 'Gemini authentication not configured. Please connect your Gemini account in settings.' });
+        sendError(res, 'Gemini authentication not configured. Please connect your Gemini account in settings.', 400);
         return;
       }
 
@@ -227,7 +234,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         }
       } catch (error) {
         logger.error('Failed to refresh Gemini token', error, { component: 'ExecuteRemoteRoute' });
-        res.status(401).json({ success: false, error: 'Gemini token expired. Please reconnect your Gemini account.' });
+        sendUnauthorized(res, 'Gemini token expired. Please reconnect your Gemini account.');
         return;
       }
 
@@ -240,7 +247,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     } else {
       // Use Claude provider (default)
       if (!userData?.claudeAuth) {
-        res.status(400).json({ success: false, error: 'Claude authentication not configured. Please connect your Claude account in settings.' });
+        sendError(res, 'Claude authentication not configured. Please connect your Claude account in settings.', 400);
         return;
       }
 
@@ -256,7 +263,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         }
       } catch (error) {
         logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
-        res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
+        sendUnauthorized(res, 'Claude token expired. Please reconnect your Claude account.');
         return;
       }
     }
@@ -280,10 +287,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           environmentId: environmentId.slice(0, 10) + '...',
         });
       } else {
-        res.status(500).json({
-          success: false,
-          error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first, or ask an admin to configure CLAUDE_ENVIRONMENT_ID.'
-        });
+        sendInternalError(res, 'Could not detect Claude environment ID. Please create a session at claude.ai/code first, or ask an admin to configure CLAUDE_ENVIRONMENT_ID.');
         return;
       }
     }
@@ -337,7 +341,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Final validation - ensure we have repoUrl (either from request or existing session)
     if (!repoUrl) {
-      res.status(400).json({ success: false, error: 'github.repoUrl is required' });
+      sendError(res, 'github.repoUrl is required', 400);
       return;
     }
 
@@ -771,10 +775,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     logger.error('Execute Remote handler error', error, { component: 'ExecuteRemoteRoute' });
 
     if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Internal server error',
-      });
+      sendInternalError(res, error instanceof Error ? error.message : 'Internal server error');
     }
   }
 };

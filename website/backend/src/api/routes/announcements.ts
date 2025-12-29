@@ -15,6 +15,10 @@ import {
   gt,
   isNull,
   sql,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -81,25 +85,22 @@ router.get('/', async (req: Request, res: Response) => {
 
     const total = Number(countResult?.count ?? 0);
 
-    res.json({
-      success: true,
-      data: {
-        announcements: items.map((a) => ({
-          ...a.announcement,
-          author: {
-            id: a.author.id,
-            displayName: a.author.displayName || a.author.email?.split('@')[0],
-          },
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      announcements: items.map((a) => ({
+        ...a.announcement,
+        author: {
+          id: a.author.id,
+          displayName: a.author.displayName || a.author.email?.split('@')[0],
+        },
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get announcements error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
+    sendInternalError(res, 'Failed to fetch announcements');
   }
 });
 
@@ -151,25 +152,22 @@ router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
 
     const total = Number(countResult?.count ?? 0);
 
-    res.json({
-      success: true,
-      data: {
-        announcements: items.map((a) => ({
-          ...a.announcement,
-          author: {
-            id: a.author.id,
-            displayName: a.author.displayName || a.author.email?.split('@')[0],
-          },
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      announcements: items.map((a) => ({
+        ...a.announcement,
+        author: {
+          id: a.author.id,
+          displayName: a.author.displayName || a.author.email?.split('@')[0],
+        },
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get admin announcements error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
+    sendInternalError(res, 'Failed to fetch announcements');
   }
 });
 
@@ -195,29 +193,26 @@ router.get('/:id', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!item) {
-      res.status(404).json({ success: false, error: 'Announcement not found' });
+      sendNotFound(res, 'Announcement not found');
       return;
     }
 
     // Non-admins can only see published announcements
     if (!isAdmin && item.announcement.status !== 'published') {
-      res.status(404).json({ success: false, error: 'Announcement not found' });
+      sendNotFound(res, 'Announcement not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        ...item.announcement,
-        author: {
-          id: item.author.id,
-          displayName: item.author.displayName || item.author.email?.split('@')[0],
-        },
+    sendSuccess(res, {
+      ...item.announcement,
+      author: {
+        id: item.author.id,
+        displayName: item.author.displayName || item.author.email?.split('@')[0],
       },
     });
   } catch (error) {
     logger.error('Get announcement error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to fetch announcement' });
+    sendInternalError(res, 'Failed to fetch announcement');
   }
 });
 
@@ -229,48 +224,39 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
 
     // Validate required fields
     if (!title || !content) {
-      res.status(400).json({
-        success: false,
-        error: 'Title and content are required',
-      });
+      sendError(res, 'Title and content are required', 400);
       return;
     }
 
     // Validate input lengths
     if (typeof title !== 'string' || title.length > MAX_TITLE_LENGTH) {
-      res.status(400).json({
-        success: false,
-        error: `Title must be a string with maximum ${MAX_TITLE_LENGTH} characters`,
-      });
+      sendError(res, `Title must be a string with maximum ${MAX_TITLE_LENGTH} characters`, 400);
       return;
     }
 
     if (typeof content !== 'string' || content.length > MAX_CONTENT_LENGTH) {
-      res.status(400).json({
-        success: false,
-        error: `Content must be a string with maximum ${MAX_CONTENT_LENGTH} characters`,
-      });
+      sendError(res, `Content must be a string with maximum ${MAX_CONTENT_LENGTH} characters`, 400);
       return;
     }
 
     // Validate type
     const validTypes = ['maintenance', 'feature', 'alert', 'general'];
     if (type && !validTypes.includes(type)) {
-      res.status(400).json({ success: false, error: 'Invalid announcement type' });
+      sendError(res, 'Invalid announcement type', 400);
       return;
     }
 
     // Validate priority
     const validPriorities = ['low', 'normal', 'high', 'critical'];
     if (priority && !validPriorities.includes(priority)) {
-      res.status(400).json({ success: false, error: 'Invalid priority' });
+      sendError(res, 'Invalid priority', 400);
       return;
     }
 
     // Validate status
     const validStatuses = ['draft', 'published', 'archived'];
     if (status && !validStatuses.includes(status)) {
-      res.status(400).json({ success: false, error: 'Invalid status' });
+      sendError(res, 'Invalid status', 400);
       return;
     }
 
@@ -300,13 +286,10 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
       status: announcement.status,
     });
 
-    res.json({
-      success: true,
-      data: { announcement },
-    });
+    sendSuccess(res, { announcement });
   } catch (error) {
     logger.error('Create announcement error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to create announcement' });
+    sendInternalError(res, 'Failed to create announcement');
   }
 });
 
@@ -325,7 +308,7 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Announcement not found' });
+      sendNotFound(res, 'Announcement not found');
       return;
     }
 
@@ -334,20 +317,14 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
 
     if (title !== undefined) {
       if (typeof title !== 'string' || title.length > MAX_TITLE_LENGTH) {
-        res.status(400).json({
-          success: false,
-          error: `Title must be a string with maximum ${MAX_TITLE_LENGTH} characters`,
-        });
+        sendError(res, `Title must be a string with maximum ${MAX_TITLE_LENGTH} characters`, 400);
         return;
       }
       updateData.title = title.trim();
     }
     if (content !== undefined) {
       if (typeof content !== 'string' || content.length > MAX_CONTENT_LENGTH) {
-        res.status(400).json({
-          success: false,
-          error: `Content must be a string with maximum ${MAX_CONTENT_LENGTH} characters`,
-        });
+        sendError(res, `Content must be a string with maximum ${MAX_CONTENT_LENGTH} characters`, 400);
         return;
       }
       updateData.content = content.trim();
@@ -355,7 +332,7 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
     if (type !== undefined) {
       const validTypes = ['maintenance', 'feature', 'alert', 'general'];
       if (!validTypes.includes(type)) {
-        res.status(400).json({ success: false, error: 'Invalid announcement type' });
+        sendError(res, 'Invalid announcement type', 400);
         return;
       }
       updateData.type = type;
@@ -363,7 +340,7 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
     if (priority !== undefined) {
       const validPriorities = ['low', 'normal', 'high', 'critical'];
       if (!validPriorities.includes(priority)) {
-        res.status(400).json({ success: false, error: 'Invalid priority' });
+        sendError(res, 'Invalid priority', 400);
         return;
       }
       updateData.priority = priority;
@@ -371,7 +348,7 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
     if (status !== undefined) {
       const validStatuses = ['draft', 'published', 'archived'];
       if (!validStatuses.includes(status)) {
-        res.status(400).json({ success: false, error: 'Invalid status' });
+        sendError(res, 'Invalid status', 400);
         return;
       }
       updateData.status = status;
@@ -393,13 +370,10 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
       component: 'Announcements',
     });
 
-    res.json({
-      success: true,
-      data: { announcement: updated },
-    });
+    sendSuccess(res, { announcement: updated });
   } catch (error) {
     logger.error('Update announcement error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to update announcement' });
+    sendInternalError(res, 'Failed to update announcement');
   }
 });
 
@@ -417,7 +391,7 @@ router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Announcement not found' });
+      sendNotFound(res, 'Announcement not found');
       return;
     }
 
@@ -430,13 +404,10 @@ router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
       component: 'Announcements',
     });
 
-    res.json({
-      success: true,
-      data: { message: 'Announcement deleted' },
-    });
+    sendSuccess(res, { message: 'Announcement deleted' });
   } catch (error) {
     logger.error('Delete announcement error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to delete announcement' });
+    sendInternalError(res, 'Failed to delete announcement');
   }
 });
 

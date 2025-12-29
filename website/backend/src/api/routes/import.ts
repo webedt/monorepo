@@ -6,7 +6,18 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { fetchFromUrl, validateUrl, WORKSPACE_DIR, db, chatSessions, eq, and } from '@webedt/shared';
+import {
+  fetchFromUrl,
+  validateUrl,
+  WORKSPACE_DIR,
+  db,
+  chatSessions,
+  eq,
+  and,
+  sendSuccess,
+  sendError,
+  sendInternalError,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -53,22 +64,16 @@ router.post('/validate', requireAuth, async (req: Request, res: Response) => {
     const { url } = req.body;
 
     if (!url || typeof url !== 'string') {
-      res.status(400).json({ success: false, error: 'URL is required' });
+      sendError(res, 'URL is required', 400);
       return;
     }
 
     const result = await validateUrl(url);
 
-    res.json({
-      success: true,
-      data: result,
-    });
+    sendSuccess(res, result);
   } catch (error) {
     console.error('URL validation error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Validation failed',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Validation failed');
   }
 });
 
@@ -82,33 +87,33 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
     const userId = authReq.user?.id;
 
     if (!userId) {
-      res.status(401).json({ success: false, error: 'Authentication required' });
+      sendError(res, 'Authentication required', 401);
       return;
     }
 
     const { url, sessionPath, targetPath } = req.body;
 
     if (!url || typeof url !== 'string') {
-      res.status(400).json({ success: false, error: 'URL is required' });
+      sendError(res, 'URL is required', 400);
       return;
     }
 
     if (!sessionPath || typeof sessionPath !== 'string') {
-      res.status(400).json({ success: false, error: 'Session path is required' });
+      sendError(res, 'Session path is required', 400);
       return;
     }
 
     // Validate session path format (owner__repo__branch)
     const sessionPathParts = sessionPath.split('__');
     if (sessionPathParts.length !== 3) {
-      res.status(400).json({ success: false, error: 'Invalid session path format' });
+      sendError(res, 'Invalid session path format', 400);
       return;
     }
 
     // Verify user has access to this session
     const hasAccess = await verifySessionAccess(userId, sessionPath);
     if (!hasAccess) {
-      res.status(403).json({ success: false, error: 'Access denied to this session' });
+      sendError(res, 'Access denied to this session', 403);
       return;
     }
 
@@ -116,10 +121,7 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
     const fetchResult = await fetchFromUrl({ url, skipValidation: true });
 
     if (!fetchResult.success || !fetchResult.content) {
-      res.status(400).json({
-        success: false,
-        error: fetchResult.error || 'Failed to fetch content from URL',
-      });
+      sendError(res, fetchResult.error || 'Failed to fetch content from URL', 400);
       return;
     }
 
@@ -131,7 +133,7 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
     const fullPath = safeResolvePath(workspaceDir, filePath);
 
     if (!fullPath) {
-      res.status(400).json({ success: false, error: 'Invalid file path' });
+      sendError(res, 'Invalid file path', 400);
       return;
     }
 
@@ -149,21 +151,15 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
       await fs.writeFile(fullPath, fetchResult.content, 'utf-8');
     }
 
-    res.json({
-      success: true,
-      data: {
-        filePath,
-        contentType: fetchResult.contentType,
-        size: fetchResult.size,
-        isBinary: fetchResult.isBinary,
-      },
+    sendSuccess(res, {
+      filePath,
+      contentType: fetchResult.contentType,
+      size: fetchResult.size,
+      isBinary: fetchResult.isBinary,
     });
   } catch (error) {
     console.error('URL import error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Import failed',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Import failed');
   }
 });
 

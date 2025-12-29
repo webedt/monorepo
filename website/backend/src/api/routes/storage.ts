@@ -4,7 +4,14 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { StorageService, STORAGE_TIERS } from '@webedt/shared';
+import {
+  StorageService,
+  STORAGE_TIERS,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -20,29 +27,26 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const stats = await StorageService.getStorageStats(authReq.user!.id);
 
-    res.json({
-      success: true,
-      data: {
-        usedBytes: stats.usedBytes.toString(),
-        quotaBytes: stats.quotaBytes.toString(),
-        availableBytes: stats.availableBytes.toString(),
-        usagePercent: stats.usagePercent,
-        usedFormatted: StorageService.formatBytes(stats.usedBytes),
-        quotaFormatted: StorageService.formatBytes(stats.quotaBytes),
-        availableFormatted: StorageService.formatBytes(stats.availableBytes),
-        breakdown: {
-          messages: stats.breakdown.messages.toString(),
-          events: stats.breakdown.events.toString(),
-          liveChatMessages: stats.breakdown.liveChatMessages.toString(),
-          workspaceEvents: stats.breakdown.workspaceEvents.toString(),
-          images: stats.breakdown.images.toString(),
-          total: stats.breakdown.total.toString(),
-        },
+    sendSuccess(res, {
+      usedBytes: stats.usedBytes.toString(),
+      quotaBytes: stats.quotaBytes.toString(),
+      availableBytes: stats.availableBytes.toString(),
+      usagePercent: stats.usagePercent,
+      usedFormatted: StorageService.formatBytes(stats.usedBytes),
+      quotaFormatted: StorageService.formatBytes(stats.quotaBytes),
+      availableFormatted: StorageService.formatBytes(stats.availableBytes),
+      breakdown: {
+        messages: stats.breakdown.messages.toString(),
+        events: stats.breakdown.events.toString(),
+        liveChatMessages: stats.breakdown.liveChatMessages.toString(),
+        workspaceEvents: stats.breakdown.workspaceEvents.toString(),
+        images: stats.breakdown.images.toString(),
+        total: stats.breakdown.total.toString(),
       },
     });
   } catch (error) {
     console.error('Get storage stats error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get storage statistics' });
+    sendInternalError(res, 'Failed to get storage statistics');
   }
 });
 
@@ -54,38 +58,35 @@ router.get('/breakdown', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const breakdown = await StorageService.getStorageBreakdown(authReq.user!.id);
 
-    res.json({
-      success: true,
-      data: {
-        messages: {
-          bytes: breakdown.messages.toString(),
-          formatted: StorageService.formatBytes(breakdown.messages),
-        },
-        events: {
-          bytes: breakdown.events.toString(),
-          formatted: StorageService.formatBytes(breakdown.events),
-        },
-        liveChatMessages: {
-          bytes: breakdown.liveChatMessages.toString(),
-          formatted: StorageService.formatBytes(breakdown.liveChatMessages),
-        },
-        workspaceEvents: {
-          bytes: breakdown.workspaceEvents.toString(),
-          formatted: StorageService.formatBytes(breakdown.workspaceEvents),
-        },
-        images: {
-          bytes: breakdown.images.toString(),
-          formatted: StorageService.formatBytes(breakdown.images),
-        },
-        total: {
-          bytes: breakdown.total.toString(),
-          formatted: StorageService.formatBytes(breakdown.total),
-        },
+    sendSuccess(res, {
+      messages: {
+        bytes: breakdown.messages.toString(),
+        formatted: StorageService.formatBytes(breakdown.messages),
+      },
+      events: {
+        bytes: breakdown.events.toString(),
+        formatted: StorageService.formatBytes(breakdown.events),
+      },
+      liveChatMessages: {
+        bytes: breakdown.liveChatMessages.toString(),
+        formatted: StorageService.formatBytes(breakdown.liveChatMessages),
+      },
+      workspaceEvents: {
+        bytes: breakdown.workspaceEvents.toString(),
+        formatted: StorageService.formatBytes(breakdown.workspaceEvents),
+      },
+      images: {
+        bytes: breakdown.images.toString(),
+        formatted: StorageService.formatBytes(breakdown.images),
+      },
+      total: {
+        bytes: breakdown.total.toString(),
+        formatted: StorageService.formatBytes(breakdown.total),
       },
     });
   } catch (error) {
     console.error('Get storage breakdown error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get storage breakdown' });
+    sendInternalError(res, 'Failed to get storage breakdown');
   }
 });
 
@@ -97,17 +98,14 @@ router.post('/recalculate', requireAuth, async (req: Request, res: Response) => 
     const authReq = req as AuthRequest;
     const newTotal = await StorageService.recalculateUsage(authReq.user!.id);
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Storage usage recalculated',
-        newTotalBytes: newTotal.toString(),
-        newTotalFormatted: StorageService.formatBytes(newTotal),
-      },
+    sendSuccess(res, {
+      message: 'Storage usage recalculated',
+      newTotalBytes: newTotal.toString(),
+      newTotalFormatted: StorageService.formatBytes(newTotal),
     });
   } catch (error) {
     console.error('Recalculate storage error:', error);
-    res.status(500).json({ success: false, error: 'Failed to recalculate storage usage' });
+    sendInternalError(res, 'Failed to recalculate storage usage');
   }
 });
 
@@ -120,32 +118,26 @@ router.post('/check', requireAuth, async (req: Request, res: Response) => {
     const { bytes } = req.body;
 
     if (typeof bytes !== 'number' || bytes < 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid bytes value. Must be a non-negative number.',
-      });
+      sendError(res, 'Invalid bytes value. Must be a non-negative number.', 400);
       return;
     }
 
     const check = await StorageService.checkQuota(authReq.user!.id, bytes);
 
-    res.json({
-      success: true,
-      data: {
-        allowed: check.allowed,
-        usedBytes: check.usedBytes.toString(),
-        quotaBytes: check.quotaBytes.toString(),
-        availableBytes: check.availableBytes.toString(),
-        requestedBytes: check.requestedBytes.toString(),
-        usedFormatted: StorageService.formatBytes(check.usedBytes),
-        quotaFormatted: StorageService.formatBytes(check.quotaBytes),
-        availableFormatted: StorageService.formatBytes(check.availableBytes),
-        requestedFormatted: StorageService.formatBytes(check.requestedBytes),
-      },
+    sendSuccess(res, {
+      allowed: check.allowed,
+      usedBytes: check.usedBytes.toString(),
+      quotaBytes: check.quotaBytes.toString(),
+      availableBytes: check.availableBytes.toString(),
+      requestedBytes: check.requestedBytes.toString(),
+      usedFormatted: StorageService.formatBytes(check.usedBytes),
+      quotaFormatted: StorageService.formatBytes(check.quotaBytes),
+      availableFormatted: StorageService.formatBytes(check.availableBytes),
+      requestedFormatted: StorageService.formatBytes(check.requestedBytes),
     });
   } catch (error) {
     console.error('Check storage quota error:', error);
-    res.status(500).json({ success: false, error: 'Failed to check storage quota' });
+    sendInternalError(res, 'Failed to check storage quota');
   }
 });
 
@@ -160,13 +152,10 @@ router.get('/tiers', requireAuth, async (_req: Request, res: Response) => {
       formatted: StorageService.formatBytes(bytes),
     }));
 
-    res.json({
-      success: true,
-      data: { tiers },
-    });
+    sendSuccess(res, { tiers });
   } catch (error) {
     console.error('Get storage tiers error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get storage tiers' });
+    sendInternalError(res, 'Failed to get storage tiers');
   }
 });
 
@@ -184,28 +173,25 @@ router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res
     // Validate target user exists
     const exists = await StorageService.userExists(userId);
     if (!exists) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
     const stats = await StorageService.getStorageStats(userId);
 
-    res.json({
-      success: true,
-      data: {
-        userId,
-        usedBytes: stats.usedBytes.toString(),
-        quotaBytes: stats.quotaBytes.toString(),
-        availableBytes: stats.availableBytes.toString(),
-        usagePercent: stats.usagePercent,
-        usedFormatted: StorageService.formatBytes(stats.usedBytes),
-        quotaFormatted: StorageService.formatBytes(stats.quotaBytes),
-        availableFormatted: StorageService.formatBytes(stats.availableBytes),
-      },
+    sendSuccess(res, {
+      userId,
+      usedBytes: stats.usedBytes.toString(),
+      quotaBytes: stats.quotaBytes.toString(),
+      availableBytes: stats.availableBytes.toString(),
+      usagePercent: stats.usagePercent,
+      usedFormatted: StorageService.formatBytes(stats.usedBytes),
+      quotaFormatted: StorageService.formatBytes(stats.quotaBytes),
+      availableFormatted: StorageService.formatBytes(stats.availableBytes),
     });
   } catch (error) {
     console.error('Admin get storage stats error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get user storage statistics' });
+    sendInternalError(res, 'Failed to get user storage statistics');
   }
 });
 
@@ -220,15 +206,12 @@ router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Reque
     // Validate target user exists
     const exists = await StorageService.userExists(userId);
     if (!exists) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
     if (!quotaBytes || typeof quotaBytes !== 'string') {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid quotaBytes. Must be a string representing bytes.',
-      });
+      sendError(res, 'Invalid quotaBytes. Must be a string representing bytes.', 400);
       return;
     }
 
@@ -236,24 +219,18 @@ router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Reque
       const quota = BigInt(quotaBytes);
       await StorageService.setQuota(userId, quota);
 
-      res.json({
-        success: true,
-        data: {
-          message: 'Storage quota updated',
-          userId,
-          newQuotaBytes: quota.toString(),
-          newQuotaFormatted: StorageService.formatBytes(quota),
-        },
+      sendSuccess(res, {
+        message: 'Storage quota updated',
+        userId,
+        newQuotaBytes: quota.toString(),
+        newQuotaFormatted: StorageService.formatBytes(quota),
       });
     } catch {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid quotaBytes value. Must be a valid number string.',
-      });
+      sendError(res, 'Invalid quotaBytes value. Must be a valid number string.', 400);
     }
   } catch (error) {
     console.error('Admin set storage quota error:', error);
-    res.status(500).json({ success: false, error: 'Failed to set user storage quota' });
+    sendInternalError(res, 'Failed to set user storage quota');
   }
 });
 
@@ -268,35 +245,29 @@ router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Reques
     // Validate target user exists
     const exists = await StorageService.userExists(userId);
     if (!exists) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
     const validTiers = Object.keys(STORAGE_TIERS);
     if (!tier || !validTiers.includes(tier)) {
-      res.status(400).json({
-        success: false,
-        error: `Invalid tier. Must be one of: ${validTiers.join(', ')}`,
-      });
+      sendError(res, `Invalid tier. Must be one of: ${validTiers.join(', ')}`, 400);
       return;
     }
 
     await StorageService.setTier(userId, tier as StorageTier);
     const quotaBytes = STORAGE_TIERS[tier as StorageTier];
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Storage tier updated',
-        userId,
-        tier,
-        newQuotaBytes: quotaBytes.toString(),
-        newQuotaFormatted: StorageService.formatBytes(quotaBytes),
-      },
+    sendSuccess(res, {
+      message: 'Storage tier updated',
+      userId,
+      tier,
+      newQuotaBytes: quotaBytes.toString(),
+      newQuotaFormatted: StorageService.formatBytes(quotaBytes),
     });
   } catch (error) {
     console.error('Admin set storage tier error:', error);
-    res.status(500).json({ success: false, error: 'Failed to set user storage tier' });
+    sendInternalError(res, 'Failed to set user storage tier');
   }
 });
 
@@ -310,24 +281,21 @@ router.post('/admin/:userId/recalculate', requireAuth, requireAdmin, async (req:
     // Validate target user exists
     const exists = await StorageService.userExists(userId);
     if (!exists) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
     const newTotal = await StorageService.recalculateUsage(userId);
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Storage usage recalculated',
-        userId,
-        newTotalBytes: newTotal.toString(),
-        newTotalFormatted: StorageService.formatBytes(newTotal),
-      },
+    sendSuccess(res, {
+      message: 'Storage usage recalculated',
+      userId,
+      newTotalBytes: newTotal.toString(),
+      newTotalFormatted: StorageService.formatBytes(newTotal),
     });
   } catch (error) {
     console.error('Admin recalculate storage error:', error);
-    res.status(500).json({ success: false, error: 'Failed to recalculate user storage usage' });
+    sendInternalError(res, 'Failed to recalculate user storage usage');
   }
 });
 

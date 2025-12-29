@@ -9,6 +9,12 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -24,13 +30,10 @@ router.get('/featured', async (req: Request, res: Response) => {
       .orderBy(desc(games.updatedAt))
       .limit(limit);
 
-    res.json({
-      success: true,
-      data: { games: featuredGames },
-    });
+    sendSuccess(res, { games: featuredGames });
   } catch (error) {
     logger.error('Get featured games error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch featured games' });
+    sendInternalError(res, 'Failed to fetch featured games');
   }
 });
 
@@ -63,13 +66,10 @@ router.get('/new', async (req: Request, res: Response) => {
       })
       .slice(0, limit);
 
-    res.json({
-      success: true,
-      data: { games: newGames },
-    });
+    sendSuccess(res, { games: newGames });
   } catch (error) {
     logger.error('Get new games error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch new games' });
+    sendInternalError(res, 'Failed to fetch new games');
   }
 });
 
@@ -117,17 +117,14 @@ router.get('/highlights', async (req: Request, res: Response) => {
       })
       .slice(0, newLimit);
 
-    res.json({
-      success: true,
-      data: {
-        featured: featuredGames,
-        new: newGames,
-        hasHighlights: featuredGames.length > 0 || newGames.length > 0,
-      },
+    sendSuccess(res, {
+      featured: featuredGames,
+      new: newGames,
+      hasHighlights: featuredGames.length > 0 || newGames.length > 0,
     });
   } catch (error) {
     logger.error('Get store highlights error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch store highlights' });
+    sendInternalError(res, 'Failed to fetch store highlights');
   }
 });
 
@@ -221,19 +218,16 @@ router.get('/browse', async (req: Request, res: Response) => {
     const total = allGames.length;
     const paginatedGames = allGames.slice(offset, offset + limit);
 
-    res.json({
-      success: true,
-      data: {
-        games: paginatedGames,
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      games: paginatedGames,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Browse games error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to browse games' });
+    sendInternalError(res, 'Failed to browse games');
   }
 });
 
@@ -249,23 +243,20 @@ router.get('/games/:id', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!game) {
-      res.status(404).json({ success: false, error: 'Game not found' });
+      sendNotFound(res, 'Game not found');
       return;
     }
 
     // Don't show unpublished games
     if (game.status !== 'published') {
-      res.status(404).json({ success: false, error: 'Game not found' });
+      sendNotFound(res, 'Game not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: { game },
-    });
+    sendSuccess(res, { game });
   } catch (error) {
     logger.error('Get game details error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch game details' });
+    sendInternalError(res, 'Failed to fetch game details');
   }
 });
 
@@ -281,13 +272,10 @@ router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) 
       .where(and(eq(userLibrary.userId, authReq.user!.id), eq(userLibrary.gameId, gameId)))
       .limit(1);
 
-    res.json({
-      success: true,
-      data: { owned: !!libraryItem },
-    });
+    sendSuccess(res, { owned: !!libraryItem });
   } catch (error) {
     logger.error('Check game ownership error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to check ownership' });
+    sendInternalError(res, 'Failed to check ownership');
   }
 });
 
@@ -311,13 +299,10 @@ router.get('/genres', async (req: Request, res: Response) => {
 
     const genres = Array.from(genreSet).sort();
 
-    res.json({
-      success: true,
-      data: { genres },
-    });
+    sendSuccess(res, { genres });
   } catch (error) {
     logger.error('Get genres error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch genres' });
+    sendInternalError(res, 'Failed to fetch genres');
   }
 });
 
@@ -341,13 +326,10 @@ router.get('/tags', async (req: Request, res: Response) => {
 
     const tags = Array.from(tagSet).sort();
 
-    res.json({
-      success: true,
-      data: { tags },
-    });
+    sendSuccess(res, { tags });
   } catch (error) {
     logger.error('Get tags error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch tags' });
+    sendInternalError(res, 'Failed to fetch tags');
   }
 });
 
@@ -365,7 +347,7 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
       .limit(1);
 
     if (!game) {
-      res.status(404).json({ success: false, error: 'Game not found' });
+      sendNotFound(res, 'Game not found');
       return;
     }
 
@@ -377,7 +359,7 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
       .limit(1);
 
     if (existing) {
-      res.status(400).json({ success: false, error: 'Game already in wishlist' });
+      sendError(res, 'Game already in wishlist', 400);
       return;
     }
 
@@ -389,7 +371,7 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
       .limit(1);
 
     if (owned) {
-      res.status(400).json({ success: false, error: 'Game already in library' });
+      sendError(res, 'Game already in library', 400);
       return;
     }
 
@@ -403,13 +385,10 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
       })
       .returning();
 
-    res.json({
-      success: true,
-      data: { wishlistItem },
-    });
+    sendSuccess(res, { wishlistItem });
   } catch (error) {
     logger.error('Add to wishlist error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to add to wishlist' });
+    sendInternalError(res, 'Failed to add to wishlist');
   }
 });
 
@@ -423,13 +402,10 @@ router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Respon
       .delete(wishlists)
       .where(and(eq(wishlists.userId, authReq.user!.id), eq(wishlists.gameId, gameId)));
 
-    res.json({
-      success: true,
-      data: { message: 'Removed from wishlist' },
-    });
+    sendSuccess(res, { message: 'Removed from wishlist' });
   } catch (error) {
     logger.error('Remove from wishlist error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to remove from wishlist' });
+    sendInternalError(res, 'Failed to remove from wishlist');
   }
 });
 
@@ -448,19 +424,16 @@ router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
       .where(eq(wishlists.userId, authReq.user!.id))
       .orderBy(desc(wishlists.addedAt));
 
-    res.json({
-      success: true,
-      data: {
-        items: wishlistItems.map((item) => ({
-          ...item.wishlistItem,
-          game: item.game,
-        })),
-        total: wishlistItems.length,
-      },
+    sendSuccess(res, {
+      items: wishlistItems.map((item) => ({
+        ...item.wishlistItem,
+        game: item.game,
+      })),
+      total: wishlistItems.length,
     });
   } catch (error) {
     logger.error('Get wishlist error', error as Error, { component: 'Store' });
-    res.status(500).json({ success: false, error: 'Failed to fetch wishlist' });
+    sendInternalError(res, 'Failed to fetch wishlist');
   }
 });
 

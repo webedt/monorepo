@@ -3,6 +3,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -22,11 +28,11 @@ router.put('/presence', async (req: Request, res: Response) => {
     const { owner, repo, branch, page, cursorX, cursorY, selection } = req.body;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, 'Unauthorized', 401);
     }
 
     if (!owner || !repo || !branch) {
-      return res.status(400).json({ error: 'Missing required fields: owner, repo, branch' });
+      return sendError(res, 'Missing required fields: owner, repo, branch', 400);
     }
 
     // Create composite ID for upsert
@@ -61,10 +67,10 @@ router.put('/presence', async (req: Request, res: Response) => {
         },
       });
 
-    res.json({ success: true });
+    sendSuccess(res, null);
   } catch (error) {
     logger.error('workspace', 'Failed to update presence', { error });
-    res.status(500).json({ error: 'Failed to update presence' });
+    sendInternalError(res, 'Failed to update presence');
   }
 });
 
@@ -78,7 +84,7 @@ router.get('/presence/:owner/:repo/:branch', async (req: Request, res: Response)
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, 'Unauthorized', 401);
     }
 
     const decodedBranch = decodeURIComponent(branch);
@@ -107,26 +113,23 @@ router.get('/presence/:owner/:repo/:branch', async (req: Request, res: Response)
         )
       );
 
-    res.json({
-      success: true,
-      data: {
-        users: activeUsers.map((u) => ({
-          userId: u.userId,
-          displayName: u.displayName || u.email?.split('@')[0] || 'Anonymous',
-          page: u.page,
-          cursorX: u.cursorX,
-          cursorY: u.cursorY,
-          selection: u.selection,
-          isCurrentUser: u.userId === userId,
-        })),
-        branch: decodedBranch,
-        owner,
-        repo,
-      },
+    sendSuccess(res, {
+      users: activeUsers.map((u) => ({
+        userId: u.userId,
+        displayName: u.displayName || u.email?.split('@')[0] || 'Anonymous',
+        page: u.page,
+        cursorX: u.cursorX,
+        cursorY: u.cursorY,
+        selection: u.selection,
+        isCurrentUser: u.userId === userId,
+      })),
+      branch: decodedBranch,
+      owner,
+      repo,
     });
   } catch (error) {
     logger.error('workspace', 'Failed to get presence', { error });
-    res.status(500).json({ error: 'Failed to get presence' });
+    sendInternalError(res, 'Failed to get presence');
   }
 });
 
@@ -140,7 +143,7 @@ router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Respon
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, 'Unauthorized', 401);
     }
 
     const decodedBranch = decodeURIComponent(branch);
@@ -148,10 +151,10 @@ router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Respon
 
     await db.delete(workspacePresence).where(eq(workspacePresence.id, id));
 
-    res.json({ success: true });
+    sendSuccess(res, null);
   } catch (error) {
     logger.error('workspace', 'Failed to delete presence', { error });
-    res.status(500).json({ error: 'Failed to delete presence' });
+    sendInternalError(res, 'Failed to delete presence');
   }
 });
 
@@ -165,11 +168,11 @@ router.post('/events', async (req: Request, res: Response) => {
     const { owner, repo, branch, eventType, page, path, payload } = req.body;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, 'Unauthorized', 401);
     }
 
     if (!owner || !repo || !branch || !eventType) {
-      return res.status(400).json({ error: 'Missing required fields: owner, repo, branch, eventType' });
+      return sendError(res, 'Missing required fields: owner, repo, branch, eventType', 400);
     }
 
     const event = {
@@ -187,13 +190,10 @@ router.post('/events', async (req: Request, res: Response) => {
 
     await db.insert(workspaceEvents).values(event);
 
-    res.json({
-      success: true,
-      data: event,
-    });
+    sendSuccess(res, event);
   } catch (error) {
     logger.error('workspace', 'Failed to log event', { error });
-    res.status(500).json({ error: 'Failed to log event' });
+    sendInternalError(res, 'Failed to log event');
   }
 });
 
@@ -209,7 +209,7 @@ router.get('/events/:owner/:repo/:branch', async (req: Request, res: Response) =
     const since = req.query.since ? new Date(req.query.since as string) : null;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, 'Unauthorized', 401);
     }
 
     const decodedBranch = decodeURIComponent(branch);
@@ -244,21 +244,18 @@ router.get('/events/:owner/:repo/:branch', async (req: Request, res: Response) =
     // Reverse for chronological order
     events.reverse();
 
-    res.json({
-      success: true,
-      data: {
-        events: events.map((e) => ({
-          ...e,
-          userName: e.displayName || e.email?.split('@')[0] || 'Anonymous',
-        })),
-        branch: decodedBranch,
-        owner,
-        repo,
-      },
+    sendSuccess(res, {
+      events: events.map((e) => ({
+        ...e,
+        userName: e.displayName || e.email?.split('@')[0] || 'Anonymous',
+      })),
+      branch: decodedBranch,
+      owner,
+      repo,
     });
   } catch (error) {
     logger.error('workspace', 'Failed to get events', { error });
-    res.status(500).json({ error: 'Failed to get events' });
+    sendInternalError(res, 'Failed to get events');
   }
 });
 
@@ -271,7 +268,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
   const userId = req.user?.id;
 
   if (!userId) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    return sendError(res, 'Unauthorized', 401);
   }
 
   const decodedBranch = decodeURIComponent(branch);

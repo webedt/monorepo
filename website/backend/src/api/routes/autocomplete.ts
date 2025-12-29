@@ -5,7 +5,12 @@
 
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { AutocompleteService } from '@webedt/shared';
+import {
+  AutocompleteService,
+  sendSuccess,
+  sendError,
+  sendInternalError,
+} from '@webedt/shared';
 
 import type { AutocompleteRequest } from '@webedt/shared';
 
@@ -38,26 +43,17 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     // Validate required fields
     if (typeof prefix !== 'string') {
-      res.status(400).json({
-        success: false,
-        error: 'prefix is required and must be a string',
-      });
+      sendError(res, 'prefix is required and must be a string', 400);
       return;
     }
 
     if (typeof suffix !== 'string') {
-      res.status(400).json({
-        success: false,
-        error: 'suffix is required and must be a string',
-      });
+      sendError(res, 'suffix is required and must be a string', 400);
       return;
     }
 
     if (typeof language !== 'string' || language.trim().length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'language is required',
-      });
+      sendError(res, 'language is required', 400);
       return;
     }
 
@@ -77,16 +73,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       additionalContext: additionalContext?.slice(0, 3),
     });
 
-    res.json({
-      success: true,
-      data: response,
-    });
+    sendSuccess(res, response);
   } catch (error) {
     console.error('[Autocomplete] Error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Internal server error',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Internal server error');
   }
 });
 
@@ -118,10 +108,7 @@ router.get('/languages', requireAuth, async (req: Request, res: Response) => {
     { id: 'xml', name: 'XML', extensions: ['.xml'] },
   ];
 
-  res.json({
-    success: true,
-    data: { languages },
-  });
+  sendSuccess(res, { languages });
 });
 
 export default router;

@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { db, games, users, chatSessions, communityPosts, eq, and, or, desc, sql, ilike } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
+import { logger, sendSuccess, sendInternalError } from '@webedt/shared';
 
 const router = Router();
 
@@ -239,14 +239,11 @@ router.get('/', async (req: Request, res: Response) => {
     const types = (req.query.types as string)?.split(',') || ['game', 'user', 'session', 'post'];
 
     if (!query || query.length < 2) {
-      res.json({
-        success: true,
-        data: {
-          items: [],
-          total: 0,
-          query,
-        } as SearchResponse,
-      });
+      sendSuccess(res, {
+        items: [],
+        total: 0,
+        query,
+      } as SearchResponse);
       return;
     }
 
@@ -295,17 +292,14 @@ router.get('/', async (req: Request, res: Response) => {
     // Limit results
     const limitedResults = results.slice(0, limit);
 
-    res.json({
-      success: true,
-      data: {
-        items: limitedResults,
-        total: results.length,
-        query,
-      } as SearchResponse,
-    });
+    sendSuccess(res, {
+      items: limitedResults,
+      total: results.length,
+      query,
+    } as SearchResponse);
   } catch (error) {
     logger.error('Universal search error', error as Error, { component: 'Search' });
-    res.status(500).json({ success: false, error: 'Search failed' });
+    sendInternalError(res, 'Search failed');
   }
 });
 
@@ -318,11 +312,8 @@ router.get('/suggestions', async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 5, 10);
 
     if (!query || query.length < 1) {
-      res.json({
-        success: true,
-        data: {
-          suggestions: [],
-        },
+      sendSuccess(res, {
+        suggestions: [],
       });
       return;
     }
@@ -343,15 +334,12 @@ router.get('/suggestions', async (req: Request, res: Response) => {
 
     const suggestions = matchedGames.map(g => g.title);
 
-    res.json({
-      success: true,
-      data: {
-        suggestions,
-      },
+    sendSuccess(res, {
+      suggestions,
     });
   } catch (error) {
     logger.error('Search suggestions error', error as Error, { component: 'Search' });
-    res.status(500).json({ success: false, error: 'Failed to get suggestions' });
+    sendInternalError(res, 'Failed to get suggestions');
   }
 });
 

@@ -15,6 +15,11 @@ import {
   and,
   desc,
   asc,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -71,26 +76,23 @@ router.get('/posts', async (req: Request, res: Response) => {
 
     const total = allPosts.length;
 
-    res.json({
-      success: true,
-      data: {
-        posts: posts.map((p) => ({
-          ...p.post,
-          author: {
-            id: p.author.id,
-            displayName: p.author.displayName || p.author.email?.split('@')[0],
-          },
-          game: p.game,
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      posts: posts.map((p) => ({
+        ...p.post,
+        author: {
+          id: p.author.id,
+          displayName: p.author.displayName || p.author.email?.split('@')[0],
+        },
+        game: p.game,
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get community posts error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to fetch posts' });
+    sendInternalError(res, 'Failed to fetch posts');
   }
 });
 
@@ -116,7 +118,7 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!post || post.post.status !== 'published') {
-      res.status(404).json({ success: false, error: 'Post not found' });
+      sendNotFound(res, 'Post not found');
       return;
     }
 
@@ -140,27 +142,24 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
       )
       .orderBy(asc(communityComments.createdAt));
 
-    res.json({
-      success: true,
-      data: {
-        ...post.post,
-        author: {
-          id: post.author.id,
-          displayName: post.author.displayName || post.author.email?.split('@')[0],
-        },
-        game: post.game,
-        comments: comments.map((c) => ({
-          ...c.comment,
-          author: {
-            id: c.author.id,
-            displayName: c.author.displayName || c.author.email?.split('@')[0],
-          },
-        })),
+    sendSuccess(res, {
+      ...post.post,
+      author: {
+        id: post.author.id,
+        displayName: post.author.displayName || post.author.email?.split('@')[0],
       },
+      game: post.game,
+      comments: comments.map((c) => ({
+        ...c.comment,
+        author: {
+          id: c.author.id,
+          displayName: c.author.displayName || c.author.email?.split('@')[0],
+        },
+      })),
     });
   } catch (error) {
     logger.error('Get post error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to fetch post' });
+    sendInternalError(res, 'Failed to fetch post');
   }
 });
 
@@ -172,27 +171,21 @@ router.post('/posts', requireAuth, async (req: Request, res: Response) => {
 
     // Validate required fields
     if (!type || !title || !content) {
-      res.status(400).json({
-        success: false,
-        error: 'Type, title, and content are required',
-      });
+      sendError(res, 'Type, title, and content are required', 400);
       return;
     }
 
     // Validate type
     const validTypes = ['discussion', 'review', 'guide', 'artwork', 'announcement'];
     if (!validTypes.includes(type)) {
-      res.status(400).json({ success: false, error: 'Invalid post type' });
+      sendError(res, 'Invalid post type', 400);
       return;
     }
 
     // Validate rating for reviews
     if (type === 'review') {
       if (!rating || rating < 1 || rating > 5) {
-        res.status(400).json({
-          success: false,
-          error: 'Reviews require a rating between 1 and 5',
-        });
+        sendError(res, 'Reviews require a rating between 1 and 5', 400);
         return;
       }
     }
@@ -206,7 +199,7 @@ router.post('/posts', requireAuth, async (req: Request, res: Response) => {
         .limit(1);
 
       if (!game) {
-        res.status(404).json({ success: false, error: 'Game not found' });
+        sendNotFound(res, 'Game not found');
         return;
       }
     }
@@ -258,13 +251,10 @@ router.post('/posts', requireAuth, async (req: Request, res: Response) => {
       gameId,
     });
 
-    res.json({
-      success: true,
-      data: { post },
-    });
+    sendSuccess(res, { post });
   } catch (error) {
     logger.error('Create post error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to create post' });
+    sendInternalError(res, 'Failed to create post');
   }
 });
 
@@ -283,13 +273,13 @@ router.patch('/posts/:id', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!post) {
-      res.status(404).json({ success: false, error: 'Post not found' });
+      sendNotFound(res, 'Post not found');
       return;
     }
 
     // Check ownership
     if (post.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+      sendForbidden(res, 'Access denied');
       return;
     }
 
@@ -305,13 +295,10 @@ router.patch('/posts/:id', requireAuth, async (req: Request, res: Response) => {
       .where(eq(communityPosts.id, postId))
       .returning();
 
-    res.json({
-      success: true,
-      data: { post: updated },
-    });
+    sendSuccess(res, { post: updated });
   } catch (error) {
     logger.error('Update post error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to update post' });
+    sendInternalError(res, 'Failed to update post');
   }
 });
 
@@ -329,13 +316,13 @@ router.delete('/posts/:id', requireAuth, async (req: Request, res: Response) => 
       .limit(1);
 
     if (!post) {
-      res.status(404).json({ success: false, error: 'Post not found' });
+      sendNotFound(res, 'Post not found');
       return;
     }
 
     // Check ownership (or admin)
     if (post.userId !== authReq.user!.id && !authReq.user!.isAdmin) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+      sendForbidden(res, 'Access denied');
       return;
     }
 
@@ -345,13 +332,10 @@ router.delete('/posts/:id', requireAuth, async (req: Request, res: Response) => 
       .set({ status: 'removed' })
       .where(eq(communityPosts.id, postId));
 
-    res.json({
-      success: true,
-      data: { message: 'Post deleted' },
-    });
+    sendSuccess(res, { message: 'Post deleted' });
   } catch (error) {
     logger.error('Delete post error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to delete post' });
+    sendInternalError(res, 'Failed to delete post');
   }
 });
 
@@ -363,7 +347,7 @@ router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Respon
     const { content, parentId } = req.body;
 
     if (!content) {
-      res.status(400).json({ success: false, error: 'Content is required' });
+      sendError(res, 'Content is required', 400);
       return;
     }
 
@@ -375,12 +359,12 @@ router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Respon
       .limit(1);
 
     if (!post || post.status !== 'published') {
-      res.status(404).json({ success: false, error: 'Post not found' });
+      sendNotFound(res, 'Post not found');
       return;
     }
 
     if (post.locked) {
-      res.status(400).json({ success: false, error: 'Post is locked' });
+      sendError(res, 'Post is locked', 400);
       return;
     }
 
@@ -398,7 +382,7 @@ router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Respon
         .limit(1);
 
       if (!parent) {
-        res.status(404).json({ success: false, error: 'Parent comment not found' });
+        sendNotFound(res, 'Parent comment not found');
         return;
       }
     }
@@ -422,13 +406,10 @@ router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Respon
       .set({ commentCount: post.commentCount + 1 })
       .where(eq(communityPosts.id, postId));
 
-    res.json({
-      success: true,
-      data: { comment },
-    });
+    sendSuccess(res, { comment });
   } catch (error) {
     logger.error('Add comment error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to add comment' });
+    sendInternalError(res, 'Failed to add comment');
   }
 });
 
@@ -446,13 +427,13 @@ router.delete('/comments/:id', requireAuth, async (req: Request, res: Response) 
       .limit(1);
 
     if (!comment) {
-      res.status(404).json({ success: false, error: 'Comment not found' });
+      sendNotFound(res, 'Comment not found');
       return;
     }
 
     // Check ownership (or admin)
     if (comment.userId !== authReq.user!.id && !authReq.user!.isAdmin) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+      sendForbidden(res, 'Access denied');
       return;
     }
 
@@ -476,13 +457,10 @@ router.delete('/comments/:id', requireAuth, async (req: Request, res: Response) 
         .where(eq(communityPosts.id, comment.postId));
     }
 
-    res.json({
-      success: true,
-      data: { message: 'Comment deleted' },
-    });
+    sendSuccess(res, { message: 'Comment deleted' });
   } catch (error) {
     logger.error('Delete comment error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to delete comment' });
+    sendInternalError(res, 'Failed to delete comment');
   }
 });
 
@@ -494,7 +472,7 @@ router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) 
     const { vote } = req.body; // 1 for upvote, -1 for downvote, 0 to remove
 
     if (![1, -1, 0].includes(vote)) {
-      res.status(400).json({ success: false, error: 'Invalid vote value' });
+      sendError(res, 'Invalid vote value', 400);
       return;
     }
 
@@ -506,7 +484,7 @@ router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) 
       .limit(1);
 
     if (!post || post.status !== 'published') {
-      res.status(404).json({ success: false, error: 'Post not found' });
+      sendNotFound(res, 'Post not found');
       return;
     }
 
@@ -571,17 +549,14 @@ router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) 
         .where(eq(communityPosts.id, postId));
     }
 
-    res.json({
-      success: true,
-      data: {
-        upvotes: post.upvotes + upvoteChange,
-        downvotes: post.downvotes + downvoteChange,
-        userVote: vote,
-      },
+    sendSuccess(res, {
+      upvotes: post.upvotes + upvoteChange,
+      downvotes: post.downvotes + downvoteChange,
+      userVote: vote,
     });
   } catch (error) {
     logger.error('Vote error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to vote' });
+    sendInternalError(res, 'Failed to vote');
   }
 });
 
@@ -593,7 +568,7 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
     const { vote } = req.body;
 
     if (![1, -1, 0].includes(vote)) {
-      res.status(400).json({ success: false, error: 'Invalid vote value' });
+      sendError(res, 'Invalid vote value', 400);
       return;
     }
 
@@ -605,7 +580,7 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
       .limit(1);
 
     if (!comment || comment.status !== 'published') {
-      res.status(404).json({ success: false, error: 'Comment not found' });
+      sendNotFound(res, 'Comment not found');
       return;
     }
 
@@ -666,17 +641,14 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
         .where(eq(communityComments.id, commentId));
     }
 
-    res.json({
-      success: true,
-      data: {
-        upvotes: comment.upvotes + upvoteChange,
-        downvotes: comment.downvotes + downvoteChange,
-        userVote: vote,
-      },
+    sendSuccess(res, {
+      upvotes: comment.upvotes + upvoteChange,
+      downvotes: comment.downvotes + downvoteChange,
+      userVote: vote,
     });
   } catch (error) {
     logger.error('Comment vote error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to vote' });
+    sendInternalError(res, 'Failed to vote');
   }
 });
 
@@ -704,18 +676,15 @@ router.get('/users/:userId/posts', async (req: Request, res: Response) => {
       .limit(limit)
       .offset(offset);
 
-    res.json({
-      success: true,
-      data: {
-        posts: posts.map((p) => ({
-          ...p.post,
-          game: p.game,
-        })),
-      },
+    sendSuccess(res, {
+      posts: posts.map((p) => ({
+        ...p.post,
+        game: p.game,
+      })),
     });
   } catch (error) {
     logger.error('Get user posts error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to fetch user posts' });
+    sendInternalError(res, 'Failed to fetch user posts');
   }
 });
 
@@ -748,21 +717,18 @@ router.get('/games/:gameId/reviews', async (req: Request, res: Response) => {
       .limit(limit)
       .offset(offset);
 
-    res.json({
-      success: true,
-      data: {
-        reviews: reviews.map((r) => ({
-          ...r.post,
-          author: {
-            id: r.author.id,
-            displayName: r.author.displayName || r.author.email?.split('@')[0],
-          },
-        })),
-      },
+    sendSuccess(res, {
+      reviews: reviews.map((r) => ({
+        ...r.post,
+        author: {
+          id: r.author.id,
+          displayName: r.author.displayName || r.author.email?.split('@')[0],
+        },
+      })),
     });
   } catch (error) {
     logger.error('Get game reviews error', error as Error, { component: 'Community' });
-    res.status(500).json({ success: false, error: 'Failed to fetch reviews' });
+    sendInternalError(res, 'Failed to fetch reviews');
   }
 });
 

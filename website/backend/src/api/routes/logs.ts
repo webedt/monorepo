@@ -6,7 +6,12 @@
  */
 
 import { Router } from 'express';
-import { logCapture, logger } from '@webedt/shared';
+import {
+  logCapture,
+  logger,
+  sendSuccess,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -39,19 +44,13 @@ router.get('/logs', (req, res) => {
 
     const status = logCapture.getStatus();
 
-    res.json({
-      success: true,
-      data: {
-        ...result,
-        status,
-      },
+    sendSuccess(res, {
+      ...result,
+      status,
     });
   } catch (error) {
     logger.error('Error fetching logs:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to fetch logs',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to fetch logs');
   }
 });
 
@@ -64,18 +63,12 @@ router.delete('/logs', (req, res) => {
     logCapture.clear();
     logger.info('Logs cleared via API');
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Logs cleared successfully',
-      },
+    sendSuccess(res, {
+      message: 'Logs cleared successfully',
     });
   } catch (error) {
     logger.error('Error clearing logs:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to clear logs',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to clear logs');
   }
 });
 
@@ -87,15 +80,9 @@ router.get('/logs/status', (req, res) => {
   try {
     const status = logCapture.getStatus();
 
-    res.json({
-      success: true,
-      data: status,
-    });
+    sendSuccess(res, status);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get log status',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to get log status');
   }
 });
 

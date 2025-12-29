@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, sendSuccess, sendError, sendInternalError } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -234,10 +234,7 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
     const { prompt, imageData, selection, provider: requestedProvider, model: requestedModel } = req.body as ImageGenerationRequest;
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Prompt is required',
-      });
+      sendError(res, 'Prompt is required', 400);
       return;
     }
 
@@ -250,7 +247,7 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
 
     const user = userResult[0];
     if (!user) {
-      res.status(401).json({ success: false, error: 'User not found' });
+      sendError(res, 'User not found', 401);
       return;
     }
 
@@ -263,19 +260,13 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
     const apiKey = apiKeys?.[provider];
 
     if (!apiKey) {
-      res.status(400).json({
-        success: false,
-        error: `No API key configured for ${provider}. Please add your API key in Settings.`,
-      });
+      sendError(res, `No API key configured for ${provider}. Please add your API key in Settings.`, 400);
       return;
     }
 
     // Validate model
     if (!AVAILABLE_MODELS[model as keyof typeof AVAILABLE_MODELS]) {
-      res.status(400).json({
-        success: false,
-        error: `Invalid model: ${model}`,
-      });
+      sendError(res, `Invalid model: ${model}`, 400);
       return;
     }
 
@@ -292,44 +283,32 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
     }
 
     if (result.success && result.imageData) {
-      res.json({
-        success: true,
-        data: {
-          imageData: result.imageData,
-          provider,
-          model,
-        },
+      sendSuccess(res, {
+        imageData: result.imageData,
+        provider,
+        model,
       });
     } else {
-      res.status(500).json({
-        success: false,
-        error: result.error || 'Image generation failed',
-      });
+      sendInternalError(res, result.error || 'Image generation failed');
     }
   } catch (error) {
     console.error('[ImageGen] Unexpected error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Internal server error',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Internal server error');
   }
 });
 
 // Get available models and providers
 router.get('/models', requireAuth, async (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    data: {
-      models: Object.entries(AVAILABLE_MODELS).map(([id, info]) => ({
-        id,
-        ...info,
-      })),
-      providers: [
-        { id: 'openrouter', name: 'OpenRouter', description: 'Access multiple AI models through OpenRouter' },
-        { id: 'cometapi', name: 'CometAPI', description: 'Alternative API provider' },
-        { id: 'google', name: 'Google AI', description: 'Direct access to Google Gemini models' },
-      ],
-    },
+  sendSuccess(res, {
+    models: Object.entries(AVAILABLE_MODELS).map(([id, info]) => ({
+      id,
+      ...info,
+    })),
+    providers: [
+      { id: 'openrouter', name: 'OpenRouter', description: 'Access multiple AI models through OpenRouter' },
+      { id: 'cometapi', name: 'CometAPI', description: 'Alternative API provider' },
+      { id: 'google', name: 'Google AI', description: 'Direct access to Google Gemini models' },
+    ],
   });
 });
 

@@ -8,6 +8,13 @@ import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPay
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
+} from '@webedt/shared';
 
 import type { PaymentProvider } from '@webedt/shared';
 
@@ -22,17 +29,14 @@ router.get('/providers', (req: Request, res: Response) => {
     const paymentService = getPaymentService();
     const providers = paymentService.getAvailableProviders();
 
-    res.json({
-      success: true,
-      data: {
-        providers,
-        stripe: paymentService.isProviderAvailable('stripe'),
-        paypal: paymentService.isProviderAvailable('paypal'),
-      },
+    sendSuccess(res, {
+      providers,
+      stripe: paymentService.isProviderAvailable('stripe'),
+      paypal: paymentService.isProviderAvailable('paypal'),
     });
   } catch (error) {
     logger.error('Get providers error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Failed to get providers' });
+    sendInternalError(res, 'Failed to get providers');
   }
 });
 
@@ -46,18 +50,14 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
     const { gameId, provider = 'stripe' } = req.body;
 
     if (!gameId) {
-      res.status(400).json({ success: false, error: 'Game ID is required' });
+      sendError(res, 'Game ID is required', 400);
       return;
     }
 
     // Validate provider
     const validProviders: PaymentProvider[] = ['stripe', 'paypal'];
     if (!validProviders.includes(provider)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid payment provider',
-        validProviders,
-      });
+      sendError(res, 'Invalid payment provider', 400);
       return;
     }
 
@@ -69,15 +69,12 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!game) {
-      res.status(404).json({ success: false, error: 'Game not found' });
+      sendNotFound(res, 'Game not found');
       return;
     }
 
     if (game.price === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'This game is free. Use the purchase endpoint instead.',
-      });
+      sendError(res, 'This game is free. Use the purchase endpoint instead.', 400);
       return;
     }
 
@@ -94,21 +91,14 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (existingOwnership) {
-      res.status(400).json({
-        success: false,
-        error: 'You already own this game',
-      });
+      sendError(res, 'You already own this game', 400);
       return;
     }
 
     const paymentService = getPaymentService();
 
     if (!paymentService.isProviderAvailable(provider)) {
-      res.status(400).json({
-        success: false,
-        error: `Payment provider ${provider} is not available`,
-        availableProviders: paymentService.getAvailableProviders(),
-      });
+      sendError(res, `Payment provider ${provider} is not available`, 400);
       return;
     }
 
@@ -140,17 +130,14 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
       sessionId: session.id,
     });
 
-    res.json({
-      success: true,
-      data: {
-        sessionId: session.id,
-        url: session.url,
-        provider: session.provider,
-      },
+    sendSuccess(res, {
+      sessionId: session.id,
+      url: session.url,
+      provider: session.provider,
     });
   } catch (error) {
     logger.error('Create checkout error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Failed to create checkout session' });
+    sendInternalError(res, 'Failed to create checkout session');
   }
 });
 
@@ -176,26 +163,23 @@ router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Respon
       .limit(1);
 
     if (!transaction) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        id: transaction.id,
-        status: transaction.status,
-        amount: transaction.amount,
-        currency: transaction.currency,
-        provider: transaction.provider,
-        purchaseId: transaction.purchaseId,
-        createdAt: transaction.createdAt,
-        completedAt: transaction.completedAt,
-      },
+    sendSuccess(res, {
+      id: transaction.id,
+      status: transaction.status,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      provider: transaction.provider,
+      purchaseId: transaction.purchaseId,
+      createdAt: transaction.createdAt,
+      completedAt: transaction.completedAt,
     });
   } catch (error) {
     logger.error('Get checkout status error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Failed to get checkout status' });
+    sendInternalError(res, 'Failed to get checkout status');
   }
 });
 
@@ -209,7 +193,7 @@ router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) 
     const { orderId } = req.body;
 
     if (!orderId) {
-      res.status(400).json({ success: false, error: 'Order ID is required' });
+      sendError(res, 'Order ID is required', 400);
       return;
     }
 
@@ -227,7 +211,7 @@ router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) 
       .limit(1);
 
     if (!transaction) {
-      res.status(404).json({ success: false, error: 'Order not found' });
+      sendNotFound(res, 'Order not found');
       return;
     }
 
@@ -235,7 +219,7 @@ router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) 
     const result = await paymentService.capturePayPalOrder(orderId);
 
     if (!result.success) {
-      res.status(400).json({ success: false, error: result.error });
+      sendError(res, result.error || 'PayPal capture failed', 400);
       return;
     }
 
@@ -246,16 +230,13 @@ router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) 
       purchaseId: result.purchaseId,
     });
 
-    res.json({
-      success: true,
-      data: {
-        transactionId: result.transactionId,
-        purchaseId: result.purchaseId,
-      },
+    sendSuccess(res, {
+      transactionId: result.transactionId,
+      purchaseId: result.purchaseId,
     });
   } catch (error) {
     logger.error('PayPal capture error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Failed to capture PayPal order' });
+    sendInternalError(res, 'Failed to capture PayPal order');
   }
 });
 
@@ -270,7 +251,7 @@ router.post(
     try {
       const signature = req.headers['stripe-signature'] as string;
       if (!signature) {
-        res.status(400).json({ success: false, error: 'Missing signature' });
+        sendError(res, 'Missing signature', 400);
         return;
       }
 
@@ -281,7 +262,7 @@ router.post(
         logger.warn('Stripe webhook missing raw body - configure express.raw() middleware', {
           component: 'Payments',
         });
-        res.status(400).json({ success: false, error: 'Missing raw body for signature verification' });
+        sendError(res, 'Missing raw body for signature verification', 400);
         return;
       }
 
@@ -293,7 +274,7 @@ router.post(
           component: 'Payments',
           error: result.error,
         });
-        res.status(400).json({ success: false, error: result.error });
+        sendError(res, result.error || 'Stripe webhook processing failed', 400);
         return;
       }
 
@@ -303,10 +284,10 @@ router.post(
         purchaseId: result.purchaseId,
       });
 
-      res.json({ success: true, received: true });
+      sendSuccess(res, { received: true });
     } catch (error) {
       logger.error('Stripe webhook error', error as Error, { component: 'Payments' });
-      res.status(500).json({ success: false, error: 'Webhook processing failed' });
+      sendInternalError(res, 'Webhook processing failed');
     }
   }
 );
@@ -325,7 +306,7 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
     const certUrl = req.headers['paypal-cert-url'] as string;
 
     if (!transmissionId || !timestamp || !transmissionSig) {
-      res.status(400).json({ success: false, error: 'Missing PayPal headers' });
+      sendError(res, 'Missing PayPal headers', 400);
       return;
     }
 
@@ -344,7 +325,7 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
         component: 'Payments',
         error: result.error,
       });
-      res.status(400).json({ success: false, error: result.error });
+      sendError(res, result.error || 'PayPal webhook processing failed', 400);
       return;
     }
 
@@ -354,10 +335,10 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
       purchaseId: result.purchaseId,
     });
 
-    res.json({ success: true, received: true });
+    sendSuccess(res, { received: true });
   } catch (error) {
     logger.error('PayPal webhook error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Webhook processing failed' });
+    sendInternalError(res, 'Webhook processing failed');
   }
 });
 
@@ -387,19 +368,16 @@ router.get('/transactions', requireAuth, async (req: Request, res: Response) => 
 
     const total = Number(countResult?.count ?? 0);
 
-    res.json({
-      success: true,
-      data: {
-        transactions,
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      transactions,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get transactions error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Failed to get transactions' });
+    sendInternalError(res, 'Failed to get transactions');
   }
 });
 
@@ -414,10 +392,7 @@ router.post('/transactions/:transactionId/refund', requireAuth, async (req: Requ
     const { reason } = req.body;
 
     if (!reason || reason.trim().length < 10) {
-      res.status(400).json({
-        success: false,
-        error: 'Refund reason is required (minimum 10 characters)',
-      });
+      sendError(res, 'Refund reason is required (minimum 10 characters)', 400);
       return;
     }
 
@@ -434,12 +409,12 @@ router.post('/transactions/:transactionId/refund', requireAuth, async (req: Requ
       .limit(1);
 
     if (!transaction) {
-      res.status(404).json({ success: false, error: 'Transaction not found' });
+      sendNotFound(res, 'Transaction not found');
       return;
     }
 
     if (transaction.status !== 'succeeded') {
-      res.status(400).json({ success: false, error: 'Transaction not eligible for refund' });
+      sendError(res, 'Transaction not eligible for refund', 400);
       return;
     }
 
@@ -449,10 +424,7 @@ router.post('/transactions/:transactionId/refund', requireAuth, async (req: Requ
     );
 
     if (daysSincePayment > 14) {
-      res.status(400).json({
-        success: false,
-        error: 'Refund period expired (14 days)',
-      });
+      sendError(res, 'Refund period expired (14 days)', 400);
       return;
     }
 
@@ -476,15 +448,12 @@ router.post('/transactions/:transactionId/refund', requireAuth, async (req: Requ
       userId: authReq.user!.id,
     });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Refund request submitted. An administrator will review your request.',
-      },
+    sendSuccess(res, {
+      message: 'Refund request submitted. An administrator will review your request.',
     });
   } catch (error) {
     logger.error('Request refund error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Failed to request refund' });
+    sendInternalError(res, 'Failed to request refund');
   }
 });
 
@@ -499,16 +468,13 @@ router.get('/health', async (req: Request, res: Response) => {
 
     const allHealthy = healthStatus.every((s) => s.healthy);
 
-    res.json({
-      success: true,
-      data: {
-        healthy: allHealthy,
-        providers: healthStatus,
-      },
+    sendSuccess(res, {
+      healthy: allHealthy,
+      providers: healthStatus,
     });
   } catch (error) {
     logger.error('Payment health check error', error as Error, { component: 'Payments' });
-    res.status(500).json({ success: false, error: 'Health check failed' });
+    sendInternalError(res, 'Health check failed');
   }
 });
 

@@ -12,6 +12,14 @@ import { logger, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
 import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
+  sendConflict,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -261,7 +269,7 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -283,10 +291,10 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
       default_branch: repo.default_branch,
     }));
 
-    res.json({ success: true, data: formattedRepos });
+    sendSuccess(res, formattedRepos);
   } catch (error) {
     logger.error('GitHub repos error', error as Error, { component: 'GitHub' });
-    res.status(500).json({ success: false, error: 'Failed to fetch repositories' });
+    sendInternalError(res, 'Failed to fetch repositories');
   }
 });
 
@@ -338,7 +346,7 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
     const { owner, repo } = req.params;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -358,10 +366,10 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
       },
     }));
 
-    res.json({ success: true, data: formattedBranches });
+    sendSuccess(res, formattedBranches);
   } catch (error) {
     logger.error('GitHub branches error', error as Error, { component: 'GitHub' });
-    res.status(500).json({ success: false, error: 'Failed to fetch branches' });
+    sendInternalError(res, 'Failed to fetch branches');
   }
 });
 
@@ -437,12 +445,12 @@ router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, re
     const { branchName, baseBranch } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branchName) {
-      res.status(400).json({ success: false, error: 'Branch name is required' });
+      sendError(res, 'Branch name is required', 400);
       return;
     }
 
@@ -464,24 +472,21 @@ router.post('/repos/:owner/:repo/branches', requireAuth, async (req: Request, re
 
     logger.info(`Created branch ${branchName} from ${base} in ${owner}/${repo}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        branchName,
-        baseBranch: base,
-        sha: baseBranchData.commit.sha,
-      },
+    sendSuccess(res, {
+      branchName,
+      baseBranch: base,
+      sha: baseBranchData.commit.sha,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub create branch error', error as Error, { component: 'GitHub' });
 
     if (err.status === 422) {
-      res.status(422).json({ success: false, error: 'Branch already exists' });
+      sendError(res, 'Branch already exists', 422);
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to create branch' });
+    sendInternalError(res, 'Failed to create branch');
   }
 });
 
@@ -494,7 +499,7 @@ router.get('/repos/:owner/:repo/tree/*', requireAuth, async (req: Request, res: 
     const { recursive } = req.query;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -516,29 +521,26 @@ router.get('/repos/:owner/:repo/tree/*', requireAuth, async (req: Request, res: 
 
     logger.info(`Fetched tree for ${owner}/${repo}/${branch} (${tree.tree.length} items)`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        sha: tree.sha,
-        tree: tree.tree.map((item) => ({
-          path: item.path,
-          type: item.type,
-          sha: item.sha,
-          size: item.size,
-        })),
-        truncated: tree.truncated,
-      },
+    sendSuccess(res, {
+      sha: tree.sha,
+      tree: tree.tree.map((item) => ({
+        path: item.path,
+        type: item.type,
+        sha: item.sha,
+        size: item.size,
+      })),
+      truncated: tree.truncated,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub get tree error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Branch or repository not found' });
+      sendNotFound(res, 'Branch or repository not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to fetch file tree' });
+    sendInternalError(res, 'Failed to fetch file tree');
   }
 });
 
@@ -551,7 +553,7 @@ router.get('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request, r
     const { ref } = req.query;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -572,64 +574,55 @@ router.get('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request, r
       if (isBinary && data.encoding === 'base64' && data.content) {
         const cleanContent = data.content.replace(/\s/g, '');
 
-        res.json({
-          success: true,
-          data: {
-            name: data.name,
-            path: data.path,
-            sha: data.sha,
-            size: data.size,
-            type: data.type,
-            content: cleanContent,
-            encoding: 'base64',
-            download_url: data.download_url,
-          },
+        sendSuccess(res, {
+          name: data.name,
+          path: data.path,
+          sha: data.sha,
+          size: data.size,
+          type: data.type,
+          content: cleanContent,
+          encoding: 'base64',
+          download_url: data.download_url,
         });
       } else {
         const content = data.encoding === 'base64' && data.content
           ? Buffer.from(data.content, 'base64').toString('utf-8')
           : data.content;
 
-        res.json({
-          success: true,
-          data: {
-            name: data.name,
-            path: data.path,
-            sha: data.sha,
-            size: data.size,
-            type: data.type,
-            content,
-            encoding: 'utf-8',
-          },
+        sendSuccess(res, {
+          name: data.name,
+          path: data.path,
+          sha: data.sha,
+          size: data.size,
+          type: data.type,
+          content,
+          encoding: 'utf-8',
         });
       }
     } else if (Array.isArray(data)) {
-      res.json({
-        success: true,
-        data: {
-          type: 'dir',
-          items: data.map((item) => ({
-            name: item.name,
-            path: item.path,
-            sha: item.sha,
-            size: item.size,
-            type: item.type,
-          })),
-        },
+      sendSuccess(res, {
+        type: 'dir',
+        items: data.map((item) => ({
+          name: item.name,
+          path: item.path,
+          sha: item.sha,
+          size: item.size,
+          type: item.type,
+        })),
       });
     } else {
-      res.json({ success: true, data });
+      sendSuccess(res, data);
     }
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub get contents error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'File or path not found' });
+      sendNotFound(res, 'File or path not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to fetch file contents' });
+    sendInternalError(res, 'Failed to fetch file contents');
   }
 });
 
@@ -641,7 +634,7 @@ router.delete('/repos/:owner/:repo/branches/*', requireAuth, async (req: Request
     const branch = req.params[0];
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -654,16 +647,16 @@ router.delete('/repos/:owner/:repo/branches/*', requireAuth, async (req: Request
     });
 
     logger.info(`Deleted branch ${owner}/${repo}/${branch}`, { component: 'GitHub' });
-    res.json({ success: true, data: { message: 'Branch deleted' } });
+    sendSuccess(res, { message: 'Branch deleted' });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     if (err.status === 422 || err.status === 404) {
       logger.info(`Branch ${req.params.owner}/${req.params.repo}/${req.params[0]} not found (already deleted)`, { component: 'GitHub' });
-      res.json({ success: true, data: { message: 'Branch already deleted or does not exist' } });
+      sendSuccess(res, { message: 'Branch already deleted or does not exist' });
       return;
     }
     logger.error('GitHub delete branch error', error as Error, { component: 'GitHub' });
-    res.status(500).json({ success: false, error: 'Failed to delete branch' });
+    sendInternalError(res, 'Failed to delete branch');
   }
 });
 
@@ -726,7 +719,7 @@ router.get('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: R
     const { head, base } = req.query;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -760,10 +753,10 @@ router.get('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: R
       updatedAt: pr.updated_at,
     }));
 
-    res.json({ success: true, data: formattedPulls });
+    sendSuccess(res, formattedPulls);
   } catch (error) {
     logger.error('GitHub get pulls error', error as Error, { component: 'GitHub' });
-    res.status(500).json({ success: false, error: 'Failed to fetch pull requests' });
+    sendInternalError(res, 'Failed to fetch pull requests');
   }
 });
 
@@ -775,12 +768,12 @@ router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, async (req: 
     const { head, base, userRequest } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!head || !base) {
-      res.status(400).json({ success: false, error: 'Head and base branches are required' });
+      sendError(res, 'Head and base branches are required', 400);
       return;
     }
 
@@ -860,27 +853,21 @@ router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, async (req: 
 
     logger.info(`Generated PR content for ${owner}/${repo}: ${head} -> ${base}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        title,
-        body,
-        stats: {
-          commits: commits.length,
-          files: files.length,
-          additions: files.reduce((sum, file) => sum + (file.additions || 0), 0),
-          deletions: files.reduce((sum, file) => sum + (file.deletions || 0), 0),
-        },
+    sendSuccess(res, {
+      title,
+      body,
+      stats: {
+        commits: commits.length,
+        files: files.length,
+        additions: files.reduce((sum, file) => sum + (file.additions || 0), 0),
+        deletions: files.reduce((sum, file) => sum + (file.deletions || 0), 0),
       },
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub generate PR content error', error as Error, { component: 'GitHub' });
 
-    res.status(err.status || 500).json({
-      success: false,
-      error: err.message || 'Failed to generate PR content'
-    });
+    sendError(res, err.message || 'Failed to generate PR content', err.status || 500);
   }
 });
 
@@ -892,12 +879,12 @@ router.post('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: 
     const { title, head, base, body } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!head || !base) {
-      res.status(400).json({ success: false, error: 'Head and base branches are required' });
+      sendError(res, 'Head and base branches are required', 400);
       return;
     }
 
@@ -914,27 +901,24 @@ router.post('/repos/:owner/:repo/pulls', requireAuth, async (req: Request, res: 
 
     logger.info(`Created PR #${pr.number} for ${owner}/${repo}: ${head} -> ${base}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        number: pr.number,
-        title: pr.title,
-        htmlUrl: pr.html_url,
-        state: pr.state,
-        head: { ref: pr.head.ref, sha: pr.head.sha },
-        base: { ref: pr.base.ref, sha: pr.base.sha },
-      },
+    sendSuccess(res, {
+      number: pr.number,
+      title: pr.title,
+      htmlUrl: pr.html_url,
+      state: pr.state,
+      head: { ref: pr.head.ref, sha: pr.head.sha },
+      base: { ref: pr.base.ref, sha: pr.base.sha },
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub create PR error', error as Error, { component: 'GitHub' });
 
     if (err.status === 422) {
-      res.status(422).json({ success: false, error: 'Pull request already exists or validation failed' });
+      sendError(res, 'Pull request already exists or validation failed', 422);
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to create pull request' });
+    sendInternalError(res, err.message || 'Failed to create pull request');
   }
 });
 
@@ -946,7 +930,7 @@ router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (
     const { merge_method, commit_title, commit_message } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -963,28 +947,25 @@ router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (
 
     logger.info(`Merged PR #${pull_number} for ${owner}/${repo}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        merged: result.merged,
-        message: result.message,
-        sha: result.sha,
-      },
+    sendSuccess(res, {
+      merged: result.merged,
+      message: result.message,
+      sha: result.sha,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub merge PR error', error as Error, { component: 'GitHub' });
 
     if (err.status === 405) {
-      res.status(405).json({ success: false, error: 'Pull request cannot be merged' });
+      sendError(res, 'Pull request cannot be merged', 405);
       return;
     }
     if (err.status === 409) {
-      res.status(409).json({ success: false, error: 'Merge conflict' });
+      sendConflict(res, 'Merge conflict');
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to merge pull request' });
+    sendInternalError(res, err.message || 'Failed to merge pull request');
   }
 });
 
@@ -997,12 +978,12 @@ router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req
     const { base } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!base) {
-      res.status(400).json({ success: false, error: 'Base branch is required' });
+      sendError(res, 'Base branch is required', 400);
       return;
     }
 
@@ -1018,15 +999,12 @@ router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req
 
     logger.info(`Merged ${base} into ${branch} for ${owner}/${repo}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
+    sendSuccess(res, {
+      sha: result.sha,
+      message: `Successfully merged ${base} into ${branch}`,
+      commit: {
         sha: result.sha,
-        message: `Successfully merged ${base} into ${branch}`,
-        commit: {
-          sha: result.sha,
-          message: result.commit?.message,
-        },
+        message: result.commit?.message,
       },
     });
   } catch (error: unknown) {
@@ -1034,15 +1012,15 @@ router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req
     logger.error('GitHub merge base error', error as Error, { component: 'GitHub' });
 
     if (err.status === 204) {
-      res.json({ success: true, data: { message: 'Branch is already up to date', sha: null } });
+      sendSuccess(res, { message: 'Branch is already up to date', sha: null });
       return;
     }
     if (err.status === 409) {
-      res.status(409).json({ success: false, error: 'Merge conflict - manual resolution required' });
+      sendConflict(res, 'Merge conflict - manual resolution required');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to merge base branch' });
+    sendInternalError(res, 'Failed to merge base branch');
   }
 });
 
@@ -1055,12 +1033,12 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
     const { base, title, body, sessionId } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!base) {
-      res.status(400).json({ success: false, error: 'Base branch is required' });
+      sendError(res, 'Base branch is required', 400);
       return;
     }
 
@@ -1178,7 +1156,7 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
       prNumber: result.pr?.number
     });
 
-    res.json({ success: true, data: result });
+    sendSuccess(res, result);
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('Auto PR error', error as Error, {
@@ -1189,16 +1167,16 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
 
     // Handle specific error cases
     if (err.message?.includes('conflict')) {
-      res.status(409).json({ success: false, error: err.message });
+      sendConflict(res, err.message);
       return;
     }
 
     if (err.message?.includes('Timeout')) {
-      res.status(408).json({ success: false, error: err.message });
+      sendError(res, err.message, 408);
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to execute Auto PR' });
+    sendInternalError(res, err.message || 'Failed to execute Auto PR');
   }
 });
 
@@ -1211,17 +1189,17 @@ router.put('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request, r
     const { content, branch, sha, message } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
+      sendError(res, 'Branch is required', 400);
       return;
     }
 
     if (content === undefined) {
-      res.status(400).json({ success: false, error: 'Content is required' });
+      sendError(res, 'Content is required', 400);
       return;
     }
 
@@ -1261,32 +1239,29 @@ router.put('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request, r
 
     logger.info(`Updated file ${path} in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        message: fileSha ? 'File updated successfully' : 'File created successfully',
-        sha: result.data.content?.sha,
-        path,
-      },
+    sendSuccess(res, {
+      message: fileSha ? 'File updated successfully' : 'File created successfully',
+      sha: result.data.content?.sha,
+      path,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub update file error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      sendNotFound(res, 'Repository or branch not found');
       return;
     }
     if (err.status === 409) {
-      res.status(409).json({ success: false, error: 'Conflict - file may have been modified. Please refresh and try again.' });
+      sendConflict(res, 'Conflict - file may have been modified. Please refresh and try again.');
       return;
     }
     if (err.status === 422) {
-      res.status(422).json({ success: false, error: 'Invalid file content or path' });
+      sendError(res, 'Invalid file content or path', 422);
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to update file' });
+    sendInternalError(res, 'Failed to update file');
   }
 });
 
@@ -1299,22 +1274,22 @@ router.post('/repos/:owner/:repo/rename/*', requireAuth, async (req: Request, re
     const { newPath, branch, message } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
+      sendError(res, 'Branch is required', 400);
       return;
     }
 
     if (!newPath) {
-      res.status(400).json({ success: false, error: 'New path is required' });
+      sendError(res, 'New path is required', 400);
       return;
     }
 
     if (oldPath === newPath) {
-      res.status(400).json({ success: false, error: 'New path must be different from old path' });
+      sendError(res, 'New path must be different from old path', 400);
       return;
     }
 
@@ -1329,7 +1304,7 @@ router.post('/repos/:owner/:repo/rename/*', requireAuth, async (req: Request, re
     });
 
     if (Array.isArray(oldFile) || oldFile.type !== 'file') {
-      res.status(400).json({ success: false, error: 'Path is not a file. Use rename-folder for directories.' });
+      sendError(res, 'Path is not a file. Use rename-folder for directories.', 400);
       return;
     }
 
@@ -1355,28 +1330,25 @@ router.post('/repos/:owner/:repo/rename/*', requireAuth, async (req: Request, re
 
     logger.info(`Renamed file ${oldPath} to ${newPath} in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'File renamed successfully',
-        oldPath,
-        newPath,
-      },
+    sendSuccess(res, {
+      message: 'File renamed successfully',
+      oldPath,
+      newPath,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub rename file error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'File not found' });
+      sendNotFound(res, 'File not found');
       return;
     }
     if (err.status === 422) {
-      res.status(422).json({ success: false, error: 'File already exists at new path' });
+      sendError(res, 'File already exists at new path', 422);
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to rename file' });
+    sendInternalError(res, 'Failed to rename file');
   }
 });
 
@@ -1389,12 +1361,12 @@ router.delete('/repos/:owner/:repo/folder/*', requireAuth, async (req: Request, 
     const { branch, message } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
+      sendError(res, 'Branch is required', 400);
       return;
     }
 
@@ -1420,7 +1392,7 @@ router.delete('/repos/:owner/:repo/folder/*', requireAuth, async (req: Request, 
     );
 
     if (filesToDelete.length === 0) {
-      res.status(404).json({ success: false, error: 'Folder is empty or not found' });
+      sendNotFound(res, 'Folder is empty or not found');
       return;
     }
 
@@ -1440,24 +1412,21 @@ router.delete('/repos/:owner/:repo/folder/*', requireAuth, async (req: Request, 
 
     logger.info(`Deleted folder ${folderPath} (${filesToDelete.length} files) in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Folder deleted successfully',
-        path: folderPath,
-        filesDeleted: filesToDelete.length,
-      },
+    sendSuccess(res, {
+      message: 'Folder deleted successfully',
+      path: folderPath,
+      filesDeleted: filesToDelete.length,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub delete folder error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Folder or branch not found' });
+      sendNotFound(res, 'Folder or branch not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to delete folder' });
+    sendInternalError(res, 'Failed to delete folder');
   }
 });
 
@@ -1470,22 +1439,22 @@ router.post('/repos/:owner/:repo/rename-folder/*', requireAuth, async (req: Requ
     const { newFolderPath, branch, message } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
+      sendError(res, 'Branch is required', 400);
       return;
     }
 
     if (!newFolderPath) {
-      res.status(400).json({ success: false, error: 'New folder path is required' });
+      sendError(res, 'New folder path is required', 400);
       return;
     }
 
     if (oldFolderPath === newFolderPath) {
-      res.status(400).json({ success: false, error: 'New path must be different from old path' });
+      sendError(res, 'New path must be different from old path', 400);
       return;
     }
 
@@ -1511,7 +1480,7 @@ router.post('/repos/:owner/:repo/rename-folder/*', requireAuth, async (req: Requ
     );
 
     if (filesToMove.length === 0) {
-      res.status(404).json({ success: false, error: 'Folder is empty or not found' });
+      sendNotFound(res, 'Folder is empty or not found');
       return;
     }
 
@@ -1556,29 +1525,26 @@ router.post('/repos/:owner/:repo/rename-folder/*', requireAuth, async (req: Requ
 
     logger.info(`Renamed folder ${oldFolderPath} to ${newFolderPath} (${filesToMove.length} files) in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Folder renamed successfully',
-        oldPath: oldFolderPath,
-        newPath: newFolderPath,
-        filesMoved: filesToMove.length,
-      },
+    sendSuccess(res, {
+      message: 'Folder renamed successfully',
+      oldPath: oldFolderPath,
+      newPath: newFolderPath,
+      filesMoved: filesToMove.length,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub rename folder error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Folder or branch not found' });
+      sendNotFound(res, 'Folder or branch not found');
       return;
     }
     if (err.status === 422) {
-      res.status(422).json({ success: false, error: 'Files already exist at new path' });
+      sendError(res, 'Files already exist at new path', 422);
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to rename folder' });
+    sendInternalError(res, 'Failed to rename folder');
   }
 });
 
@@ -1591,12 +1557,12 @@ router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request
     const { branch, sha, message } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
+      sendError(res, 'Branch is required', 400);
       return;
     }
 
@@ -1617,7 +1583,7 @@ router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request
       } catch (error: unknown) {
         const err = error as { status?: number };
         if (err.status === 404) {
-          res.status(404).json({ success: false, error: 'File not found' });
+          sendNotFound(res, 'File not found');
           return;
         }
         throw error;
@@ -1635,24 +1601,21 @@ router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request
 
     logger.info(`Deleted file ${path} in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
-    res.json({
-      success: true,
-      data: { message: 'File deleted successfully' },
-    });
+    sendSuccess(res, { message: 'File deleted successfully' });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('GitHub delete file error', error as Error, { component: 'GitHub' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'File or repository not found' });
+      sendNotFound(res, 'File or repository not found');
       return;
     }
     if (err.status === 409) {
-      res.status(409).json({ success: false, error: 'Conflict - file may have been modified' });
+      sendConflict(res, 'Conflict - file may have been modified');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to delete file' });
+    sendInternalError(res, 'Failed to delete file');
   }
 });
 
@@ -1680,12 +1643,12 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
     } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!branch) {
-      res.status(400).json({ success: false, error: 'Branch is required' });
+      sendError(res, 'Branch is required', 400);
       return;
     }
 
@@ -1694,7 +1657,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
     const hasDeletions = deletions && Array.isArray(deletions) && deletions.length > 0;
 
     if (!hasFiles && !hasImages && !hasDeletions) {
-      res.status(400).json({ success: false, error: 'No files, images, or deletions to commit' });
+      sendError(res, 'No files, images, or deletions to commit', 400);
       return;
     }
 
@@ -1799,7 +1762,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
     }
 
     if (treeEntries.length === 0) {
-      res.status(400).json({ success: false, error: 'No valid files to commit' });
+      sendError(res, 'No valid files to commit', 400);
       return;
     }
 
@@ -1862,15 +1825,12 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
       filesCommitted: treeEntries.length
     });
 
-    res.json({
-      success: true,
-      data: {
-        commitSha: newCommit.sha,
-        message: commitMessage,
-        branch,
-        filesCommitted: treeEntries.length,
-        htmlUrl: `https://github.com/${owner}/${repo}/commit/${newCommit.sha}`
-      }
+    sendSuccess(res, {
+      commitSha: newCommit.sha,
+      message: commitMessage,
+      branch,
+      filesCommitted: treeEntries.length,
+      htmlUrl: `https://github.com/${owner}/${repo}/commit/${newCommit.sha}`
     });
 
   } catch (error: unknown) {
@@ -1882,19 +1842,19 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
     });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      sendNotFound(res, 'Repository or branch not found');
       return;
     }
     if (err.status === 409) {
-      res.status(409).json({ success: false, error: 'Conflict - branch may have been modified. Please refresh and try again.' });
+      sendConflict(res, 'Conflict - branch may have been modified. Please refresh and try again.');
       return;
     }
     if (err.status === 422) {
-      res.status(422).json({ success: false, error: 'Invalid file content or path' });
+      sendError(res, 'Invalid file content or path', 422);
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to create commit' });
+    sendInternalError(res, err.message || 'Failed to create commit');
   }
 });
 
@@ -1911,10 +1871,10 @@ router.post('/disconnect', requireAuth, async (req: Request, res: Response) => {
       })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({ success: true, data: { message: 'GitHub disconnected' } });
+    sendSuccess(res, { message: 'GitHub disconnected' });
   } catch (error) {
     logger.error('GitHub disconnect error', error as Error, { component: 'GitHub' });
-    res.status(500).json({ success: false, error: 'Failed to disconnect GitHub' });
+    sendInternalError(res, 'Failed to disconnect GitHub');
   }
 });
 
@@ -1928,15 +1888,7 @@ router.all('*', (req: Request, res: Response) => {
     originalUrl: req.originalUrl,
     params: req.params
   });
-  res.status(404).json({
-    success: false,
-    error: 'GitHub endpoint not found',
-    debug: {
-      method: req.method,
-      path: req.path,
-      originalUrl: req.originalUrl
-    }
-  });
+  sendNotFound(res, 'GitHub endpoint not found');
 });
 
 export default router;

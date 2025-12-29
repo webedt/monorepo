@@ -3,7 +3,15 @@
  */
 
 import { Router } from 'express';
-import { organizationService } from '@webedt/shared';
+import {
+  organizationService,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
+  sendConflict,
+} from '@webedt/shared';
 import { AuthRequest, requireAuth } from '../middleware/auth.js';
 
 import type { Request, Response } from 'express';
@@ -39,17 +47,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const organizations = await organizationService.getUserOrganizations(userId);
 
-    res.json({
-      success: true,
-      data: organizations.map(org => ({
-        ...org.organization,
-        role: org.role,
-        joinedAt: org.joinedAt,
-      })),
-    });
+    sendSuccess(res, organizations.map(org => ({
+      ...org.organization,
+      role: org.role,
+      joinedAt: org.joinedAt,
+    })));
   } catch (error) {
     console.error('Error fetching organizations:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch organizations' });
+    sendInternalError(res, 'Failed to fetch organizations');
   }
 });
 
@@ -61,33 +66,30 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const { name, slug, displayName, description, avatarUrl, websiteUrl, githubOrg } = req.body;
 
     if (!name || !slug) {
-      res.status(400).json({ success: false, error: 'Name and slug are required' });
+      sendError(res, 'Name and slug are required', 400);
       return;
     }
 
     // Validate name length
     if (name.length < 2 || name.length > 100) {
-      res.status(400).json({ success: false, error: 'Name must be between 2 and 100 characters' });
+      sendError(res, 'Name must be between 2 and 100 characters', 400);
       return;
     }
 
     // Validate displayName length if provided
     if (displayName && (displayName.length < 2 || displayName.length > 100)) {
-      res.status(400).json({ success: false, error: 'Display name must be between 2 and 100 characters' });
+      sendError(res, 'Display name must be between 2 and 100 characters', 400);
       return;
     }
 
     if (!isValidSlug(slug)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid slug. Must be 3-50 characters, lowercase alphanumeric with hyphens, cannot start or end with hyphen',
-      });
+      sendError(res, 'Invalid slug. Must be 3-50 characters, lowercase alphanumeric with hyphens, cannot start or end with hyphen', 400);
       return;
     }
 
     const slugAvailable = await organizationService.isSlugAvailable(slug);
     if (!slugAvailable) {
-      res.status(409).json({ success: false, error: 'Slug is already taken' });
+      sendConflict(res, 'Slug is already taken');
       return;
     }
 
@@ -96,15 +98,15 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       userId
     );
 
-    res.status(201).json({ success: true, data: organization });
+    sendSuccess(res, organization, 201);
   } catch (error: unknown) {
     console.error('Error creating organization:', error);
     // Handle race condition where slug was taken between check and create
     if (isUniqueConstraintError(error)) {
-      res.status(409).json({ success: false, error: 'Slug is already taken' });
+      sendConflict(res, 'Slug is already taken');
       return;
     }
-    res.status(500).json({ success: false, error: 'Failed to create organization' });
+    sendInternalError(res, 'Failed to create organization');
   }
 });
 
@@ -116,15 +118,15 @@ router.get('/slug-available/:slug', requireAuth, async (req: Request, res: Respo
     const { slug } = req.params;
 
     if (!isValidSlug(slug)) {
-      res.json({ success: true, data: { available: false, reason: 'invalid' } });
+      sendSuccess(res, { available: false, reason: 'invalid' });
       return;
     }
 
     const available = await organizationService.isSlugAvailable(slug);
-    res.json({ success: true, data: { available, reason: available ? null : 'taken' } });
+    sendSuccess(res, { available, reason: available ? null : 'taken' });
   } catch (error) {
     console.error('Error checking slug availability:', error);
-    res.status(500).json({ success: false, error: 'Failed to check slug availability' });
+    sendInternalError(res, 'Failed to check slug availability');
   }
 });
 
@@ -137,26 +139,23 @@ router.get('/slug/:slug', requireAuth, async (req: Request, res: Response) => {
 
     const organization = await organizationService.getBySlug(slug);
     if (!organization) {
-      res.status(404).json({ success: false, error: 'Organization not found' });
+      sendNotFound(res, 'Organization not found');
       return;
     }
 
     const member = await organizationService.getMember(organization.id, userId);
     if (!member) {
-      res.status(403).json({ success: false, error: 'Not a member of this organization' });
+      sendForbidden(res, 'Not a member of this organization');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        ...organization,
-        role: member.role,
-      },
+    sendSuccess(res, {
+      ...organization,
+      role: member.role,
     });
   } catch (error) {
     console.error('Error fetching organization:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch organization' });
+    sendInternalError(res, 'Failed to fetch organization');
   }
 });
 
@@ -171,37 +170,31 @@ router.post('/invitations/:token/accept', requireAuth, async (req: Request, res:
     // First, verify the invitation exists and email matches
     const invitation = await organizationService.getInvitationByToken(token);
     if (!invitation) {
-      res.status(404).json({ success: false, error: 'Invitation not found or expired' });
+      sendNotFound(res, 'Invitation not found or expired');
       return;
     }
 
     // Verify the invitation email matches the user's email
     if (invitation.email.toLowerCase() !== userEmail.toLowerCase()) {
-      res.status(403).json({
-        success: false,
-        error: 'This invitation was sent to a different email address',
-      });
+      sendForbidden(res, 'This invitation was sent to a different email address');
       return;
     }
 
     const member = await organizationService.acceptInvitation(token, userId);
     if (!member) {
-      res.status(404).json({ success: false, error: 'Invitation not found or expired' });
+      sendNotFound(res, 'Invitation not found or expired');
       return;
     }
 
     const organization = await organizationService.getById(member.organizationId);
 
-    res.json({
-      success: true,
-      data: {
-        member,
-        organization,
-      },
+    sendSuccess(res, {
+      member,
+      organization,
     });
   } catch (error) {
     console.error('Error accepting invitation:', error);
-    res.status(500).json({ success: false, error: 'Failed to accept invitation' });
+    sendInternalError(res, 'Failed to accept invitation');
   }
 });
 
@@ -214,31 +207,28 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const organization = await organizationService.getById(id);
     if (!organization) {
-      res.status(404).json({ success: false, error: 'Organization not found' });
+      sendNotFound(res, 'Organization not found');
       return;
     }
 
     const member = await organizationService.getMember(id, userId);
     if (!member) {
-      res.status(403).json({ success: false, error: 'Not a member of this organization' });
+      sendForbidden(res, 'Not a member of this organization');
       return;
     }
 
     const members = await organizationService.getMembers(id);
     const repositories = await organizationService.getRepositories(id);
 
-    res.json({
-      success: true,
-      data: {
-        ...organization,
-        role: member.role,
-        members,
-        repositories,
-      },
+    sendSuccess(res, {
+      ...organization,
+      role: member.role,
+      members,
+      repositories,
     });
   } catch (error) {
     console.error('Error fetching organization:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch organization' });
+    sendInternalError(res, 'Failed to fetch organization');
   }
 });
 
@@ -252,19 +242,19 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     // Validate name length if provided
     if (name !== undefined && (name.length < 2 || name.length > 100)) {
-      res.status(400).json({ success: false, error: 'Name must be between 2 and 100 characters' });
+      sendError(res, 'Name must be between 2 and 100 characters', 400);
       return;
     }
 
     // Validate displayName length if provided
     if (displayName !== undefined && displayName !== null && (displayName.length < 2 || displayName.length > 100)) {
-      res.status(400).json({ success: false, error: 'Display name must be between 2 and 100 characters' });
+      sendError(res, 'Display name must be between 2 and 100 characters', 400);
       return;
     }
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
@@ -278,14 +268,14 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     });
 
     if (!organization) {
-      res.status(404).json({ success: false, error: 'Organization not found' });
+      sendNotFound(res, 'Organization not found');
       return;
     }
 
-    res.json({ success: true, data: organization });
+    sendSuccess(res, organization);
   } catch (error) {
     console.error('Error updating organization:', error);
-    res.status(500).json({ success: false, error: 'Failed to update organization' });
+    sendInternalError(res, 'Failed to update organization');
   }
 });
 
@@ -298,20 +288,20 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'owner');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Owner access required' });
+      sendForbidden(res, 'Owner access required');
       return;
     }
 
     const deleted = await organizationService.delete(id);
     if (!deleted) {
-      res.status(404).json({ success: false, error: 'Organization not found' });
+      sendNotFound(res, 'Organization not found');
       return;
     }
 
-    res.json({ success: true, data: { id } });
+    sendSuccess(res, { id });
   } catch (error) {
     console.error('Error deleting organization:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete organization' });
+    sendInternalError(res, 'Failed to delete organization');
   }
 });
 
@@ -324,15 +314,15 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
 
     const member = await organizationService.getMember(id, userId);
     if (!member) {
-      res.status(403).json({ success: false, error: 'Not a member of this organization' });
+      sendForbidden(res, 'Not a member of this organization');
       return;
     }
 
     const members = await organizationService.getMembers(id);
-    res.json({ success: true, data: members });
+    sendSuccess(res, members);
   } catch (error) {
     console.error('Error fetching members:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch members' });
+    sendInternalError(res, 'Failed to fetch members');
   }
 });
 
@@ -345,32 +335,32 @@ router.post('/:id/members', requireAuth, async (req: Request, res: Response) => 
     const { userId: newMemberId, role } = req.body;
 
     if (!newMemberId || !role) {
-      res.status(400).json({ success: false, error: 'userId and role are required' });
+      sendError(res, 'userId and role are required', 400);
       return;
     }
 
     if (!['admin', 'member'].includes(role)) {
-      res.status(400).json({ success: false, error: 'Invalid role. Must be admin or member' });
+      sendError(res, 'Invalid role. Must be admin or member', 400);
       return;
     }
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     const existingMember = await organizationService.getMember(id, newMemberId);
     if (existingMember) {
-      res.status(409).json({ success: false, error: 'User is already a member' });
+      sendConflict(res, 'User is already a member');
       return;
     }
 
     const member = await organizationService.addMember(id, newMemberId, role as OrganizationRole, userId);
-    res.status(201).json({ success: true, data: member });
+    sendSuccess(res, member, 201);
   } catch (error) {
     console.error('Error adding member:', error);
-    res.status(500).json({ success: false, error: 'Failed to add member' });
+    sendInternalError(res, 'Failed to add member');
   }
 });
 
@@ -383,31 +373,31 @@ router.patch('/:id/members/:userId', requireAuth, async (req: Request, res: Resp
     const { role } = req.body;
 
     if (!role || !['owner', 'admin', 'member'].includes(role)) {
-      res.status(400).json({ success: false, error: 'Invalid role' });
+      sendError(res, 'Invalid role', 400);
       return;
     }
 
     const hasPermission = await organizationService.hasPermission(id, currentUserId, 'owner');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Owner access required to change roles' });
+      sendForbidden(res, 'Owner access required to change roles');
       return;
     }
 
     if (currentUserId === targetUserId && role !== 'owner') {
-      res.status(400).json({ success: false, error: 'Cannot demote yourself from owner' });
+      sendError(res, 'Cannot demote yourself from owner', 400);
       return;
     }
 
     const member = await organizationService.updateMemberRole(id, targetUserId, role as OrganizationRole);
     if (!member) {
-      res.status(404).json({ success: false, error: 'Member not found' });
+      sendNotFound(res, 'Member not found');
       return;
     }
 
-    res.json({ success: true, data: member });
+    sendSuccess(res, member);
   } catch (error) {
     console.error('Error updating member role:', error);
-    res.status(500).json({ success: false, error: 'Failed to update member role' });
+    sendInternalError(res, 'Failed to update member role');
   }
 });
 
@@ -419,32 +409,32 @@ router.delete('/:id/members/:userId', requireAuth, async (req: Request, res: Res
     const { id, userId: targetUserId } = req.params;
 
     if (currentUserId === targetUserId) {
-      res.status(400).json({ success: false, error: 'Use leave endpoint to leave organization' });
+      sendError(res, 'Use leave endpoint to leave organization', 400);
       return;
     }
 
     const hasPermission = await organizationService.hasPermission(id, currentUserId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     const targetMember = await organizationService.getMember(id, targetUserId);
     if (targetMember && targetMember.role === 'owner') {
-      res.status(403).json({ success: false, error: 'Cannot remove owner' });
+      sendForbidden(res, 'Cannot remove owner');
       return;
     }
 
     const removed = await organizationService.removeMember(id, targetUserId);
     if (!removed) {
-      res.status(404).json({ success: false, error: 'Member not found' });
+      sendNotFound(res, 'Member not found');
       return;
     }
 
-    res.json({ success: true, data: { userId: targetUserId } });
+    sendSuccess(res, { userId: targetUserId });
   } catch (error) {
     console.error('Error removing member:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove member' });
+    sendInternalError(res, 'Failed to remove member');
   }
 });
 
@@ -457,7 +447,7 @@ router.post('/:id/leave', requireAuth, async (req: Request, res: Response) => {
 
     const member = await organizationService.getMember(id, userId);
     if (!member) {
-      res.status(404).json({ success: false, error: 'Not a member of this organization' });
+      sendNotFound(res, 'Not a member of this organization');
       return;
     }
 
@@ -465,19 +455,16 @@ router.post('/:id/leave', requireAuth, async (req: Request, res: Response) => {
       const members = await organizationService.getMembers(id);
       const otherOwners = members.filter(m => m.role === 'owner' && m.userId !== userId);
       if (otherOwners.length === 0) {
-        res.status(400).json({
-          success: false,
-          error: 'Cannot leave as the only owner. Transfer ownership or delete the organization',
-        });
+        sendError(res, 'Cannot leave as the only owner. Transfer ownership or delete the organization', 400);
         return;
       }
     }
 
     await organizationService.removeMember(id, userId);
-    res.json({ success: true, data: { message: 'Left organization' } });
+    sendSuccess(res, { message: 'Left organization' });
   } catch (error) {
     console.error('Error leaving organization:', error);
-    res.status(500).json({ success: false, error: 'Failed to leave organization' });
+    sendInternalError(res, 'Failed to leave organization');
   }
 });
 
@@ -490,15 +477,15 @@ router.get('/:id/repositories', requireAuth, async (req: Request, res: Response)
 
     const member = await organizationService.getMember(id, userId);
     if (!member) {
-      res.status(403).json({ success: false, error: 'Not a member of this organization' });
+      sendForbidden(res, 'Not a member of this organization');
       return;
     }
 
     const repositories = await organizationService.getRepositories(id);
-    res.json({ success: true, data: repositories });
+    sendSuccess(res, repositories);
   } catch (error) {
     console.error('Error fetching repositories:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch repositories' });
+    sendInternalError(res, 'Failed to fetch repositories');
   }
 });
 
@@ -511,13 +498,13 @@ router.post('/:id/repositories', requireAuth, async (req: Request, res: Response
     const { repositoryOwner, repositoryName, isDefault } = req.body;
 
     if (!repositoryOwner || !repositoryName) {
-      res.status(400).json({ success: false, error: 'repositoryOwner and repositoryName are required' });
+      sendError(res, 'repositoryOwner and repositoryName are required', 400);
       return;
     }
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
@@ -529,14 +516,14 @@ router.post('/:id/repositories', requireAuth, async (req: Request, res: Response
       addedBy: userId,
     });
 
-    res.status(201).json({ success: true, data: repository });
+    sendSuccess(res, repository, 201);
   } catch (error: unknown) {
     console.error('Error adding repository:', error);
     if (isUniqueConstraintError(error)) {
-      res.status(409).json({ success: false, error: 'This repository is already added to the organization' });
+      sendConflict(res, 'This repository is already added to the organization');
       return;
     }
-    res.status(500).json({ success: false, error: 'Failed to add repository' });
+    sendInternalError(res, 'Failed to add repository');
   }
 });
 
@@ -549,20 +536,20 @@ router.delete('/:id/repositories/:owner/:repo', requireAuth, async (req: Request
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     const removed = await organizationService.removeRepository(id, owner, repo);
     if (!removed) {
-      res.status(404).json({ success: false, error: 'Repository not found' });
+      sendNotFound(res, 'Repository not found');
       return;
     }
 
-    res.json({ success: true, data: { owner, repo } });
+    sendSuccess(res, { owner, repo });
   } catch (error) {
     console.error('Error removing repository:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove repository' });
+    sendInternalError(res, 'Failed to remove repository');
   }
 });
 
@@ -575,20 +562,20 @@ router.post('/:id/repositories/:owner/:repo/default', requireAuth, async (req: R
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     const success = await organizationService.setDefaultRepository(id, owner, repo);
     if (!success) {
-      res.status(404).json({ success: false, error: 'Repository not found' });
+      sendNotFound(res, 'Repository not found');
       return;
     }
 
-    res.json({ success: true, data: { owner, repo, isDefault: true } });
+    sendSuccess(res, { owner, repo, isDefault: true });
   } catch (error) {
     console.error('Error setting default repository:', error);
-    res.status(500).json({ success: false, error: 'Failed to set default repository' });
+    sendInternalError(res, 'Failed to set default repository');
   }
 });
 
@@ -601,24 +588,24 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
     const { email, role } = req.body;
 
     if (!email) {
-      res.status(400).json({ success: false, error: 'Email is required' });
+      sendError(res, 'Email is required', 400);
       return;
     }
 
     // Basic email validation
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      res.status(400).json({ success: false, error: 'Invalid email format' });
+      sendError(res, 'Invalid email format', 400);
       return;
     }
 
     if (role && !['admin', 'member'].includes(role)) {
-      res.status(400).json({ success: false, error: 'Invalid role. Must be admin or member' });
+      sendError(res, 'Invalid role. Must be admin or member', 400);
       return;
     }
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
@@ -629,14 +616,14 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
       invitedBy: userId,
     });
 
-    res.status(201).json({ success: true, data: invitation });
+    sendSuccess(res, invitation, 201);
   } catch (error: unknown) {
     console.error('Error creating invitation:', error);
     if (isUniqueConstraintError(error)) {
-      res.status(409).json({ success: false, error: 'An invitation for this email already exists' });
+      sendConflict(res, 'An invitation for this email already exists');
       return;
     }
-    res.status(500).json({ success: false, error: 'Failed to create invitation' });
+    sendInternalError(res, 'Failed to create invitation');
   }
 });
 
@@ -649,15 +636,15 @@ router.get('/:id/invitations', requireAuth, async (req: Request, res: Response) 
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     const invitations = await organizationService.getPendingInvitations(id);
-    res.json({ success: true, data: invitations });
+    sendSuccess(res, invitations);
   } catch (error) {
     console.error('Error fetching invitations:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch invitations' });
+    sendInternalError(res, 'Failed to fetch invitations');
   }
 });
 
@@ -670,23 +657,23 @@ router.delete('/:id/invitations/:invitationId', requireAuth, async (req: Request
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     // Verify the invitation belongs to this organization
     const invitation = await organizationService.getInvitationById(invitationId);
     if (!invitation || invitation.organizationId !== id) {
-      res.status(404).json({ success: false, error: 'Invitation not found' });
+      sendNotFound(res, 'Invitation not found');
       return;
     }
 
     await organizationService.revokeInvitation(invitationId);
 
-    res.json({ success: true, data: { invitationId } });
+    sendSuccess(res, { invitationId });
   } catch (error) {
     console.error('Error revoking invitation:', error);
-    res.status(500).json({ success: false, error: 'Failed to revoke invitation' });
+    sendInternalError(res, 'Failed to revoke invitation');
   }
 });
 

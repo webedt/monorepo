@@ -10,6 +10,12 @@ import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import type { TransactionContext } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -45,7 +51,7 @@ router.get('/session/:sessionId', requireAuth, async (req: Request, res: Respons
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -68,16 +74,13 @@ router.get('/session/:sessionId', requireAuth, async (req: Request, res: Respons
       .where(eq(sessionCollections.sessionId, sessionId))
       .orderBy(asc(collections.sortOrder), asc(collections.name));
 
-    res.json({
-      success: true,
-      data: {
-        collections: sessionCols,
-        total: sessionCols.length,
-      },
+    sendSuccess(res, {
+      collections: sessionCols,
+      total: sessionCols.length,
     });
   } catch (error) {
     logger.error('Get session collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to fetch session collections' });
+    sendInternalError(res, 'Failed to fetch session collections');
   }
 });
 
@@ -90,7 +93,7 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
     const { collectionIds } = req.body;
 
     if (!Array.isArray(collectionIds) || collectionIds.length === 0) {
-      res.status(400).json({ success: false, error: 'collectionIds array is required' });
+      sendError(res, 'collectionIds array is required', 400);
       return;
     }
 
@@ -101,7 +104,7 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -115,7 +118,7 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
     const validCollectionIds = collectionIds.filter((id: string) => userCollectionIds.has(id));
 
     if (validCollectionIds.length === 0) {
-      res.status(400).json({ success: false, error: 'No valid collections found' });
+      sendError(res, 'No valid collections found', 400);
       return;
     }
 
@@ -129,7 +132,7 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
     const newCollectionIds = validCollectionIds.filter((id: string) => !existingCollectionIds.has(id));
 
     if (newCollectionIds.length === 0) {
-      res.json({ success: true, data: { added: 0 }, message: 'Session already in all specified collections' });
+      sendSuccess(res, { added: 0 });
       return;
     }
 
@@ -154,10 +157,10 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
       userId: authReq.user!.id,
     });
 
-    res.json({ success: true, data: { added: newCollectionIds.length } });
+    sendSuccess(res, { added: newCollectionIds.length });
   } catch (error) {
     logger.error('Bulk add session to collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to add session to collections' });
+    sendInternalError(res, 'Failed to add session to collections');
   }
 });
 
@@ -169,7 +172,7 @@ router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
     const { orderedIds } = req.body;
 
     if (!Array.isArray(orderedIds)) {
-      res.status(400).json({ success: false, error: 'orderedIds array is required' });
+      sendError(res, 'orderedIds array is required', 400);
       return;
     }
 
@@ -203,10 +206,10 @@ router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
       count: orderedIds.length,
     });
 
-    res.json({ success: true, message: 'Collections reordered' });
+    sendSuccess(res, null);
   } catch (error) {
     logger.error('Reorder collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to reorder collections' });
+    sendInternalError(res, 'Failed to reorder collections');
   }
 });
 
@@ -242,16 +245,13 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       .where(eq(collections.userId, authReq.user!.id))
       .orderBy(asc(collections.sortOrder), asc(collections.name));
 
-    res.json({
-      success: true,
-      data: {
-        collections: userCollections,
-        total: userCollections.length,
-      },
+    sendSuccess(res, {
+      collections: userCollections,
+      total: userCollections.length,
     });
   } catch (error) {
     logger.error('Get collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to fetch collections' });
+    sendInternalError(res, 'Failed to fetch collections');
   }
 });
 
@@ -267,14 +267,14 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(collections.id, id), eq(collections.userId, authReq.user!.id)));
 
     if (!collection) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
-    res.json({ success: true, data: { collection } });
+    sendSuccess(res, { collection });
   } catch (error) {
     logger.error('Get collection error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to fetch collection' });
+    sendInternalError(res, 'Failed to fetch collection');
   }
 });
 
@@ -285,22 +285,19 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const { name, description, color, icon, isDefault } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Collection name is required' });
+      sendError(res, 'Collection name is required', 400);
       return;
     }
 
     // Validate color format if provided
     if (color !== undefined && color !== null && !isValidHexColor(color)) {
-      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color like #RRGGBB' });
+      sendError(res, 'Invalid color format. Must be a hex color like #RRGGBB', 400);
       return;
     }
 
     // Validate icon if provided
     if (icon !== undefined && icon !== null && !isValidIcon(icon)) {
-      res.status(400).json({
-        success: false,
-        error: `Invalid icon. Must be one of: ${VALID_ICONS.join(', ')}`,
-      });
+      sendError(res, `Invalid icon. Must be one of: ${VALID_ICONS.join(', ')}`, 400);
       return;
     }
 
@@ -311,7 +308,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(collections.userId, authReq.user!.id), eq(collections.name, name.trim())));
 
     if (existing) {
-      res.status(400).json({ success: false, error: 'A collection with this name already exists' });
+      sendError(res, 'A collection with this name already exists', 400);
       return;
     }
 
@@ -360,10 +357,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       userId: authReq.user!.id,
     });
 
-    res.status(201).json({ success: true, data: { collection } });
+    sendSuccess(res, { collection }, 201);
   } catch (error) {
     logger.error('Create collection error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to create collection' });
+    sendInternalError(res, 'Failed to create collection');
   }
 });
 
@@ -376,16 +373,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     // Validate color format if provided
     if (color !== undefined && color !== null && !isValidHexColor(color)) {
-      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color like #RRGGBB' });
+      sendError(res, 'Invalid color format. Must be a hex color like #RRGGBB', 400);
       return;
     }
 
     // Validate icon if provided
     if (icon !== undefined && icon !== null && !isValidIcon(icon)) {
-      res.status(400).json({
-        success: false,
-        error: `Invalid icon. Must be one of: ${VALID_ICONS.join(', ')}`,
-      });
+      sendError(res, `Invalid icon. Must be one of: ${VALID_ICONS.join(', ')}`, 400);
       return;
     }
 
@@ -396,7 +390,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(collections.id, id), eq(collections.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -408,7 +402,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         .where(and(eq(collections.userId, authReq.user!.id), eq(collections.name, name.trim())));
 
       if (duplicate) {
-        res.status(400).json({ success: false, error: 'A collection with this name already exists' });
+        sendError(res, 'A collection with this name already exists', 400);
         return;
       }
     }
@@ -447,10 +441,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       userId: authReq.user!.id,
     });
 
-    res.json({ success: true, data: { collection } });
+    sendSuccess(res, { collection });
   } catch (error) {
     logger.error('Update collection error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to update collection' });
+    sendInternalError(res, 'Failed to update collection');
   }
 });
 
@@ -467,7 +461,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(collections.id, id), eq(collections.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -480,10 +474,10 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       userId: authReq.user!.id,
     });
 
-    res.json({ success: true, message: 'Collection deleted' });
+    sendSuccess(res, null);
   } catch (error) {
     logger.error('Delete collection error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to delete collection' });
+    sendInternalError(res, 'Failed to delete collection');
   }
 });
 
@@ -500,7 +494,7 @@ router.get('/:id/sessions', requireAuth, async (req: Request, res: Response) => 
       .where(and(eq(collections.id, id), eq(collections.userId, authReq.user!.id)));
 
     if (!collection) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -530,17 +524,14 @@ router.get('/:id/sessions', requireAuth, async (req: Request, res: Response) => 
       .where(eq(sessionCollections.collectionId, id))
       .orderBy(desc(sessionCollections.addedAt));
 
-    res.json({
-      success: true,
-      data: {
-        collection,
-        sessions,
-        total: sessions.length,
-      },
+    sendSuccess(res, {
+      collection,
+      sessions,
+      total: sessions.length,
     });
   } catch (error) {
     logger.error('Get collection sessions error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to fetch collection sessions' });
+    sendInternalError(res, 'Failed to fetch collection sessions');
   }
 });
 
@@ -557,7 +548,7 @@ router.post('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: R
       .where(and(eq(collections.id, id), eq(collections.userId, authReq.user!.id)));
 
     if (!collection) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -568,7 +559,7 @@ router.post('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: R
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -579,7 +570,7 @@ router.post('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: R
       .where(and(eq(sessionCollections.sessionId, sessionId), eq(sessionCollections.collectionId, id)));
 
     if (existing) {
-      res.status(400).json({ success: false, error: 'Session is already in this collection' });
+      sendError(res, 'Session is already in this collection', 400);
       return;
     }
 
@@ -600,10 +591,10 @@ router.post('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: R
       userId: authReq.user!.id,
     });
 
-    res.status(201).json({ success: true, data: { membership } });
+    sendSuccess(res, { membership }, 201);
   } catch (error) {
     logger.error('Add session to collection error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to add session to collection' });
+    sendInternalError(res, 'Failed to add session to collection');
   }
 });
 
@@ -620,7 +611,7 @@ router.delete('/:id/sessions/:sessionId', requireAuth, async (req: Request, res:
       .where(and(eq(collections.id, id), eq(collections.userId, authReq.user!.id)));
 
     if (!collection) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -636,10 +627,10 @@ router.delete('/:id/sessions/:sessionId', requireAuth, async (req: Request, res:
       userId: authReq.user!.id,
     });
 
-    res.json({ success: true, message: 'Session removed from collection' });
+    sendSuccess(res, null);
   } catch (error) {
     logger.error('Remove session from collection error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to remove session from collection' });
+    sendInternalError(res, 'Failed to remove session from collection');
   }
 });
 

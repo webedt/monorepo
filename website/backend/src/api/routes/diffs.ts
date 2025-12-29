@@ -6,7 +6,14 @@
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { requireAuth } from '../middleware/auth.js';
-import { logger, parseDiff } from '@webedt/shared';
+import {
+  logger,
+  parseDiff,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import type { ParsedDiff } from '@webedt/shared';
 
@@ -53,7 +60,7 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: R
     const { owner, repo, base, head } = req.params;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -123,17 +130,17 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: R
       head,
     });
 
-    res.json({ success: true, data: result });
+    sendSuccess(res, result);
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('Failed to get diff comparison', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      sendNotFound(res, 'Repository or branch not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get diff comparison' });
+    sendInternalError(res, err.message || 'Failed to get diff comparison');
   }
 });
 
@@ -144,7 +151,7 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
     const { owner, repo, base, head } = req.params;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -166,27 +173,24 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
       previousFilename: file.previous_filename,
     }));
 
-    res.json({
-      success: true,
-      data: {
-        files,
-        totalFiles: files.length,
-        totalAdditions: files.reduce((sum, f) => sum + f.additions, 0),
-        totalDeletions: files.reduce((sum, f) => sum + f.deletions, 0),
-        aheadBy: comparison.ahead_by,
-        behindBy: comparison.behind_by,
-      },
+    sendSuccess(res, {
+      files,
+      totalFiles: files.length,
+      totalAdditions: files.reduce((sum, f) => sum + f.additions, 0),
+      totalDeletions: files.reduce((sum, f) => sum + f.deletions, 0),
+      aheadBy: comparison.ahead_by,
+      behindBy: comparison.behind_by,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('Failed to get changed files', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      sendNotFound(res, 'Repository or branch not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get changed files' });
+    sendInternalError(res, err.message || 'Failed to get changed files');
   }
 });
 
@@ -198,12 +202,12 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, async (re
     const filePath = req.params[0];
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
     if (!filePath) {
-      res.status(400).json({ success: false, error: 'File path is required' });
+      sendError(res, 'File path is required', 400);
       return;
     }
 
@@ -221,7 +225,7 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, async (re
     const file = comparison.files?.find(f => f.filename === filePath);
 
     if (!file) {
-      res.status(404).json({ success: false, error: 'File not found in diff' });
+      sendNotFound(res, 'File not found in diff');
       return;
     }
 
@@ -236,30 +240,27 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, async (re
 
     const parsedDiff = parseDiff(rawDiff);
 
-    res.json({
-      success: true,
-      data: {
-        filename: file.filename,
-        status: file.status,
-        additions: file.additions,
-        deletions: file.deletions,
-        changes: file.changes,
-        patch: file.patch,
-        rawDiff,
-        parsedDiff: parsedDiff.files[0] || null,
-        previousFilename: file.previous_filename,
-      },
+    sendSuccess(res, {
+      filename: file.filename,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      changes: file.changes,
+      patch: file.patch,
+      rawDiff,
+      parsedDiff: parsedDiff.files[0] || null,
+      previousFilename: file.previous_filename,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('Failed to get file diff', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      sendNotFound(res, 'Repository or branch not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get file diff' });
+    sendInternalError(res, err.message || 'Failed to get file diff');
   }
 });
 
@@ -270,7 +271,7 @@ router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, async (req: Req
     const { owner, repo, base, head } = req.params;
 
     if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      sendError(res, 'GitHub not connected', 400);
       return;
     }
 
@@ -287,29 +288,26 @@ router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, async (req: Req
     const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0);
     const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0);
 
-    res.json({
-      success: true,
-      data: {
-        filesChanged: files.length,
-        additions: totalAdditions,
-        deletions: totalDeletions,
-        totalChanges: totalAdditions + totalDeletions,
-        commits: comparison.commits?.length || 0,
-        aheadBy: comparison.ahead_by,
-        behindBy: comparison.behind_by,
-        status: comparison.status,
-      },
+    sendSuccess(res, {
+      filesChanged: files.length,
+      additions: totalAdditions,
+      deletions: totalDeletions,
+      totalChanges: totalAdditions + totalDeletions,
+      commits: comparison.commits?.length || 0,
+      aheadBy: comparison.ahead_by,
+      behindBy: comparison.behind_by,
+      status: comparison.status,
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     logger.error('Failed to get diff stats', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      sendNotFound(res, 'Repository or branch not found');
       return;
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get diff stats' });
+    sendInternalError(res, err.message || 'Failed to get diff stats');
   }
 });
 

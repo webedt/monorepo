@@ -18,6 +18,12 @@ import {
   sql,
   ilike,
   or,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
+  sendConflict,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -190,20 +196,17 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       // For accurate count, would need a more complex query
     }
 
-    res.json({
-      success: true,
-      data: {
-        snippets: userSnippets,
-        total,
-        limit,
-        offset,
-        languages: SNIPPET_LANGUAGES,
-        categories: SNIPPET_CATEGORIES,
-      },
+    sendSuccess(res, {
+      snippets: userSnippets,
+      total,
+      limit,
+      offset,
+      languages: SNIPPET_LANGUAGES,
+      categories: SNIPPET_CATEGORIES,
     });
   } catch (error) {
     logger.error('List snippets error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to fetch snippets' });
+    sendInternalError(res, 'Failed to fetch snippets');
   }
 });
 
@@ -219,7 +222,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(snippets.id, id), eq(snippets.userId, authReq.user!.id)));
 
     if (!snippet) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -235,16 +238,13 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       .innerJoin(snippetCollections, eq(snippetsInCollections.collectionId, snippetCollections.id))
       .where(eq(snippetsInCollections.snippetId, id));
 
-    res.json({
-      success: true,
-      data: {
-        ...snippet,
-        collections,
-      },
+    sendSuccess(res, {
+      ...snippet,
+      collections,
     });
   } catch (error) {
     logger.error('Get snippet error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to fetch snippet' });
+    sendInternalError(res, 'Failed to fetch snippet');
   }
 });
 
@@ -267,23 +267,23 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     // Validate required fields
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Title is required' });
+      sendError(res, 'Title is required', 400);
       return;
     }
     if (title.length > MAX_TITLE_LENGTH) {
-      res.status(400).json({ success: false, error: `Title must be ${MAX_TITLE_LENGTH} characters or less` });
+      sendError(res, `Title must be ${MAX_TITLE_LENGTH} characters or less`, 400);
       return;
     }
     if (!code || typeof code !== 'string' || code.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Code is required' });
+      sendError(res, 'Code is required', 400);
       return;
     }
     if (code.length > MAX_CODE_LENGTH) {
-      res.status(400).json({ success: false, error: `Code must be ${MAX_CODE_LENGTH} characters or less` });
+      sendError(res, `Code must be ${MAX_CODE_LENGTH} characters or less`, 400);
       return;
     }
     if (description && description.length > MAX_DESCRIPTION_LENGTH) {
-      res.status(400).json({ success: false, error: `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less` });
+      sendError(res, `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`, 400);
       return;
     }
 
@@ -338,20 +338,17 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       category,
     });
 
-    res.status(201).json({
-      success: true,
-      data: newSnippet,
-    });
+    sendSuccess(res, newSnippet, 201);
   } catch (error) {
     logger.error('Create snippet error', error as Error, { component: 'Snippets' });
 
     // Check for unique constraint violation
     if ((error as any)?.code === '23505') {
-      res.status(409).json({ success: false, error: 'A snippet with this title already exists' });
+      sendConflict(res, 'A snippet with this title already exists');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to create snippet' });
+    sendInternalError(res, 'Failed to create snippet');
   }
 });
 
@@ -379,7 +376,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(snippets.id, id), eq(snippets.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -390,29 +387,29 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 
     if (title !== undefined) {
       if (typeof title !== 'string' || title.trim().length === 0) {
-        res.status(400).json({ success: false, error: 'Title cannot be empty' });
+        sendError(res, 'Title cannot be empty', 400);
         return;
       }
       if (title.length > MAX_TITLE_LENGTH) {
-        res.status(400).json({ success: false, error: `Title must be ${MAX_TITLE_LENGTH} characters or less` });
+        sendError(res, `Title must be ${MAX_TITLE_LENGTH} characters or less`, 400);
         return;
       }
       updates.title = title.trim();
     }
     if (description !== undefined) {
       if (description && description.length > MAX_DESCRIPTION_LENGTH) {
-        res.status(400).json({ success: false, error: `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less` });
+        sendError(res, `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`, 400);
         return;
       }
       updates.description = description?.trim() || null;
     }
     if (code !== undefined) {
       if (typeof code !== 'string' || code.trim().length === 0) {
-        res.status(400).json({ success: false, error: 'Code cannot be empty' });
+        sendError(res, 'Code cannot be empty', 400);
         return;
       }
       if (code.length > MAX_CODE_LENGTH) {
-        res.status(400).json({ success: false, error: `Code must be ${MAX_CODE_LENGTH} characters or less` });
+        sendError(res, `Code must be ${MAX_CODE_LENGTH} characters or less`, 400);
         return;
       }
       updates.code = code.trim();
@@ -448,19 +445,16 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
       userId: authReq.user!.id,
     });
 
-    res.json({
-      success: true,
-      data: updated,
-    });
+    sendSuccess(res, updated);
   } catch (error) {
     logger.error('Update snippet error', error as Error, { component: 'Snippets' });
 
     if ((error as any)?.code === '23505') {
-      res.status(409).json({ success: false, error: 'A snippet with this title already exists' });
+      sendConflict(res, 'A snippet with this title already exists');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to update snippet' });
+    sendInternalError(res, 'Failed to update snippet');
   }
 });
 
@@ -477,7 +471,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(snippets.id, id), eq(snippets.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -490,13 +484,10 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       userId: authReq.user!.id,
     });
 
-    res.json({
-      success: true,
-      message: 'Snippet deleted',
-    });
+    sendSuccess(res, { message: 'Snippet deleted' });
   } catch (error) {
     logger.error('Delete snippet error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to delete snippet' });
+    sendInternalError(res, 'Failed to delete snippet');
   }
 });
 
@@ -513,7 +504,7 @@ router.post('/:id/use', requireAuth, async (req: Request, res: Response) => {
       .where(and(eq(snippets.id, id), eq(snippets.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -526,13 +517,10 @@ router.post('/:id/use', requireAuth, async (req: Request, res: Response) => {
       .where(eq(snippets.id, id))
       .returning();
 
-    res.json({
-      success: true,
-      data: updated,
-    });
+    sendSuccess(res, updated);
   } catch (error) {
     logger.error('Record snippet usage error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to record usage' });
+    sendInternalError(res, 'Failed to record usage');
   }
 });
 
@@ -549,7 +537,7 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
       .where(and(eq(snippets.id, id), eq(snippets.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -562,13 +550,10 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
       .where(eq(snippets.id, id))
       .returning();
 
-    res.json({
-      success: true,
-      data: updated,
-    });
+    sendSuccess(res, updated);
   } catch (error) {
     logger.error('Toggle favorite error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to toggle favorite' });
+    sendInternalError(res, 'Failed to toggle favorite');
   }
 });
 
@@ -585,7 +570,7 @@ router.post('/:id/duplicate', requireAuth, async (req: Request, res: Response) =
       .where(and(eq(snippets.id, id), eq(snippets.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -622,13 +607,10 @@ router.post('/:id/duplicate', requireAuth, async (req: Request, res: Response) =
       userId: authReq.user!.id,
     });
 
-    res.status(201).json({
-      success: true,
-      data: duplicated,
-    });
+    sendSuccess(res, duplicated, 201);
   } catch (error) {
     logger.error('Duplicate snippet error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to duplicate snippet' });
+    sendInternalError(res, 'Failed to duplicate snippet');
   }
 });
 
@@ -669,16 +651,13 @@ router.get('/collections/list', requireAuth, async (req: Request, res: Response)
       snippetCount: countMap.get(c.id) || 0,
     }));
 
-    res.json({
-      success: true,
-      data: {
-        collections: collectionsWithCounts,
-        total: collections.length,
-      },
+    sendSuccess(res, {
+      collections: collectionsWithCounts,
+      total: collections.length,
     });
   } catch (error) {
     logger.error('List snippet collections error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to fetch collections' });
+    sendInternalError(res, 'Failed to fetch collections');
   }
 });
 
@@ -689,7 +668,7 @@ router.post('/collections', requireAuth, async (req: Request, res: Response) => 
     const { name, description, color, icon, isDefault = false } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Collection name is required' });
+      sendError(res, 'Collection name is required', 400);
       return;
     }
 
@@ -722,19 +701,16 @@ router.post('/collections', requireAuth, async (req: Request, res: Response) => 
       userId: authReq.user!.id,
     });
 
-    res.status(201).json({
-      success: true,
-      data: newCollection,
-    });
+    sendSuccess(res, newCollection, 201);
   } catch (error) {
     logger.error('Create snippet collection error', error as Error, { component: 'Snippets' });
 
     if ((error as any)?.code === '23505') {
-      res.status(409).json({ success: false, error: 'A collection with this name already exists' });
+      sendConflict(res, 'A collection with this name already exists');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to create collection' });
+    sendInternalError(res, 'Failed to create collection');
   }
 });
 
@@ -752,7 +728,7 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
       .where(and(eq(snippetCollections.id, id), eq(snippetCollections.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -762,7 +738,7 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
 
     if (name !== undefined) {
       if (typeof name !== 'string' || name.trim().length === 0) {
-        res.status(400).json({ success: false, error: 'Collection name cannot be empty' });
+        sendError(res, 'Collection name cannot be empty', 400);
         return;
       }
       updates.name = name.trim();
@@ -796,19 +772,16 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
       .where(eq(snippetCollections.id, id))
       .returning();
 
-    res.json({
-      success: true,
-      data: updated,
-    });
+    sendSuccess(res, updated);
   } catch (error) {
     logger.error('Update snippet collection error', error as Error, { component: 'Snippets' });
 
     if ((error as any)?.code === '23505') {
-      res.status(409).json({ success: false, error: 'A collection with this name already exists' });
+      sendConflict(res, 'A collection with this name already exists');
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to update collection' });
+    sendInternalError(res, 'Failed to update collection');
   }
 });
 
@@ -825,7 +798,7 @@ router.delete('/collections/:id', requireAuth, async (req: Request, res: Respons
       .where(and(eq(snippetCollections.id, id), eq(snippetCollections.userId, authReq.user!.id)));
 
     if (!existing) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -838,13 +811,10 @@ router.delete('/collections/:id', requireAuth, async (req: Request, res: Respons
       userId: authReq.user!.id,
     });
 
-    res.json({
-      success: true,
-      message: 'Collection deleted',
-    });
+    sendSuccess(res, { message: 'Collection deleted' });
   } catch (error) {
     logger.error('Delete snippet collection error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to delete collection' });
+    sendInternalError(res, 'Failed to delete collection');
   }
 });
 
@@ -861,7 +831,7 @@ router.post('/collections/:collectionId/snippets/:snippetId', requireAuth, async
       .where(and(eq(snippetCollections.id, collectionId), eq(snippetCollections.userId, authReq.user!.id)));
 
     if (!collection) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -872,7 +842,7 @@ router.post('/collections/:collectionId/snippets/:snippetId', requireAuth, async
       .where(and(eq(snippets.id, snippetId), eq(snippets.userId, authReq.user!.id)));
 
     if (!snippet) {
-      res.status(404).json({ success: false, error: 'Snippet not found' });
+      sendNotFound(res, 'Snippet not found');
       return;
     }
 
@@ -886,10 +856,7 @@ router.post('/collections/:collectionId/snippets/:snippetId', requireAuth, async
       ));
 
     if (existing) {
-      res.json({
-        success: true,
-        message: 'Snippet already in collection',
-      });
+      sendSuccess(res, { message: 'Snippet already in collection' });
       return;
     }
 
@@ -899,13 +866,10 @@ router.post('/collections/:collectionId/snippets/:snippetId', requireAuth, async
       collectionId,
     });
 
-    res.json({
-      success: true,
-      message: 'Snippet added to collection',
-    });
+    sendSuccess(res, { message: 'Snippet added to collection' });
   } catch (error) {
     logger.error('Add snippet to collection error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to add snippet to collection' });
+    sendInternalError(res, 'Failed to add snippet to collection');
   }
 });
 
@@ -922,7 +886,7 @@ router.delete('/collections/:collectionId/snippets/:snippetId', requireAuth, asy
       .where(and(eq(snippetCollections.id, collectionId), eq(snippetCollections.userId, authReq.user!.id)));
 
     if (!collection) {
-      res.status(404).json({ success: false, error: 'Collection not found' });
+      sendNotFound(res, 'Collection not found');
       return;
     }
 
@@ -933,13 +897,10 @@ router.delete('/collections/:collectionId/snippets/:snippetId', requireAuth, asy
         eq(snippetsInCollections.collectionId, collectionId)
       ));
 
-    res.json({
-      success: true,
-      message: 'Snippet removed from collection',
-    });
+    sendSuccess(res, { message: 'Snippet removed from collection' });
   } catch (error) {
     logger.error('Remove snippet from collection error', error as Error, { component: 'Snippets' });
-    res.status(500).json({ success: false, error: 'Failed to remove snippet from collection' });
+    sendInternalError(res, 'Failed to remove snippet from collection');
   }
 });
 

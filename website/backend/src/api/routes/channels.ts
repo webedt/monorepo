@@ -15,6 +15,11 @@ import {
   desc,
   asc,
   sql,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -36,18 +41,15 @@ router.get('/', async (req: Request, res: Response) => {
       .where(eq(communityChannels.status, 'active'))
       .orderBy(asc(communityChannels.sortOrder), asc(communityChannels.name));
 
-    res.json({
-      success: true,
-      data: {
-        channels: channels.map((c) => ({
-          ...c.channel,
-          game: c.game,
-        })),
-      },
+    sendSuccess(res, {
+      channels: channels.map((c) => ({
+        ...c.channel,
+        game: c.game,
+      })),
     });
   } catch (error) {
     logger.error('Get channels error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to fetch channels' });
+    sendInternalError(res, 'Failed to fetch channels');
   }
 });
 
@@ -72,20 +74,17 @@ router.get('/by-slug/:slug', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!result) {
-      res.status(404).json({ success: false, error: 'Channel not found' });
+      sendNotFound(res, 'Channel not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        ...result.channel,
-        game: result.game,
-      },
+    sendSuccess(res, {
+      ...result.channel,
+      game: result.game,
     });
   } catch (error) {
     logger.error('Get channel by slug error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to fetch channel' });
+    sendInternalError(res, 'Failed to fetch channel');
   }
 });
 
@@ -122,22 +121,19 @@ router.get('/activity/recent', async (req: Request, res: Response) => {
       .orderBy(desc(channelMessages.createdAt))
       .limit(limit);
 
-    res.json({
-      success: true,
-      data: {
-        messages: messages.map((m) => ({
-          ...m.message,
-          author: {
-            id: m.author.id,
-            displayName: m.author.displayName || m.author.email?.split('@')[0],
-          },
-          channel: m.channel,
-        })),
-      },
+    sendSuccess(res, {
+      messages: messages.map((m) => ({
+        ...m.message,
+        author: {
+          id: m.author.id,
+          displayName: m.author.displayName || m.author.email?.split('@')[0],
+        },
+        channel: m.channel,
+      })),
     });
   } catch (error) {
     logger.error('Get recent activity error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to fetch recent activity' });
+    sendInternalError(res, 'Failed to fetch recent activity');
   }
 });
 
@@ -157,20 +153,17 @@ router.get('/:id', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!result || result.channel.status !== 'active') {
-      res.status(404).json({ success: false, error: 'Channel not found' });
+      sendNotFound(res, 'Channel not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        ...result.channel,
-        game: result.game,
-      },
+    sendSuccess(res, {
+      ...result.channel,
+      game: result.game,
     });
   } catch (error) {
     logger.error('Get channel error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to fetch channel' });
+    sendInternalError(res, 'Failed to fetch channel');
   }
 });
 
@@ -189,7 +182,7 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!channel || channel.status !== 'active') {
-      res.status(404).json({ success: false, error: 'Channel not found' });
+      sendNotFound(res, 'Channel not found');
       return;
     }
 
@@ -231,25 +224,22 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
     // Reverse to get chronological order for display
     const sortedMessages = messages.reverse();
 
-    res.json({
-      success: true,
-      data: {
-        messages: sortedMessages.map((m) => ({
-          ...m.message,
-          author: {
-            id: m.author.id,
-            displayName: m.author.displayName || m.author.email?.split('@')[0],
-          },
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      messages: sortedMessages.map((m) => ({
+        ...m.message,
+        author: {
+          id: m.author.id,
+          displayName: m.author.displayName || m.author.email?.split('@')[0],
+        },
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get channel messages error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+    sendInternalError(res, 'Failed to fetch messages');
   }
 });
 
@@ -261,17 +251,14 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
     const { content, replyToId, images } = req.body;
 
     if (!content || content.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Message content is required' });
+      sendError(res, 'Message content is required', 400);
       return;
     }
 
     // Validate content length (max 4000 characters)
     const MAX_MESSAGE_LENGTH = 4000;
     if (content.length > MAX_MESSAGE_LENGTH) {
-      res.status(400).json({
-        success: false,
-        error: `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`,
-      });
+      sendError(res, `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`, 400);
       return;
     }
 
@@ -283,12 +270,12 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
       .limit(1);
 
     if (!channel || channel.status !== 'active') {
-      res.status(404).json({ success: false, error: 'Channel not found' });
+      sendNotFound(res, 'Channel not found');
       return;
     }
 
     if (channel.isReadOnly && !authReq.user!.isAdmin) {
-      res.status(403).json({ success: false, error: 'This channel is read-only' });
+      sendForbidden(res, 'This channel is read-only');
       return;
     }
 
@@ -306,7 +293,7 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
         .limit(1);
 
       if (!replyTarget) {
-        res.status(404).json({ success: false, error: 'Reply target not found' });
+        sendNotFound(res, 'Reply target not found');
         return;
       }
     }
@@ -341,21 +328,18 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
       messageId: message.id,
     });
 
-    res.json({
-      success: true,
-      data: {
-        message: {
-          ...message,
-          author: {
-            id: author.id,
-            displayName: author.displayName || author.email?.split('@')[0],
-          },
+    sendSuccess(res, {
+      message: {
+        ...message,
+        author: {
+          id: author.id,
+          displayName: author.displayName || author.email?.split('@')[0],
         },
       },
     });
   } catch (error) {
     logger.error('Post message error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to post message' });
+    sendInternalError(res, 'Failed to post message');
   }
 });
 
@@ -367,17 +351,14 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
     const { content } = req.body;
 
     if (!content || content.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Message content is required' });
+      sendError(res, 'Message content is required', 400);
       return;
     }
 
     // Validate content length (max 4000 characters)
     const MAX_MESSAGE_LENGTH = 4000;
     if (content.length > MAX_MESSAGE_LENGTH) {
-      res.status(400).json({
-        success: false,
-        error: `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`,
-      });
+      sendError(res, `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`, 400);
       return;
     }
 
@@ -389,13 +370,13 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
       .limit(1);
 
     if (!message) {
-      res.status(404).json({ success: false, error: 'Message not found' });
+      sendNotFound(res, 'Message not found');
       return;
     }
 
     // Check ownership
     if (message.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+      sendForbidden(res, 'Access denied');
       return;
     }
 
@@ -410,13 +391,10 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
       .where(eq(channelMessages.id, messageId))
       .returning();
 
-    res.json({
-      success: true,
-      data: { message: updated },
-    });
+    sendSuccess(res, { message: updated });
   } catch (error) {
     logger.error('Edit message error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to edit message' });
+    sendInternalError(res, 'Failed to edit message');
   }
 });
 
@@ -434,13 +412,13 @@ router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) 
       .limit(1);
 
     if (!message) {
-      res.status(404).json({ success: false, error: 'Message not found' });
+      sendNotFound(res, 'Message not found');
       return;
     }
 
     // Check ownership (or admin)
     if (message.userId !== authReq.user!.id && !authReq.user!.isAdmin) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+      sendForbidden(res, 'Access denied');
       return;
     }
 
@@ -450,13 +428,10 @@ router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) 
       .set({ status: 'removed' })
       .where(eq(channelMessages.id, messageId));
 
-    res.json({
-      success: true,
-      data: { message: 'Message deleted' },
-    });
+    sendSuccess(res, { message: 'Message deleted' });
   } catch (error) {
     logger.error('Delete message error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to delete message' });
+    sendInternalError(res, 'Failed to delete message');
   }
 });
 
@@ -466,14 +441,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     if (!authReq.user!.isAdmin) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
     const { name, slug, description, gameId, isDefault, isReadOnly, sortOrder } = req.body;
 
     if (!name || !slug) {
-      res.status(400).json({ success: false, error: 'Name and slug are required' });
+      sendError(res, 'Name and slug are required', 400);
       return;
     }
 
@@ -485,7 +460,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (existing) {
-      res.status(400).json({ success: false, error: 'Channel with this slug already exists' });
+      sendError(res, 'Channel with this slug already exists', 400);
       return;
     }
 
@@ -498,7 +473,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         .limit(1);
 
       if (!game) {
-        res.status(404).json({ success: false, error: 'Game not found' });
+        sendNotFound(res, 'Game not found');
         return;
       }
     }
@@ -524,13 +499,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       channelSlug: slug,
     });
 
-    res.json({
-      success: true,
-      data: { channel },
-    });
+    sendSuccess(res, { channel });
   } catch (error) {
     logger.error('Create channel error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to create channel' });
+    sendInternalError(res, 'Failed to create channel');
   }
 });
 
@@ -540,7 +512,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     if (!authReq.user!.isAdmin) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+      sendForbidden(res, 'Admin access required');
       return;
     }
 
@@ -555,7 +527,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!channel) {
-      res.status(404).json({ success: false, error: 'Channel not found' });
+      sendNotFound(res, 'Channel not found');
       return;
     }
 
@@ -574,13 +546,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       .where(eq(communityChannels.id, channelId))
       .returning();
 
-    res.json({
-      success: true,
-      data: { channel: updated },
-    });
+    sendSuccess(res, { channel: updated });
   } catch (error) {
     logger.error('Update channel error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to update channel' });
+    sendInternalError(res, 'Failed to update channel');
   }
 });
 

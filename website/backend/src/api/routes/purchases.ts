@@ -8,6 +8,13 @@ import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPayment
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
+} from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 import type { PaymentProvider } from '@webedt/shared';
@@ -41,20 +48,17 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
       0
     );
 
-    res.json({
-      success: true,
-      data: {
-        totalPurchases: allPurchases.length,
-        completedPurchases: completedPurchases.length,
-        refundedPurchases: refundedPurchases.length,
-        totalSpentCents: totalSpent,
-        totalRefundedCents: totalRefunded,
-        netSpentCents: totalSpent - totalRefunded,
-      },
+    sendSuccess(res, {
+      totalPurchases: allPurchases.length,
+      completedPurchases: completedPurchases.length,
+      refundedPurchases: refundedPurchases.length,
+      totalSpentCents: totalSpent,
+      totalRefundedCents: totalRefunded,
+      netSpentCents: totalSpent - totalRefunded,
     });
   } catch (error) {
     logger.error('Get purchase stats error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to fetch purchase stats' });
+    sendInternalError(res, 'Failed to fetch purchase stats');
   }
 });
 
@@ -86,22 +90,19 @@ router.get('/history', async (req: Request, res: Response) => {
 
     const total = allPurchases.length;
 
-    res.json({
-      success: true,
-      data: {
-        purchases: purchaseHistory.map((item) => ({
-          ...item.purchase,
-          game: item.game,
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      purchases: purchaseHistory.map((item) => ({
+        ...item.purchase,
+        game: item.game,
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get purchase history error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to fetch purchase history' });
+    sendInternalError(res, 'Failed to fetch purchase history');
   }
 });
 
@@ -120,7 +121,7 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!game) {
-      res.status(404).json({ success: false, error: 'Game not found' });
+      sendNotFound(res, 'Game not found');
       return;
     }
 
@@ -137,7 +138,7 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       .limit(1);
 
     if (existingLibraryItem) {
-      res.status(400).json({ success: false, error: 'Game already owned' });
+      sendError(res, 'Game already owned', 400);
       return;
     }
 
@@ -150,20 +151,12 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       if (provider) {
         const validProviders: PaymentProvider[] = ['stripe', 'paypal'];
         if (!validProviders.includes(provider)) {
-          res.status(400).json({
-            success: false,
-            error: 'Invalid payment provider',
-            validProviders,
-          });
+          sendError(res, 'Invalid payment provider', 400);
           return;
         }
 
         if (!paymentService.isProviderAvailable(provider)) {
-          res.status(400).json({
-            success: false,
-            error: `Payment provider ${provider} is not available`,
-            availableProviders,
-          });
+          sendError(res, `Payment provider ${provider} is not available`, 400);
           return;
         }
 
@@ -187,28 +180,17 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
           cancelUrl,
         });
 
-        res.json({
-          success: true,
-          data: {
-            requiresPayment: true,
-            checkoutUrl: session.url,
-            sessionId: session.id,
-            provider: session.provider,
-          },
+        sendSuccess(res, {
+          requiresPayment: true,
+          checkoutUrl: session.url,
+          sessionId: session.id,
+          provider: session.provider,
         });
         return;
       }
 
       // No provider specified - return payment required response
-      res.status(402).json({
-        success: false,
-        error: 'Payment required',
-        requiresPayment: true,
-        price: game.price,
-        currency: game.currency,
-        availableProviders,
-        checkoutEndpoint: '/api/payments/checkout',
-      });
+      sendError(res, 'Payment required', 402);
       return;
     }
 
@@ -261,17 +243,14 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       purchaseId,
     });
 
-    res.json({
-      success: true,
-      data: {
-        purchase,
-        libraryItem,
-        message: 'Game added to library',
-      },
+    sendSuccess(res, {
+      purchase,
+      libraryItem,
+      message: 'Game added to library',
     });
   } catch (error) {
     logger.error('Purchase game error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to complete purchase' });
+    sendInternalError(res, 'Failed to complete purchase');
   }
 });
 
@@ -297,20 +276,17 @@ router.get('/:purchaseId', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!purchase) {
-      res.status(404).json({ success: false, error: 'Purchase not found' });
+      sendNotFound(res, 'Purchase not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        ...purchase.purchase,
-        game: purchase.game,
-      },
+    sendSuccess(res, {
+      ...purchase.purchase,
+      game: purchase.game,
     });
   } catch (error) {
     logger.error('Get purchase error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to fetch purchase' });
+    sendInternalError(res, 'Failed to fetch purchase');
   }
 });
 
@@ -322,10 +298,7 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
     const { reason } = req.body;
 
     if (!reason || reason.trim().length < 10) {
-      res.status(400).json({
-        success: false,
-        error: 'Refund reason is required (minimum 10 characters)',
-      });
+      sendError(res, 'Refund reason is required (minimum 10 characters)', 400);
       return;
     }
 
@@ -341,22 +314,22 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!purchase) {
-      res.status(404).json({ success: false, error: 'Purchase not found' });
+      sendNotFound(res, 'Purchase not found');
       return;
     }
 
     if (purchase.status === 'refunded') {
-      res.status(400).json({ success: false, error: 'Purchase already refunded' });
+      sendError(res, 'Purchase already refunded', 400);
       return;
     }
 
     if (purchase.status === 'pending_refund') {
-      res.status(400).json({ success: false, error: 'Refund already pending approval' });
+      sendError(res, 'Refund already pending approval', 400);
       return;
     }
 
     if (purchase.status !== 'completed') {
-      res.status(400).json({ success: false, error: 'Purchase not eligible for refund' });
+      sendError(res, 'Purchase not eligible for refund', 400);
       return;
     }
 
@@ -366,10 +339,7 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
     );
 
     if (daysSincePurchase > 14) {
-      res.status(400).json({
-        success: false,
-        error: 'Refund period expired (14 days)',
-      });
+      sendError(res, 'Refund period expired (14 days)', 400);
       return;
     }
 
@@ -391,16 +361,13 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
       status: 'pending_refund',
     });
 
-    res.json({
-      success: true,
-      data: {
-        purchase: pendingRefund,
-        message: 'Refund request submitted. An administrator will review your request.',
-      },
+    sendSuccess(res, {
+      purchase: pendingRefund,
+      message: 'Refund request submitted. An administrator will review your request.',
     });
   } catch (error) {
     logger.error('Refund error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to process refund' });
+    sendInternalError(res, 'Failed to process refund');
   }
 });
 

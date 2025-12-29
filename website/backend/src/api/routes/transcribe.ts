@@ -7,6 +7,11 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
+import {
+  sendSuccess,
+  sendError,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = express.Router();
 
@@ -36,19 +41,13 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     // Check if OpenAI API key is configured
     if (!apiKey) {
-      res.status(400).json({
-        success: false,
-        error: 'OpenAI API key not configured. Please use browser fallback.',
-      });
+      sendError(res, 'OpenAI API key not configured. Please use browser fallback.', 400);
       return;
     }
 
     // Check if file was uploaded
     if (!req.file) {
-      res.status(400).json({
-        success: false,
-        error: 'No audio file provided',
-      });
+      sendError(res, 'No audio file provided', 400);
       return;
     }
 
@@ -79,10 +78,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', errorText);
-      res.status(response.status).json({
-        success: false,
-        error: `OpenAI API error: ${response.statusText}`,
-      });
+      sendError(res, `OpenAI API error: ${response.statusText}`, response.status);
       return;
     }
 
@@ -90,18 +86,12 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     console.log('Transcription successful:', result.text.substring(0, 100) + '...');
 
-    res.json({
-      success: true,
-      data: {
-        text: result.text,
-      },
+    sendSuccess(res, {
+      text: result.text,
     });
   } catch (error) {
     console.error('Transcription error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to transcribe audio',
-    });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to transcribe audio');
   }
 });
 

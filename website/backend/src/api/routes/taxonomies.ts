@@ -14,6 +14,12 @@ import {
   asc,
   desc,
   inArray,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendInternalError,
+  sendConflict,
 } from '@webedt/shared';
 import type {
   Taxonomy,
@@ -57,10 +63,10 @@ router.get('/', requireAuth, async (req, res) => {
       .from(taxonomies)
       .orderBy(asc(taxonomies.sortOrder), asc(taxonomies.name));
 
-    res.json({ success: true, data: allTaxonomies });
+    sendSuccess(res, allTaxonomies);
   } catch (error) {
     console.error('Error fetching taxonomies:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch taxonomies' });
+    sendInternalError(res, 'Failed to fetch taxonomies');
   }
 });
 
@@ -77,7 +83,7 @@ router.get('/by-slug/:slug', requireAuth, async (req, res) => {
       .limit(1);
 
     if (!taxonomy) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      sendNotFound(res, 'Taxonomy not found');
       return;
     }
 
@@ -88,10 +94,10 @@ router.get('/by-slug/:slug', requireAuth, async (req, res) => {
       .where(eq(taxonomyTerms.taxonomyId, taxonomy.id))
       .orderBy(asc(taxonomyTerms.sortOrder), asc(taxonomyTerms.name));
 
-    res.json({ success: true, data: { ...taxonomy, terms } });
+    sendSuccess(res, { ...taxonomy, terms });
   } catch (error) {
     console.error('Error fetching taxonomy by slug:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
+    sendInternalError(res, 'Failed to fetch taxonomy');
   }
 });
 
@@ -107,7 +113,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .limit(1);
 
     if (!taxonomy) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      sendNotFound(res, 'Taxonomy not found');
       return;
     }
 
@@ -118,10 +124,10 @@ router.get('/:id', requireAuth, async (req, res) => {
       .where(eq(taxonomyTerms.taxonomyId, id))
       .orderBy(asc(taxonomyTerms.sortOrder), asc(taxonomyTerms.name));
 
-    res.json({ success: true, data: { ...taxonomy, terms } });
+    sendSuccess(res, { ...taxonomy, terms });
   } catch (error) {
     console.error('Error fetching taxonomy:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
+    sendInternalError(res, 'Failed to fetch taxonomy');
   }
 });
 
@@ -131,7 +137,7 @@ router.post('/', requireAdmin, async (req, res) => {
     const { name, displayName, description, allowMultiple, isRequired, itemTypes, sortOrder } = req.body;
 
     if (!name || !displayName) {
-      res.status(400).json({ success: false, error: 'Name and displayName are required' });
+      sendError(res, 'Name and displayName are required', 400);
       return;
     }
 
@@ -145,7 +151,7 @@ router.post('/', requireAdmin, async (req, res) => {
       .limit(1);
 
     if (existing) {
-      res.status(400).json({ success: false, error: 'A taxonomy with this name already exists' });
+      sendError(res, 'A taxonomy with this name already exists', 400);
       return;
     }
 
@@ -165,10 +171,10 @@ router.post('/', requireAdmin, async (req, res) => {
       })
       .returning();
 
-    res.json({ success: true, data: newTaxonomy });
+    sendSuccess(res, newTaxonomy);
   } catch (error) {
     console.error('Error creating taxonomy:', error);
-    res.status(500).json({ success: false, error: 'Failed to create taxonomy' });
+    sendInternalError(res, 'Failed to create taxonomy');
   }
 });
 
@@ -180,7 +186,7 @@ router.patch('/:id', requireAdmin, async (req, res) => {
 
     // Validate status if provided
     if (status !== undefined && !isValidStatus(status)) {
-      res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` });
+      sendError(res, `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`, 400);
       return;
     }
 
@@ -205,14 +211,14 @@ router.patch('/:id', requireAdmin, async (req, res) => {
       .returning();
 
     if (!updated) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      sendNotFound(res, 'Taxonomy not found');
       return;
     }
 
-    res.json({ success: true, data: updated });
+    sendSuccess(res, updated);
   } catch (error) {
     console.error('Error updating taxonomy:', error);
-    res.status(500).json({ success: false, error: 'Failed to update taxonomy' });
+    sendInternalError(res, 'Failed to update taxonomy');
   }
 });
 
@@ -227,14 +233,14 @@ router.delete('/:id', requireAdmin, async (req, res) => {
       .returning({ id: taxonomies.id });
 
     if (!deleted) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      sendNotFound(res, 'Taxonomy not found');
       return;
     }
 
-    res.json({ success: true, data: { id: deleted.id } });
+    sendSuccess(res, { id: deleted.id });
   } catch (error) {
     console.error('Error deleting taxonomy:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete taxonomy' });
+    sendInternalError(res, 'Failed to delete taxonomy');
   }
 });
 
@@ -257,14 +263,14 @@ router.get('/terms/:termId', requireAuth, async (req, res) => {
       .limit(1);
 
     if (!term) {
-      res.status(404).json({ success: false, error: 'Term not found' });
+      sendNotFound(res, 'Term not found');
       return;
     }
 
-    res.json({ success: true, data: term });
+    sendSuccess(res, term);
   } catch (error) {
     console.error('Error fetching term:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch term' });
+    sendInternalError(res, 'Failed to fetch term');
   }
 });
 
@@ -276,13 +282,13 @@ router.patch('/terms/:termId', requireAdmin, async (req, res) => {
 
     // Validate status if provided
     if (status !== undefined && !isValidStatus(status)) {
-      res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` });
+      sendError(res, `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`, 400);
       return;
     }
 
     // Validate color if provided
     if (color !== undefined && color !== null && color !== '' && !isValidHexColor(color)) {
-      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color (e.g., #FF5733)' });
+      sendError(res, 'Invalid color format. Must be a hex color (e.g., #FF5733)', 400);
       return;
     }
 
@@ -307,14 +313,14 @@ router.patch('/terms/:termId', requireAdmin, async (req, res) => {
       .returning();
 
     if (!updated) {
-      res.status(404).json({ success: false, error: 'Term not found' });
+      sendNotFound(res, 'Term not found');
       return;
     }
 
-    res.json({ success: true, data: updated });
+    sendSuccess(res, updated);
   } catch (error) {
     console.error('Error updating term:', error);
-    res.status(500).json({ success: false, error: 'Failed to update term' });
+    sendInternalError(res, 'Failed to update term');
   }
 });
 
@@ -329,14 +335,14 @@ router.delete('/terms/:termId', requireAdmin, async (req, res) => {
       .returning({ id: taxonomyTerms.id });
 
     if (!deleted) {
-      res.status(404).json({ success: false, error: 'Term not found' });
+      sendNotFound(res, 'Term not found');
       return;
     }
 
-    res.json({ success: true, data: { id: deleted.id } });
+    sendSuccess(res, { id: deleted.id });
   } catch (error) {
     console.error('Error deleting term:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete term' });
+    sendInternalError(res, 'Failed to delete term');
   }
 });
 
@@ -351,10 +357,10 @@ router.get('/:taxonomyId/terms', requireAuth, async (req, res) => {
       .where(eq(taxonomyTerms.taxonomyId, taxonomyId))
       .orderBy(asc(taxonomyTerms.sortOrder), asc(taxonomyTerms.name));
 
-    res.json({ success: true, data: terms });
+    sendSuccess(res, terms);
   } catch (error) {
     console.error('Error fetching taxonomy terms:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch terms' });
+    sendInternalError(res, 'Failed to fetch terms');
   }
 });
 
@@ -365,13 +371,13 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
     const { name, description, parentId, color, icon, metadata, sortOrder } = req.body;
 
     if (!name) {
-      res.status(400).json({ success: false, error: 'Name is required' });
+      sendError(res, 'Name is required', 400);
       return;
     }
 
     // Validate color if provided
     if (color && !isValidHexColor(color)) {
-      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color (e.g., #FF5733)' });
+      sendError(res, 'Invalid color format. Must be a hex color (e.g., #FF5733)', 400);
       return;
     }
 
@@ -383,7 +389,7 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
       .limit(1);
 
     if (!taxonomy) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      sendNotFound(res, 'Taxonomy not found');
       return;
     }
 
@@ -397,7 +403,7 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
       .limit(1);
 
     if (existing) {
-      res.status(400).json({ success: false, error: 'A term with this name already exists in this taxonomy' });
+      sendError(res, 'A term with this name already exists in this taxonomy', 400);
       return;
     }
 
@@ -418,10 +424,10 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
       })
       .returning();
 
-    res.json({ success: true, data: newTerm });
+    sendSuccess(res, newTerm);
   } catch (error) {
     console.error('Error creating term:', error);
-    res.status(500).json({ success: false, error: 'Failed to create term' });
+    sendInternalError(res, 'Failed to create term');
   }
 });
 
@@ -452,10 +458,10 @@ router.get('/items/by-term/:termId', requireAuth, async (req, res) => {
 
     const items = await query;
 
-    res.json({ success: true, data: items });
+    sendSuccess(res, items);
   } catch (error) {
     console.error('Error fetching items by term:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch items' });
+    sendInternalError(res, 'Failed to fetch items');
   }
 });
 
@@ -485,10 +491,10 @@ router.get('/items/:itemType/:itemId', requireAuth, async (req, res) => {
       grouped[row.taxonomy.id].terms.push(row.term);
     }
 
-    res.json({ success: true, data: Object.values(grouped) });
+    sendSuccess(res, Object.values(grouped));
   } catch (error) {
     console.error('Error fetching item taxonomies:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch item taxonomies' });
+    sendInternalError(res, 'Failed to fetch item taxonomies');
   }
 });
 
@@ -505,7 +511,7 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
       .limit(1);
 
     if (!term) {
-      res.status(404).json({ success: false, error: 'Term not found' });
+      sendNotFound(res, 'Term not found');
       return;
     }
 
@@ -517,13 +523,13 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
       .limit(1);
 
     if (!taxonomy) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      sendNotFound(res, 'Taxonomy not found');
       return;
     }
 
     // Check if taxonomy applies to this item type
     if (taxonomy.itemTypes && taxonomy.itemTypes.length > 0 && !taxonomy.itemTypes.includes(itemType)) {
-      res.status(400).json({ success: false, error: `This taxonomy cannot be applied to ${itemType} items` });
+      sendError(res, `This taxonomy cannot be applied to ${itemType} items`, 400);
       return;
     }
 
@@ -565,7 +571,7 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
       .limit(1);
 
     if (existing) {
-      res.json({ success: true, data: existing, message: 'Term already assigned' });
+      sendSuccess(res, existing);
       return;
     }
 
@@ -579,10 +585,10 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
       })
       .returning();
 
-    res.json({ success: true, data: assignment });
+    sendSuccess(res, assignment);
   } catch (error) {
     console.error('Error assigning term to item:', error);
-    res.status(500).json({ success: false, error: 'Failed to assign term' });
+    sendInternalError(res, 'Failed to assign term');
   }
 });
 
@@ -603,14 +609,14 @@ router.delete('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req
       .returning({ id: itemTaxonomies.id });
 
     if (!deleted) {
-      res.status(404).json({ success: false, error: 'Assignment not found' });
+      sendNotFound(res, 'Assignment not found');
       return;
     }
 
-    res.json({ success: true, data: { id: deleted.id } });
+    sendSuccess(res, { id: deleted.id });
   } catch (error) {
     console.error('Error removing term from item:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove term' });
+    sendInternalError(res, 'Failed to remove term');
   }
 });
 
@@ -621,7 +627,7 @@ router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
     const { termIds } = req.body; // Array of term IDs to assign
 
     if (!Array.isArray(termIds)) {
-      res.status(400).json({ success: false, error: 'termIds must be an array' });
+      sendError(res, 'termIds must be an array', 400);
       return;
     }
 
@@ -636,7 +642,7 @@ router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
       const invalidIds = termIds.filter((id) => !existingIds.has(id));
 
       if (invalidIds.length > 0) {
-        res.status(400).json({ success: false, error: `Invalid term IDs: ${invalidIds.join(', ')}` });
+        sendError(res, `Invalid term IDs: ${invalidIds.join(', ')}`, 400);
         return;
       }
     }
@@ -661,10 +667,10 @@ router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
       assignments.push(assignment);
     }
 
-    res.json({ success: true, data: assignments });
+    sendSuccess(res, assignments);
   } catch (error) {
     console.error('Error bulk updating item terms:', error);
-    res.status(500).json({ success: false, error: 'Failed to update item terms' });
+    sendInternalError(res, 'Failed to update item terms');
   }
 });
 

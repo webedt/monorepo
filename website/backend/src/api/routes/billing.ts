@@ -4,6 +4,11 @@
  */
 
 import { Router, Request, Response } from 'express';
+import {
+  sendSuccess,
+  sendError,
+  sendInternalError,
+} from '@webedt/shared';
 import { StorageService, STORAGE_TIERS } from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -46,25 +51,22 @@ router.get('/current', requireAuth, async (req: Request, res: Response) => {
 
     const pricing = TIER_PRICING[tier];
 
-    res.json({
-      success: true,
-      data: {
-        tier,
-        tierLabel: tier.charAt(0) + tier.slice(1).toLowerCase(),
-        price: pricing.price,
-        priceLabel: pricing.priceLabel,
-        usedBytes: stats.usedBytes.toString(),
-        quotaBytes: stats.quotaBytes.toString(),
-        availableBytes: stats.availableBytes.toString(),
-        usagePercent: stats.usagePercent,
-        usedFormatted: StorageService.formatBytes(stats.usedBytes),
-        quotaFormatted: StorageService.formatBytes(stats.quotaBytes),
-        availableFormatted: StorageService.formatBytes(stats.availableBytes),
-      },
+    sendSuccess(res, {
+      tier,
+      tierLabel: tier.charAt(0) + tier.slice(1).toLowerCase(),
+      price: pricing.price,
+      priceLabel: pricing.priceLabel,
+      usedBytes: stats.usedBytes.toString(),
+      quotaBytes: stats.quotaBytes.toString(),
+      availableBytes: stats.availableBytes.toString(),
+      usagePercent: stats.usagePercent,
+      usedFormatted: StorageService.formatBytes(stats.usedBytes),
+      quotaFormatted: StorageService.formatBytes(stats.quotaBytes),
+      availableFormatted: StorageService.formatBytes(stats.availableBytes),
     });
   } catch (error) {
     console.error('Get billing info error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get billing information' });
+    sendInternalError(res, 'Failed to get billing information');
   }
 });
 
@@ -86,13 +88,10 @@ router.get('/tiers', async (_req: Request, res: Response) => {
       };
     });
 
-    res.json({
-      success: true,
-      data: { tiers },
-    });
+    sendSuccess(res, { tiers });
   } catch (error) {
     console.error('Get pricing tiers error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get pricing tiers' });
+    sendInternalError(res, 'Failed to get pricing tiers');
   }
 });
 
@@ -107,10 +106,7 @@ router.post('/change-plan', requireAuth, async (req: Request, res: Response) => 
 
     const validTiers = Object.keys(STORAGE_TIERS);
     if (!tier || !validTiers.includes(tier)) {
-      res.status(400).json({
-        success: false,
-        error: `Invalid tier. Must be one of: ${validTiers.join(', ')}`,
-      });
+      sendError(res, `Invalid tier. Must be one of: ${validTiers.join(', ')}`, 400);
       return;
     }
 
@@ -120,10 +116,7 @@ router.post('/change-plan', requireAuth, async (req: Request, res: Response) => 
       const newQuota = STORAGE_TIERS[tier as StorageTier];
 
       if (Number(currentStats.usedBytes) > newQuota) {
-        res.status(400).json({
-          success: false,
-          error: `Cannot downgrade to ${tier}. You are using ${StorageService.formatBytes(currentStats.usedBytes)} but the ${tier} plan only allows ${StorageService.formatBytes(newQuota)}. Please delete some data first.`,
-        });
+        sendError(res, `Cannot downgrade to ${tier}. You are using ${StorageService.formatBytes(currentStats.usedBytes)} but the ${tier} plan only allows ${StorageService.formatBytes(newQuota)}. Please delete some data first.`, 400);
         return;
       }
     }
@@ -132,21 +125,18 @@ router.post('/change-plan', requireAuth, async (req: Request, res: Response) => 
     const quotaBytes = STORAGE_TIERS[tier as StorageTier];
     const pricing = TIER_PRICING[tier as StorageTier];
 
-    res.json({
-      success: true,
-      data: {
-        message: `Successfully changed to ${tier} plan`,
-        tier,
-        tierLabel: tier.charAt(0) + tier.slice(1).toLowerCase(),
-        price: pricing.price,
-        priceLabel: pricing.priceLabel,
-        newQuotaBytes: quotaBytes.toString(),
-        newQuotaFormatted: StorageService.formatBytes(quotaBytes),
-      },
+    sendSuccess(res, {
+      message: `Successfully changed to ${tier} plan`,
+      tier,
+      tierLabel: tier.charAt(0) + tier.slice(1).toLowerCase(),
+      price: pricing.price,
+      priceLabel: pricing.priceLabel,
+      newQuotaBytes: quotaBytes.toString(),
+      newQuotaFormatted: StorageService.formatBytes(quotaBytes),
     });
   } catch (error) {
     console.error('Change plan error:', error);
-    res.status(500).json({ success: false, error: 'Failed to change plan' });
+    sendInternalError(res, 'Failed to change plan');
   }
 });
 

@@ -16,6 +16,12 @@ import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -62,7 +68,7 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       .limit(1);
 
     if (existingSessions.length === 0) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -315,7 +321,7 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
         res.end();
       }
     } else {
-      res.status(500).json({ success: false, error: 'Internal server error' });
+      sendInternalError(res, 'Internal server error');
     }
   }
 });
@@ -347,7 +353,7 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       .limit(1);
 
     if (session.length === 0) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -367,16 +373,13 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       timestamp: e.timestamp
     }));
 
-    res.json({
-      success: true,
-      data: {
-        events: formattedEvents,
-        total: formattedEvents.length,
-        // Include session info for convenience
-        sessionId: session[0].id,
-        sessionPath: session[0].sessionPath,
-        status: session[0].status,
-      }
+    sendSuccess(res, {
+      events: formattedEvents,
+      total: formattedEvents.length,
+      // Include session info for convenience
+      sessionId: session[0].id,
+      sessionPath: session[0].sessionPath,
+      status: session[0].status,
     });
 
   } catch (error) {
@@ -385,7 +388,7 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       sessionId
     });
 
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    sendInternalError(res, 'Internal server error');
   }
 });
 

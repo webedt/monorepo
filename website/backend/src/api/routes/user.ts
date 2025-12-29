@@ -9,6 +9,12 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { shouldRefreshClaudeToken, refreshClaudeToken, type ClaudeAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -25,10 +31,7 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
 
     // Validate Claude auth structure
     if (!claudeAuth || !claudeAuth.accessToken || !claudeAuth.refreshToken) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid Claude auth. Must include accessToken and refreshToken.',
-      });
+      sendError(res, 'Invalid Claude auth. Must include accessToken and refreshToken.', 400);
       return;
     }
 
@@ -38,13 +41,10 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
       .set({ claudeAuth })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Claude authentication updated successfully' },
-    });
+    sendSuccess(res, { message: 'Claude authentication updated successfully' });
   } catch (error) {
     console.error('Update Claude auth error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update Claude authentication' });
+    sendInternalError(res, 'Failed to update Claude authentication');
   }
 });
 
@@ -58,13 +58,10 @@ router.delete('/claude-auth', requireAuth, async (req: Request, res: Response) =
       .set({ claudeAuth: null })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Claude authentication removed' },
-    });
+    sendSuccess(res, { message: 'Claude authentication removed' });
   } catch (error) {
     console.error('Remove Claude auth error:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove Claude authentication' });
+    sendInternalError(res, 'Failed to remove Claude authentication');
   }
 });
 
@@ -81,10 +78,7 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
       .limit(1);
 
     if (!user?.claudeAuth) {
-      res.status(400).json({
-        success: false,
-        error: 'No Claude authentication found for user',
-      });
+      sendError(res, 'No Claude authentication found for user', 400);
       return;
     }
 
@@ -93,13 +87,10 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
     // Check if refresh is needed
     if (!shouldRefreshClaudeToken(claudeAuth)) {
       logger.info('Token still valid, no refresh needed', { component: 'UserRoutes' });
-      res.json({
-        success: true,
-        data: {
-          message: 'Token still valid',
-          claudeAuth,
-          refreshed: false,
-        },
+      sendSuccess(res, {
+        message: 'Token still valid',
+        claudeAuth,
+        refreshed: false,
       });
       return;
     }
@@ -120,20 +111,14 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
       newExpiration: newClaudeAuth.expiresAt ? new Date(newClaudeAuth.expiresAt).toISOString() : 'unknown',
     });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Token refreshed successfully',
-        claudeAuth: newClaudeAuth,
-        refreshed: true,
-      },
+    sendSuccess(res, {
+      message: 'Token refreshed successfully',
+      claudeAuth: newClaudeAuth,
+      refreshed: true,
     });
   } catch (error: any) {
     logger.error('Failed to refresh Claude token', error, { component: 'UserRoutes' });
-    res.status(500).json({
-      success: false,
-      error: `Failed to refresh Claude token: ${error.message}`,
-    });
+    sendInternalError(res, `Failed to refresh Claude token: ${error.message}`);
   }
 });
 
@@ -151,10 +136,7 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
       .limit(1);
 
     if (!user?.claudeAuth) {
-      res.status(400).json({
-        success: false,
-        error: 'No Claude authentication found for user',
-      });
+      sendError(res, 'No Claude authentication found for user', 400);
       return;
     }
 
@@ -181,21 +163,15 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
       }
     }
 
-    res.json({
-      success: true,
-      data: {
-        claudeAuth,
-        refreshed: wasRefreshed,
-        expiresAt: claudeAuth.expiresAt,
-        expiresIn: claudeAuth.expiresAt ? Math.max(0, claudeAuth.expiresAt - Date.now()) : 0,
-      },
+    sendSuccess(res, {
+      claudeAuth,
+      refreshed: wasRefreshed,
+      expiresAt: claudeAuth.expiresAt,
+      expiresIn: claudeAuth.expiresAt ? Math.max(0, claudeAuth.expiresAt - Date.now()) : 0,
     });
   } catch (error: any) {
     logger.error('Failed to get Claude credentials', error, { component: 'UserRoutes' });
-    res.status(500).json({
-      success: false,
-      error: `Failed to get Claude credentials: ${error.message}`,
-    });
+    sendInternalError(res, `Failed to get Claude credentials: ${error.message}`);
   }
 });
 
@@ -207,10 +183,7 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
 
     // Validate Codex auth structure - must have either apiKey or accessToken
     if (!codexAuth || (!codexAuth.apiKey && !codexAuth.accessToken)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid Codex auth. Must include either apiKey or accessToken.',
-      });
+      sendError(res, 'Invalid Codex auth. Must include either apiKey or accessToken.', 400);
       return;
     }
 
@@ -220,13 +193,10 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       .set({ codexAuth })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Codex authentication updated successfully' },
-    });
+    sendSuccess(res, { message: 'Codex authentication updated successfully' });
   } catch (error) {
     console.error('Update Codex auth error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update Codex authentication' });
+    sendInternalError(res, 'Failed to update Codex authentication');
   }
 });
 
@@ -240,13 +210,10 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
       .set({ codexAuth: null })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Codex authentication removed' },
-    });
+    sendSuccess(res, { message: 'Codex authentication removed' });
   } catch (error) {
     console.error('Remove Codex auth error:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove Codex authentication' });
+    sendInternalError(res, 'Failed to remove Codex authentication');
   }
 });
 
@@ -263,10 +230,7 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
 
     // Validate OAuth credentials are present
     if (!accessToken || !refreshToken) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid Gemini auth. Must include OAuth tokens (accessToken/access_token and refreshToken/refresh_token). Run `gemini auth login` locally and paste the contents of ~/.gemini/oauth_creds.json',
-      });
+      sendError(res, 'Invalid Gemini auth. Must include OAuth tokens (accessToken/access_token and refreshToken/refresh_token). Run `gemini auth login` locally and paste the contents of ~/.gemini/oauth_creds.json', 400);
       return;
     }
 
@@ -285,13 +249,10 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       .set({ geminiAuth: normalizedAuth })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Gemini OAuth authentication updated successfully' },
-    });
+    sendSuccess(res, { message: 'Gemini OAuth authentication updated successfully' });
   } catch (error) {
     console.error('Update Gemini auth error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update Gemini authentication' });
+    sendInternalError(res, 'Failed to update Gemini authentication');
   }
 });
 
@@ -305,13 +266,10 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
       .set({ geminiAuth: null })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Gemini authentication removed' },
-    });
+    sendSuccess(res, { message: 'Gemini authentication removed' });
   } catch (error) {
     console.error('Remove Gemini auth error:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove Gemini authentication' });
+    sendInternalError(res, 'Failed to remove Gemini authentication');
   }
 });
 
@@ -324,10 +282,7 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
     // Validate provider is one of the valid options
     const validProviders = ['claude', 'codex', 'copilot', 'gemini'];
     if (!validProviders.includes(provider)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be one of: claude, codex, copilot, gemini',
-      });
+      sendError(res, 'Invalid provider. Must be one of: claude, codex, copilot, gemini', 400);
       return;
     }
 
@@ -336,13 +291,10 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
       .set({ preferredProvider: provider })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Preferred provider updated successfully' },
-    });
+    sendSuccess(res, { message: 'Preferred provider updated successfully' });
   } catch (error) {
     console.error('Update preferred provider error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update preferred provider' });
+    sendInternalError(res, 'Failed to update preferred provider');
   }
 });
 
@@ -355,10 +307,7 @@ router.post('/image-resize-setting', requireAuth, async (req: Request, res: Resp
     // Validate that maxDimension is a valid number
     const validDimensions = [512, 1024, 2048, 4096, 8000];
     if (!validDimensions.includes(maxDimension)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid max dimension. Must be one of: 512, 1024, 2048, 4096, 8000',
-      });
+      sendError(res, 'Invalid max dimension. Must be one of: 512, 1024, 2048, 4096, 8000', 400);
       return;
     }
 
@@ -367,13 +316,10 @@ router.post('/image-resize-setting', requireAuth, async (req: Request, res: Resp
       .set({ imageResizeMaxDimension: maxDimension })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Image resize setting updated successfully' },
-    });
+    sendSuccess(res, { message: 'Image resize setting updated successfully' });
   } catch (error) {
     console.error('Update image resize setting error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update image resize setting' });
+    sendInternalError(res, 'Failed to update image resize setting');
   }
 });
 
@@ -386,18 +332,12 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
     // Validate display name (optional field, but if provided should be reasonable)
     if (displayName !== null && displayName !== undefined && displayName !== '') {
       if (typeof displayName !== 'string') {
-        res.status(400).json({
-          success: false,
-          error: 'Display name must be a string',
-        });
+        sendError(res, 'Display name must be a string', 400);
         return;
       }
 
       if (displayName.length > 100) {
-        res.status(400).json({
-          success: false,
-          error: 'Display name must be 100 characters or less',
-        });
+        sendError(res, 'Display name must be 100 characters or less', 400);
         return;
       }
     }
@@ -410,13 +350,10 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
       .set({ displayName: finalDisplayName })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Display name updated successfully' },
-    });
+    sendSuccess(res, { message: 'Display name updated successfully' });
   } catch (error) {
     console.error('Update display name error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update display name' });
+    sendInternalError(res, 'Failed to update display name');
   }
 });
 
@@ -428,10 +365,7 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
 
     // Validate keywords is an array
     if (!Array.isArray(keywords)) {
-      res.status(400).json({
-        success: false,
-        error: 'Keywords must be an array',
-      });
+      sendError(res, 'Keywords must be an array', 400);
       return;
     }
 
@@ -445,10 +379,7 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
 
     // Limit to 20 keywords max
     if (uniqueKeywords.length > 20) {
-      res.status(400).json({
-        success: false,
-        error: 'Maximum of 20 keywords allowed',
-      });
+      sendError(res, 'Maximum of 20 keywords allowed', 400);
       return;
     }
 
@@ -457,13 +388,10 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
       .set({ voiceCommandKeywords: uniqueKeywords })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Voice command keywords updated successfully', keywords: uniqueKeywords },
-    });
+    sendSuccess(res, { message: 'Voice command keywords updated successfully', keywords: uniqueKeywords });
   } catch (error) {
     console.error('Update voice command keywords error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update voice command keywords' });
+    sendInternalError(res, 'Failed to update voice command keywords');
   }
 });
 
@@ -475,10 +403,7 @@ router.post('/stop-listening-after-submit', requireAuth, async (req: Request, re
 
     // Validate boolean
     if (typeof stopAfterSubmit !== 'boolean') {
-      res.status(400).json({
-        success: false,
-        error: 'stopAfterSubmit must be a boolean',
-      });
+      sendError(res, 'stopAfterSubmit must be a boolean', 400);
       return;
     }
 
@@ -487,13 +412,10 @@ router.post('/stop-listening-after-submit', requireAuth, async (req: Request, re
       .set({ stopListeningAfterSubmit: stopAfterSubmit })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Stop listening after submit preference updated successfully' },
-    });
+    sendSuccess(res, { message: 'Stop listening after submit preference updated successfully' });
   } catch (error) {
     console.error('Update stop listening after submit error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update stop listening after submit preference' });
+    sendInternalError(res, 'Failed to update stop listening after submit preference');
   }
 });
 
@@ -506,10 +428,7 @@ router.post('/default-landing-page', requireAuth, async (req: Request, res: Resp
     // Validate landing page is one of the valid options
     const validPages = ['store', 'library', 'community', 'sessions'];
     if (!validPages.includes(landingPage)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid landing page. Must be one of: store, library, community, sessions',
-      });
+      sendError(res, 'Invalid landing page. Must be one of: store, library, community, sessions', 400);
       return;
     }
 
@@ -518,13 +437,10 @@ router.post('/default-landing-page', requireAuth, async (req: Request, res: Resp
       .set({ defaultLandingPage: landingPage })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Default landing page updated successfully' },
-    });
+    sendSuccess(res, { message: 'Default landing page updated successfully' });
   } catch (error) {
     console.error('Update default landing page error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update default landing page' });
+    sendInternalError(res, 'Failed to update default landing page');
   }
 });
 
@@ -537,10 +453,7 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
     // Validate preferred model is one of the valid options or null/empty
     const validModels = ['', 'opus', 'sonnet'];
     if (preferredModel !== null && preferredModel !== undefined && !validModels.includes(preferredModel)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid preferred model. Must be one of: (empty), opus, sonnet',
-      });
+      sendError(res, 'Invalid preferred model. Must be one of: (empty), opus, sonnet', 400);
       return;
     }
 
@@ -552,13 +465,10 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
       .set({ preferredModel: finalPreferredModel })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Preferred model updated successfully' },
-    });
+    sendSuccess(res, { message: 'Preferred model updated successfully' });
   } catch (error) {
     console.error('Update preferred model error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update preferred model' });
+    sendInternalError(res, 'Failed to update preferred model');
   }
 });
 
@@ -571,10 +481,7 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
     // Validate verbosity level is one of the valid options
     const validLevels = ['minimal', 'normal', 'verbose'];
     if (!validLevels.includes(verbosityLevel)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid verbosity level. Must be one of: minimal, normal, verbose',
-      });
+      sendError(res, 'Invalid verbosity level. Must be one of: minimal, normal, verbose', 400);
       return;
     }
 
@@ -583,13 +490,10 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
       .set({ chatVerbosityLevel: verbosityLevel })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Chat verbosity level updated successfully' },
-    });
+    sendSuccess(res, { message: 'Chat verbosity level updated successfully' });
   } catch (error) {
     console.error('Update chat verbosity level error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update chat verbosity level' });
+    sendInternalError(res, 'Failed to update chat verbosity level');
   }
 });
 
@@ -601,18 +505,12 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
 
     // Validate API key format (OpenRouter keys start with sk-or-)
     if (!apiKey || typeof apiKey !== 'string') {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid API key. Must be a non-empty string.',
-      });
+      sendError(res, 'Invalid API key. Must be a non-empty string.', 400);
       return;
     }
 
     if (!apiKey.startsWith('sk-or-')) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid OpenRouter API key format. Keys should start with "sk-or-".',
-      });
+      sendError(res, 'Invalid OpenRouter API key format. Keys should start with "sk-or-".', 400);
       return;
     }
 
@@ -621,13 +519,10 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
       .set({ openrouterApiKey: apiKey })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'OpenRouter API key updated successfully' },
-    });
+    sendSuccess(res, { message: 'OpenRouter API key updated successfully' });
   } catch (error) {
     console.error('Update OpenRouter API key error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update OpenRouter API key' });
+    sendInternalError(res, 'Failed to update OpenRouter API key');
   }
 });
 
@@ -641,13 +536,10 @@ router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Resp
       .set({ openrouterApiKey: null })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'OpenRouter API key removed' },
-    });
+    sendSuccess(res, { message: 'OpenRouter API key removed' });
   } catch (error) {
     console.error('Remove OpenRouter API key error:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove OpenRouter API key' });
+    sendInternalError(res, 'Failed to remove OpenRouter API key');
   }
 });
 
@@ -672,20 +564,14 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
         'anthropic/claude-3-haiku',
       ];
       if (!validModels.includes(model)) {
-        res.status(400).json({
-          success: false,
-          error: `Invalid model. Must be one of: ${validModels.join(', ')}`,
-        });
+        sendError(res, `Invalid model. Must be one of: ${validModels.join(', ')}`, 400);
         return;
       }
       updates.autocompleteModel = model;
     }
 
     if (Object.keys(updates).length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'No valid settings to update',
-      });
+      sendError(res, 'No valid settings to update', 400);
       return;
     }
 
@@ -694,13 +580,10 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
       .set(updates)
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Autocomplete settings updated successfully' },
-    });
+    sendSuccess(res, { message: 'Autocomplete settings updated successfully' });
   } catch (error) {
     console.error('Update autocomplete settings error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update autocomplete settings' });
+    sendInternalError(res, 'Failed to update autocomplete settings');
   }
 });
 
@@ -712,10 +595,7 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
 
     // Validate structure
     if (!imageAiKeys || typeof imageAiKeys !== 'object') {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid imageAiKeys. Must be an object with provider keys.',
-      });
+      sendError(res, 'Invalid imageAiKeys. Must be an object with provider keys.', 400);
       return;
     }
 
@@ -733,13 +613,10 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
       .set({ imageAiKeys: sanitizedKeys })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Image AI keys updated successfully' },
-    });
+    sendSuccess(res, { message: 'Image AI keys updated successfully' });
   } catch (error) {
     console.error('Update image AI keys error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update image AI keys' });
+    sendInternalError(res, 'Failed to update image AI keys');
   }
 });
 
@@ -751,10 +628,7 @@ router.post('/image-ai-provider', requireAuth, async (req: Request, res: Respons
 
     const validProviders = ['openrouter', 'cometapi', 'google'];
     if (!validProviders.includes(provider)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be one of: openrouter, cometapi, google',
-      });
+      sendError(res, 'Invalid provider. Must be one of: openrouter, cometapi, google', 400);
       return;
     }
 
@@ -763,13 +637,10 @@ router.post('/image-ai-provider', requireAuth, async (req: Request, res: Respons
       .set({ imageAiProvider: provider })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Image AI provider updated successfully' },
-    });
+    sendSuccess(res, { message: 'Image AI provider updated successfully' });
   } catch (error) {
     console.error('Update image AI provider error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update image AI provider' });
+    sendInternalError(res, 'Failed to update image AI provider');
   }
 });
 
@@ -781,10 +652,7 @@ router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) 
 
     const validModels = ['google/gemini-2.5-flash-image', 'google/gemini-3-pro-image-preview'];
     if (!validModels.includes(model)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid model. Must be one of: google/gemini-2.5-flash-image, google/gemini-3-pro-image-preview',
-      });
+      sendError(res, 'Invalid model. Must be one of: google/gemini-2.5-flash-image, google/gemini-3-pro-image-preview', 400);
       return;
     }
 
@@ -793,13 +661,10 @@ router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) 
       .set({ imageAiModel: model })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Image AI model updated successfully' },
-    });
+    sendSuccess(res, { message: 'Image AI model updated successfully' });
   } catch (error) {
     console.error('Update image AI model error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update image AI model' });
+    sendInternalError(res, 'Failed to update image AI model');
   }
 });
 
@@ -823,7 +688,7 @@ router.get('/spending-limits', requireAuth, async (req: Request, res: Response) 
       .limit(1);
 
     if (!user) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
@@ -833,23 +698,20 @@ router.get('/spending-limits', requireAuth, async (req: Request, res: Response) 
     const remainingBudget = Math.max(0, monthlyBudget - currentSpent);
     const usagePercent = monthlyBudget > 0 ? (currentSpent / monthlyBudget) * 100 : 0;
 
-    res.json({
-      success: true,
-      data: {
-        enabled: user.spendingLimitEnabled,
-        monthlyBudgetCents: user.monthlyBudgetCents,
-        perTransactionLimitCents: user.perTransactionLimitCents,
-        resetDay: user.spendingResetDay,
-        currentMonthSpentCents: user.currentMonthSpentCents,
-        remainingBudgetCents: String(remainingBudget),
-        usagePercent: Math.round(usagePercent * 100) / 100,
-        limitAction: user.spendingLimitAction,
-        lastResetAt: user.spendingResetAt?.toISOString() || null,
-      },
+    sendSuccess(res, {
+      enabled: user.spendingLimitEnabled,
+      monthlyBudgetCents: user.monthlyBudgetCents,
+      perTransactionLimitCents: user.perTransactionLimitCents,
+      resetDay: user.spendingResetDay,
+      currentMonthSpentCents: user.currentMonthSpentCents,
+      remainingBudgetCents: String(remainingBudget),
+      usagePercent: Math.round(usagePercent * 100) / 100,
+      limitAction: user.spendingLimitAction,
+      lastResetAt: user.spendingResetAt?.toISOString() || null,
     });
   } catch (error) {
     console.error('Get spending limits error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get spending limits' });
+    sendInternalError(res, 'Failed to get spending limits');
   }
 });
 
@@ -876,10 +738,7 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
     if (monthlyBudgetCents !== undefined) {
       const budget = Number(monthlyBudgetCents);
       if (isNaN(budget) || budget < 0) {
-        res.status(400).json({
-          success: false,
-          error: 'Monthly budget must be a non-negative number',
-        });
+        sendError(res, 'Monthly budget must be a non-negative number', 400);
         return;
       }
       updates.monthlyBudgetCents = String(Math.round(budget));
@@ -889,10 +748,7 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
     if (perTransactionLimitCents !== undefined) {
       const limit = Number(perTransactionLimitCents);
       if (isNaN(limit) || limit < 0) {
-        res.status(400).json({
-          success: false,
-          error: 'Per-transaction limit must be a non-negative number',
-        });
+        sendError(res, 'Per-transaction limit must be a non-negative number', 400);
         return;
       }
       updates.perTransactionLimitCents = String(Math.round(limit));
@@ -902,10 +758,7 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
     if (resetDay !== undefined) {
       const day = Number(resetDay);
       if (isNaN(day) || day < 1 || day > 31) {
-        res.status(400).json({
-          success: false,
-          error: 'Reset day must be between 1 and 31',
-        });
+        sendError(res, 'Reset day must be between 1 and 31', 400);
         return;
       }
       updates.spendingResetDay = day;
@@ -915,20 +768,14 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
     if (limitAction !== undefined) {
       const validActions = ['warn', 'block'];
       if (!validActions.includes(limitAction)) {
-        res.status(400).json({
-          success: false,
-          error: 'Limit action must be one of: warn, block',
-        });
+        sendError(res, 'Limit action must be one of: warn, block', 400);
         return;
       }
       updates.spendingLimitAction = limitAction;
     }
 
     if (Object.keys(updates).length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'No valid settings to update',
-      });
+      sendError(res, 'No valid settings to update', 400);
       return;
     }
 
@@ -937,13 +784,10 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
       .set(updates)
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Spending limits updated successfully' },
-    });
+    sendSuccess(res, { message: 'Spending limits updated successfully' });
   } catch (error) {
     console.error('Update spending limits error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update spending limits' });
+    sendInternalError(res, 'Failed to update spending limits');
   }
 });
 
@@ -960,13 +804,10 @@ router.post('/spending-limits/reset', requireAuth, async (req: Request, res: Res
       })
       .where(eq(users.id, authReq.user!.id));
 
-    res.json({
-      success: true,
-      data: { message: 'Monthly spending reset successfully' },
-    });
+    sendSuccess(res, { message: 'Monthly spending reset successfully' });
   } catch (error) {
     console.error('Reset spending error:', error);
-    res.status(500).json({ success: false, error: 'Failed to reset spending' });
+    sendInternalError(res, 'Failed to reset spending');
   }
 });
 

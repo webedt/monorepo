@@ -32,6 +32,12 @@ import {
   generateTitle,
   type ClaudeSessionEvent as SessionEvent,
   type TitleGenerationEvent,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendForbidden,
+  sendUnauthorized,
+  sendInternalError,
 } from '@webedt/shared';
 import {
   CLAUDE_ENVIRONMENT_ID,
@@ -147,15 +153,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const claudeAuth = await getClaudeAuth(user.id);
     if (!claudeAuth) {
-      res.status(401).json({ success: false, error: 'Claude authentication not configured' });
+      sendUnauthorized(res, 'Claude authentication not configured');
       return;
     }
 
     const client = getClaudeClient(claudeAuth);
     const response = await client.listSessions(limit, before);
 
-    res.json({
-      success: true,
+    sendSuccess(res, {
       data: response.data.map(session => ({
         sessionId: session.id,
         status: session.session_status,
@@ -169,7 +174,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Failed to list sessions', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to list sessions' });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to list sessions');
   }
 });
 
@@ -195,18 +200,18 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const { prompt, gitUrl, model } = req.body;
 
     if (!prompt) {
-      res.status(400).json({ success: false, error: 'prompt is required' });
+      sendError(res, 'prompt is required', 400);
       return;
     }
 
     if (!gitUrl) {
-      res.status(400).json({ success: false, error: 'gitUrl is required' });
+      sendError(res, 'gitUrl is required', 400);
       return;
     }
 
     const claudeAuth = await getClaudeAuth(user.id);
     if (!claudeAuth) {
-      res.status(401).json({ success: false, error: 'Claude authentication not configured' });
+      sendUnauthorized(res, 'Claude authentication not configured');
       return;
     }
 
@@ -356,7 +361,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       };
 
       if (!res.headersSent) {
-        res.status(500).json({ success: false, error: errorEvent.error });
+        sendInternalError(res, errorEvent.error);
       } else {
         sendSSE(res, errorEvent);
         await storeEvent(chatSessionId, errorEvent);
@@ -365,7 +370,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
       unregisterActiveStream(chatSessionId);
     } else if (!res.headersSent) {
-      res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      sendInternalError(res, error instanceof Error ? error.message : 'Unknown error');
     }
   }
 });
@@ -392,29 +397,26 @@ router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        sessionId: session.id,
-        remoteSessionId: session.remoteSessionId,
-        remoteWebUrl: session.remoteWebUrl,
-        status: session.status,
-        title: session.userRequest?.slice(0, 50),
-        branch: session.branch,
-        totalCost: session.totalCost,
-        provider: session.provider,
-        repositoryUrl: session.repositoryUrl,
-        createdAt: session.createdAt,
-        completedAt: session.completedAt,
-      },
+    sendSuccess(res, {
+      sessionId: session.id,
+      remoteSessionId: session.remoteSessionId,
+      remoteWebUrl: session.remoteWebUrl,
+      status: session.status,
+      title: session.userRequest?.slice(0, 50),
+      branch: session.branch,
+      totalCost: session.totalCost,
+      provider: session.provider,
+      repositoryUrl: session.repositoryUrl,
+      createdAt: session.createdAt,
+      completedAt: session.completedAt,
     });
   } catch (error) {
     logger.error('Failed to get session status', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: 'Failed to get session status' });
+    sendInternalError(res, 'Failed to get session status');
   }
 });
 
@@ -441,7 +443,7 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -453,17 +455,14 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       .orderBy(asc(events.id));
 
     // eventData contains the raw event with type field inside
-    res.json({
-      success: true,
-      data: sessionEvents.map(e => ({
-        id: e.id,
-        eventData: e.eventData,
-        timestamp: e.timestamp,
-      })),
-    });
+    sendSuccess(res, sessionEvents.map(e => ({
+      id: e.id,
+      eventData: e.eventData,
+      timestamp: e.timestamp,
+    })));
   } catch (error) {
     logger.error('Failed to get session events', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: 'Failed to get session events' });
+    sendInternalError(res, 'Failed to get session events');
   }
 });
 
@@ -495,7 +494,7 @@ const streamHandler = async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -587,7 +586,7 @@ const streamHandler = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Failed to stream session', error, { component: 'InternalSessions' });
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: 'Failed to stream session' });
+      sendInternalError(res, 'Failed to stream session');
     } else {
       sendSSE(res, { type: 'error', error: error instanceof Error ? error.message : 'Unknown error' });
       res.end();
@@ -618,7 +617,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
     const { prompt } = req.body;
 
     if (!prompt) {
-      res.status(400).json({ success: false, error: 'prompt is required' });
+      sendError(res, 'prompt is required', 400);
       return;
     }
 
@@ -634,18 +633,18 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
     if (!session.remoteSessionId) {
-      res.status(400).json({ success: false, error: 'Session has no remote session ID' });
+      sendError(res, 'Session has no remote session ID', 400);
       return;
     }
 
     const claudeAuth = await getClaudeAuth(user.id);
     if (!claudeAuth) {
-      res.status(401).json({ success: false, error: 'Claude authentication not configured' });
+      sendUnauthorized(res, 'Claude authentication not configured');
       return;
     }
 
@@ -750,7 +749,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
     };
 
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: errorEvent.error });
+      sendInternalError(res, errorEvent.error);
     } else {
       sendSSE(res, errorEvent);
       await storeEvent(id, errorEvent);
@@ -775,7 +774,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const { title } = req.body;
 
     if (!title) {
-      res.status(400).json({ success: false, error: 'title is required' });
+      sendError(res, 'title is required', 400);
       return;
     }
 
@@ -791,7 +790,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -809,16 +808,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       .set({ userRequest: title })
       .where(eq(chatSessions.id, id));
 
-    res.json({
-      success: true,
-      data: {
-        sessionId: id,
-        title,
-      },
+    sendSuccess(res, {
+      sessionId: id,
+      title,
     });
   } catch (error) {
     logger.error('Failed to rename session', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to rename session' });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to rename session');
   }
 });
 
@@ -845,7 +841,7 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -863,16 +859,13 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
       .set({ status: 'completed', completedAt: new Date() })
       .where(eq(chatSessions.id, id));
 
-    res.json({
-      success: true,
-      data: {
-        sessionId: id,
-        status: 'archived',
-      },
+    sendSuccess(res, {
+      sessionId: id,
+      status: 'archived',
     });
   } catch (error) {
     logger.error('Failed to archive session', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to archive session' });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to archive session');
   }
 });
 
@@ -899,7 +892,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -908,16 +901,13 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       .set({ deletedAt: new Date() })
       .where(eq(chatSessions.id, id));
 
-    res.json({
-      success: true,
-      data: {
-        sessionId: id,
-        deleted: true,
-      },
+    sendSuccess(res, {
+      sessionId: id,
+      deleted: true,
     });
   } catch (error) {
     logger.error('Failed to delete session', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: 'Failed to delete session' });
+    sendInternalError(res, 'Failed to delete session');
   }
 });
 
@@ -944,7 +934,7 @@ router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) =
       .limit(1);
 
     if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
+      sendNotFound(res, 'Session not found');
       return;
     }
 
@@ -982,17 +972,14 @@ router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) =
       timestamp: new Date().toISOString(),
     });
 
-    res.json({
-      success: true,
-      data: {
-        sessionId: id,
-        interrupted: true,
-        wasActive,
-      },
+    sendSuccess(res, {
+      sessionId: id,
+      interrupted: true,
+      wasActive,
     });
   } catch (error) {
     logger.error('Failed to interrupt session', error, { component: 'InternalSessions' });
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to interrupt session' });
+    sendInternalError(res, error instanceof Error ? error.message : 'Failed to interrupt session');
   }
 });
 

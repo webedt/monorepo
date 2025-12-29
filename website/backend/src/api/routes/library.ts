@@ -8,6 +8,12 @@ import { db, games, userLibrary, purchases, eq, and, desc } from '@webedt/shared
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 
 const router = Router();
 
@@ -41,19 +47,16 @@ router.get('/recent', async (req: Request, res: Response) => {
       .filter((item) => item.libraryItem.lastPlayedAt !== null)
       .slice(0, limit);
 
-    res.json({
-      success: true,
-      data: {
-        items: playedItems.map((item) => ({
-          ...item.libraryItem,
-          game: item.game,
-        })),
-        total: playedItems.length,
-      },
+    sendSuccess(res, {
+      items: playedItems.map((item) => ({
+        ...item.libraryItem,
+        game: item.game,
+      })),
+      total: playedItems.length,
     });
   } catch (error) {
     logger.error('Get recently played error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch recently played games' });
+    sendInternalError(res, 'Failed to fetch recently played games');
   }
 });
 
@@ -77,19 +80,16 @@ router.get('/hidden/all', async (req: Request, res: Response) => {
       )
       .orderBy(desc(userLibrary.acquiredAt));
 
-    res.json({
-      success: true,
-      data: {
-        items: hiddenItems.map((item) => ({
-          ...item.libraryItem,
-          game: item.game,
-        })),
-        total: hiddenItems.length,
-      },
+    sendSuccess(res, {
+      items: hiddenItems.map((item) => ({
+        ...item.libraryItem,
+        game: item.game,
+      })),
+      total: hiddenItems.length,
     });
   } catch (error) {
     logger.error('Get hidden games error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch hidden games' });
+    sendInternalError(res, 'Failed to fetch hidden games');
   }
 });
 
@@ -113,19 +113,16 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
       0
     );
 
-    res.json({
-      success: true,
-      data: {
-        totalGames,
-        installedGames,
-        favoriteGames,
-        totalPlaytimeMinutes,
-        totalPlaytimeHours: Math.round(totalPlaytimeMinutes / 60),
-      },
+    sendSuccess(res, {
+      totalGames,
+      installedGames,
+      favoriteGames,
+      totalPlaytimeMinutes,
+      totalPlaytimeHours: Math.round(totalPlaytimeMinutes / 60),
     });
   } catch (error) {
     logger.error('Get library stats error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch library stats' });
+    sendInternalError(res, 'Failed to fetch library stats');
   }
 });
 
@@ -200,22 +197,19 @@ router.get('/', async (req: Request, res: Response) => {
     const total = libraryItems.length;
     const paginatedItems = libraryItems.slice(offset, offset + limit);
 
-    res.json({
-      success: true,
-      data: {
-        items: paginatedItems.map((item) => ({
-          ...item.libraryItem,
-          game: item.game,
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+    sendSuccess(res, {
+      items: paginatedItems.map((item) => ({
+        ...item.libraryItem,
+        game: item.game,
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
     });
   } catch (error) {
     logger.error('Get library error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch library' });
+    sendInternalError(res, 'Failed to fetch library');
   }
 });
 
@@ -241,20 +235,17 @@ router.get('/:gameId', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!libraryItem) {
-      res.status(404).json({ success: false, error: 'Game not in library' });
+      sendNotFound(res, 'Game not in library');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        ...libraryItem.libraryItem,
-        game: libraryItem.game,
-      },
+    sendSuccess(res, {
+      ...libraryItem.libraryItem,
+      game: libraryItem.game,
     });
   } catch (error) {
     logger.error('Get library item error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch library item' });
+    sendInternalError(res, 'Failed to fetch library item');
   }
 });
 
@@ -277,7 +268,7 @@ router.post('/:gameId/favorite', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!libraryItem) {
-      res.status(404).json({ success: false, error: 'Game not in library' });
+      sendNotFound(res, 'Game not in library');
       return;
     }
 
@@ -288,13 +279,10 @@ router.post('/:gameId/favorite', async (req: Request, res: Response) => {
       .where(eq(userLibrary.id, libraryItem.id))
       .returning();
 
-    res.json({
-      success: true,
-      data: { item: updated },
-    });
+    sendSuccess(res, { item: updated });
   } catch (error) {
     logger.error('Toggle favorite error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to toggle favorite' });
+    sendInternalError(res, 'Failed to toggle favorite');
   }
 });
 
@@ -318,7 +306,7 @@ router.post('/:gameId/hide', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!libraryItem) {
-      res.status(404).json({ success: false, error: 'Game not in library' });
+      sendNotFound(res, 'Game not in library');
       return;
     }
 
@@ -329,13 +317,10 @@ router.post('/:gameId/hide', async (req: Request, res: Response) => {
       .where(eq(userLibrary.id, libraryItem.id))
       .returning();
 
-    res.json({
-      success: true,
-      data: { item: updated },
-    });
+    sendSuccess(res, { item: updated });
   } catch (error) {
     logger.error('Hide game error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to hide game' });
+    sendInternalError(res, 'Failed to hide game');
   }
 });
 
@@ -347,7 +332,7 @@ router.post('/:gameId/install-status', async (req: Request, res: Response) => {
     const { status } = req.body;
 
     if (!['not_installed', 'installing', 'installed'].includes(status)) {
-      res.status(400).json({ success: false, error: 'Invalid install status' });
+      sendError(res, 'Invalid install status', 400);
       return;
     }
 
@@ -364,7 +349,7 @@ router.post('/:gameId/install-status', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!libraryItem) {
-      res.status(404).json({ success: false, error: 'Game not in library' });
+      sendNotFound(res, 'Game not in library');
       return;
     }
 
@@ -375,13 +360,10 @@ router.post('/:gameId/install-status', async (req: Request, res: Response) => {
       .where(eq(userLibrary.id, libraryItem.id))
       .returning();
 
-    res.json({
-      success: true,
-      data: { item: updated },
-    });
+    sendSuccess(res, { item: updated });
   } catch (error) {
     logger.error('Update install status error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to update install status' });
+    sendInternalError(res, 'Failed to update install status');
   }
 });
 
@@ -393,7 +375,7 @@ router.post('/:gameId/playtime', async (req: Request, res: Response) => {
     const { minutes } = req.body;
 
     if (typeof minutes !== 'number' || minutes < 0) {
-      res.status(400).json({ success: false, error: 'Invalid playtime' });
+      sendError(res, 'Invalid playtime', 400);
       return;
     }
 
@@ -410,7 +392,7 @@ router.post('/:gameId/playtime', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!libraryItem) {
-      res.status(404).json({ success: false, error: 'Game not in library' });
+      sendNotFound(res, 'Game not in library');
       return;
     }
 
@@ -424,13 +406,10 @@ router.post('/:gameId/playtime', async (req: Request, res: Response) => {
       .where(eq(userLibrary.id, libraryItem.id))
       .returning();
 
-    res.json({
-      success: true,
-      data: { item: updated },
-    });
+    sendSuccess(res, { item: updated });
   } catch (error) {
     logger.error('Update playtime error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to update playtime' });
+    sendInternalError(res, 'Failed to update playtime');
   }
 });
 

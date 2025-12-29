@@ -4,7 +4,14 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { CloudSavesService, logger } from '@webedt/shared';
+import {
+  CloudSavesService,
+  logger,
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -19,18 +26,15 @@ router.get('/stats', async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const stats = await CloudSavesService.getStats(authReq.user!.id);
 
-    res.json({
-      success: true,
-      data: {
-        totalSaves: stats.totalSaves,
-        totalSizeBytes: stats.totalSize.toString(),
-        gamesWithSaves: stats.gamesWithSaves,
-        lastSyncAt: stats.lastSyncAt,
-      },
+    sendSuccess(res, {
+      totalSaves: stats.totalSaves,
+      totalSizeBytes: stats.totalSize.toString(),
+      gamesWithSaves: stats.gamesWithSaves,
+      lastSyncAt: stats.lastSyncAt,
     });
   } catch (error) {
     logger.error('Get cloud saves stats error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch cloud saves stats' });
+    sendInternalError(res, 'Failed to fetch cloud saves stats');
   }
 });
 
@@ -42,13 +46,10 @@ router.get('/sync-history', async (req: Request, res: Response) => {
 
     const history = await CloudSavesService.getSyncHistory(authReq.user!.id, limit);
 
-    res.json({
-      success: true,
-      data: { history },
-    });
+    sendSuccess(res, { history });
   } catch (error) {
     logger.error('Get sync history error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch sync history' });
+    sendInternalError(res, 'Failed to fetch sync history');
   }
 });
 
@@ -58,21 +59,18 @@ router.get('/all', async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const saves = await CloudSavesService.listAllSaves(authReq.user!.id);
 
-    res.json({
-      success: true,
-      data: {
-        saves: saves.map((save) => ({
-          ...save,
-          // Don't include full save data in list response
-          saveData: undefined,
-          hasData: !!save.saveData,
-        })),
-        total: saves.length,
-      },
+    sendSuccess(res, {
+      saves: saves.map((save) => ({
+        ...save,
+        // Don't include full save data in list response
+        saveData: undefined,
+        hasData: !!save.saveData,
+      })),
+      total: saves.length,
     });
   } catch (error) {
     logger.error('List all saves error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch saves' });
+    sendInternalError(res, 'Failed to fetch saves');
   }
 });
 
@@ -83,7 +81,7 @@ router.post('/check-conflicts', async (req: Request, res: Response) => {
     const { localSaves } = req.body;
 
     if (!Array.isArray(localSaves)) {
-      res.status(400).json({ success: false, error: 'localSaves must be an array' });
+      sendError(res, 'localSaves must be an array', 400);
       return;
     }
 
@@ -91,19 +89,19 @@ router.post('/check-conflicts', async (req: Request, res: Response) => {
     for (let i = 0; i < localSaves.length; i++) {
       const save = localSaves[i];
       if (!save || typeof save !== 'object') {
-        res.status(400).json({ success: false, error: `localSaves[${i}] must be an object` });
+        sendError(res, `localSaves[${i}] must be an object`, 400);
         return;
       }
       if (typeof save.gameId !== 'string' || !save.gameId) {
-        res.status(400).json({ success: false, error: `localSaves[${i}].gameId is required and must be a string` });
+        sendError(res, `localSaves[${i}].gameId is required and must be a string`, 400);
         return;
       }
       if (typeof save.slotNumber !== 'number' || !Number.isInteger(save.slotNumber)) {
-        res.status(400).json({ success: false, error: `localSaves[${i}].slotNumber is required and must be an integer` });
+        sendError(res, `localSaves[${i}].slotNumber is required and must be an integer`, 400);
         return;
       }
       if (typeof save.checksum !== 'string' || !save.checksum) {
-        res.status(400).json({ success: false, error: `localSaves[${i}].checksum is required and must be a string` });
+        sendError(res, `localSaves[${i}].checksum is required and must be a string`, 400);
         return;
       }
       // Parse updatedAt if it's a string
@@ -112,31 +110,28 @@ router.post('/check-conflicts', async (req: Request, res: Response) => {
           save.updatedAt = new Date(save.updatedAt);
         }
         if (!(save.updatedAt instanceof Date) || isNaN(save.updatedAt.getTime())) {
-          res.status(400).json({ success: false, error: `localSaves[${i}].updatedAt must be a valid date` });
+          sendError(res, `localSaves[${i}].updatedAt must be a valid date`, 400);
           return;
         }
       } else {
-        res.status(400).json({ success: false, error: `localSaves[${i}].updatedAt is required` });
+        sendError(res, `localSaves[${i}].updatedAt is required`, 400);
         return;
       }
     }
 
     const conflicts = await CloudSavesService.checkSyncConflicts(authReq.user!.id, localSaves);
 
-    res.json({
-      success: true,
-      data: {
-        conflicts: conflicts.map((c) => ({
-          localInfo: c.localInfo,
-          remoteSave: { ...c.remoteSave, saveData: undefined },
-          conflictType: c.conflictType,
-        })),
-        hasConflicts: conflicts.length > 0,
-      },
+    sendSuccess(res, {
+      conflicts: conflicts.map((c) => ({
+        localInfo: c.localInfo,
+        remoteSave: { ...c.remoteSave, saveData: undefined },
+        conflictType: c.conflictType,
+      })),
+      hasConflicts: conflicts.length > 0,
     });
   } catch (error) {
     logger.error('Check sync conflicts error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to check conflicts' });
+    sendInternalError(res, 'Failed to check conflicts');
   }
 });
 
@@ -148,21 +143,18 @@ router.get('/games/:gameId', async (req: Request, res: Response) => {
 
     const saves = await CloudSavesService.listSavesByGame(authReq.user!.id, gameId);
 
-    res.json({
-      success: true,
-      data: {
-        saves: saves.map((save) => ({
-          ...save,
-          // Don't include full save data in list response
-          saveData: undefined,
-          hasData: !!save.saveData,
-        })),
-        total: saves.length,
-      },
+    sendSuccess(res, {
+      saves: saves.map((save) => ({
+        ...save,
+        // Don't include full save data in list response
+        saveData: undefined,
+        hasData: !!save.saveData,
+      })),
+      total: saves.length,
     });
   } catch (error) {
     logger.error('List game saves error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch game saves' });
+    sendInternalError(res, 'Failed to fetch game saves');
   }
 });
 
@@ -174,27 +166,24 @@ router.get('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respons
     const slotNumber = parseInt(req.params.slotNumber);
 
     if (isNaN(slotNumber)) {
-      res.status(400).json({ success: false, error: 'Invalid slot number' });
+      sendError(res, 'Invalid slot number', 400);
       return;
     }
 
     const result = await CloudSavesService.getSave(authReq.user!.id, gameId, slotNumber);
 
     if (!result) {
-      res.status(404).json({ success: false, error: 'Save not found' });
+      sendNotFound(res, 'Save not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: {
-        save: result.save,
-        game: result.game,
-      },
+    sendSuccess(res, {
+      save: result.save,
+      game: result.game,
     });
   } catch (error) {
     logger.error('Get save error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch save' });
+    sendInternalError(res, 'Failed to fetch save');
   }
 });
 
@@ -206,14 +195,14 @@ router.post('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respon
     const slotNumber = parseInt(req.params.slotNumber);
 
     if (isNaN(slotNumber)) {
-      res.status(400).json({ success: false, error: 'Invalid slot number' });
+      sendError(res, 'Invalid slot number', 400);
       return;
     }
 
     const { slotName, saveData, platformData, screenshotUrl, playTimeSeconds, gameProgress } = req.body;
 
     if (!saveData || typeof saveData !== 'string') {
-      res.status(400).json({ success: false, error: 'saveData is required and must be a string' });
+      sendError(res, 'saveData is required and must be a string', 400);
       return;
     }
 
@@ -229,14 +218,11 @@ router.post('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respon
       gameProgress,
     });
 
-    res.json({
-      success: true,
-      data: {
-        save: {
-          ...save,
-          saveData: undefined, // Don't return full save data in response
-          hasData: true,
-        },
+    sendSuccess(res, {
+      save: {
+        ...save,
+        saveData: undefined, // Don't return full save data in response
+        hasData: true,
       },
       message: 'Save uploaded successfully',
     });
@@ -244,11 +230,11 @@ router.post('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respon
     const err = error as Error;
     if (err.message.includes('quota exceeded')) {
       logger.warn('Upload save quota exceeded', { component: 'CloudSaves', userId: (req as AuthRequest).user!.id });
-      res.status(413).json({ success: false, error: err.message });
+      sendError(res, err.message, 413);
       return;
     }
     logger.error('Upload save error', err, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to upload save' });
+    sendInternalError(res, 'Failed to upload save');
   }
 });
 
@@ -260,7 +246,7 @@ router.delete('/games/:gameId/slots/:slotNumber', async (req: Request, res: Resp
     const slotNumber = parseInt(req.params.slotNumber);
 
     if (isNaN(slotNumber)) {
-      res.status(400).json({ success: false, error: 'Invalid slot number' });
+      sendError(res, 'Invalid slot number', 400);
       return;
     }
 
@@ -272,17 +258,14 @@ router.delete('/games/:gameId/slots/:slotNumber', async (req: Request, res: Resp
     );
 
     if (!deleted) {
-      res.status(404).json({ success: false, error: 'Save not found' });
+      sendNotFound(res, 'Save not found');
       return;
     }
 
-    res.json({
-      success: true,
-      message: 'Save deleted successfully',
-    });
+    sendSuccess(res, { message: 'Save deleted successfully' });
   } catch (error) {
     logger.error('Delete save error', error as Error, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to delete save' });
+    sendInternalError(res, 'Failed to delete save');
   }
 });
 
@@ -294,26 +277,23 @@ router.get('/saves/:saveId/versions', async (req: Request, res: Response) => {
 
     const versions = await CloudSavesService.getSaveVersions(authReq.user!.id, saveId);
 
-    res.json({
-      success: true,
-      data: {
-        versions: versions.map((v) => ({
-          ...v,
-          // Don't include full save data in list
-          saveData: undefined,
-          hasData: !!v.saveData,
-        })),
-        total: versions.length,
-      },
+    sendSuccess(res, {
+      versions: versions.map((v) => ({
+        ...v,
+        // Don't include full save data in list
+        saveData: undefined,
+        hasData: !!v.saveData,
+      })),
+      total: versions.length,
     });
   } catch (error) {
     const err = error as Error;
     if (err.message.includes('not found') || err.message.includes('access denied')) {
-      res.status(404).json({ success: false, error: 'Save not found' });
+      sendNotFound(res, 'Save not found');
       return;
     }
     logger.error('Get save versions error', err, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch save versions' });
+    sendInternalError(res, 'Failed to fetch save versions');
   }
 });
 
@@ -327,22 +307,19 @@ router.get('/saves/:saveId/versions/:versionId', async (req: Request, res: Respo
     const version = await CloudSavesService.getVersionById(authReq.user!.id, saveId, versionId);
 
     if (!version) {
-      res.status(404).json({ success: false, error: 'Version not found' });
+      sendNotFound(res, 'Version not found');
       return;
     }
 
-    res.json({
-      success: true,
-      data: { version },
-    });
+    sendSuccess(res, { version });
   } catch (error) {
     const err = error as Error;
     if (err.message.includes('not found') || err.message.includes('access denied')) {
-      res.status(404).json({ success: false, error: 'Save not found' });
+      sendNotFound(res, 'Save not found');
       return;
     }
     logger.error('Get version error', err, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to fetch version' });
+    sendInternalError(res, 'Failed to fetch version');
   }
 });
 
@@ -359,25 +336,22 @@ router.post('/saves/:saveId/versions/:versionId/restore', async (req: Request, r
       req.body.platformData
     );
 
-    res.json({
-      success: true,
-      data: {
-        save: {
-          ...restoredSave,
-          saveData: undefined,
-          hasData: true,
-        },
+    sendSuccess(res, {
+      save: {
+        ...restoredSave,
+        saveData: undefined,
+        hasData: true,
       },
       message: 'Save restored successfully',
     });
   } catch (error) {
     const err = error as Error;
     if (err.message.includes('not found')) {
-      res.status(404).json({ success: false, error: err.message });
+      sendNotFound(res, err.message);
       return;
     }
     logger.error('Restore version error', err, { component: 'CloudSaves' });
-    res.status(500).json({ success: false, error: 'Failed to restore save' });
+    sendInternalError(res, 'Failed to restore save');
   }
 });
 
