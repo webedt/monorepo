@@ -4,7 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq, encryptUserFields } from '@webedt/shared';
+import { db, users, eq } from '@webedt/shared';
+// Note: Encryption/decryption is now automatic via Drizzle custom column types
 import type { ImageAiKeysData } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -352,10 +353,10 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
       return;
     }
 
-    const encryptedApiKeyFields = encryptUserFields({ openrouterApiKey: apiKey });
+    // Store the API key (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedApiKeyFields as typeof users.$inferInsert)
+      .set({ openrouterApiKey: apiKey })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -480,10 +481,10 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
       }
     }
 
-    const encryptedImageAiFields = encryptUserFields({ imageAiKeys: sanitizedKeys });
+    // Store the API keys (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedImageAiFields as typeof users.$inferInsert)
+      .set({ imageAiKeys: sanitizedKeys })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({

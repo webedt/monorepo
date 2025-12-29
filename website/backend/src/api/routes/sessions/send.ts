@@ -4,7 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events, eq, and, isNull, logger } from '@webedt/shared';
+import { db, chatSessions, events, eq, logger, withTransactionOrThrow } from '@webedt/shared';
+import type { TransactionContext } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import {
@@ -53,32 +54,35 @@ router.post('/:id/send', requireAuth, validateSessionId, requireSessionOwnership
     return;
   }
 
-  // Update session status to running
-  await db
-    .update(chatSessions)
-    .set({
-      status: 'running',
-      workerLastActivity: new Date()
-    })
-    .where(eq(chatSessions.id, sessionId));
+  // Use transaction to ensure status update and event insert are atomic
+  await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+    // Update session status to running
+    await tx.update(chatSessions)
+      .set({ status: 'running' })
+      .where(eq(chatSessions.id, sessionId));
 
-  // Store input_preview event (will be picked up by stream endpoint)
-  const inputPreviewEvent = {
-    type: 'input_preview',
-    message: `Request received: ${message.length > 200 ? message.substring(0, 200) + '...' : message}`,
-    source: 'user',
-    timestamp: new Date().toISOString(),
-    data: {
-      preview: message,
-      truncated: message.length > 200,
-      originalLength: message.length,
-    },
-  };
+    // Store the user message in the database for the stream to pick up
+    // The actual resume will happen when the client connects to the SSE stream
+    // Use input_preview for consistency with initial execution flow
+    const userMessageEvent = {
+      type: 'input_preview',
+      message: `Request received: ${message.length > 200 ? message.substring(0, 200) + '...' : message}`,
+      source: 'user',
+      timestamp: new Date().toISOString(),
+      data: {
+        preview: message,
+        truncated: message.length > 200,
+        originalLength: message.length,
+      },
+    };
 
-  await db.insert(events).values({
-    chatSessionId: sessionId,
-    uuid: null, // Local input_preview events don't have UUIDs
-    eventData: inputPreviewEvent,
+    await tx.insert(events).values({
+      chatSessionId: sessionId,
+      uuid: null, // Local input_preview events don't have UUIDs
+      eventData: userMessageEvent,
+    });
+  }, {
+    context: { operation: 'sendMessage', sessionId, contentLength: message.length },
   });
 
   // Notify session list subscribers of status change

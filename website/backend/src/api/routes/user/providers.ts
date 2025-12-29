@@ -4,7 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq, encryptUserFields } from '@webedt/shared';
+import { db, users, eq } from '@webedt/shared';
+// Note: Encryption/decryption is now automatic via Drizzle custom column types
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 
@@ -53,11 +54,10 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Update user with Codex auth (encrypted)
-    const encryptedCodexFields = encryptUserFields({ codexAuth });
+    // Update user with Codex auth (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedCodexFields as typeof users.$inferInsert)
+      .set({ codexAuth })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({
@@ -170,11 +170,10 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       scope: geminiAuth.scope,
     };
 
-    // Update user with Gemini auth (encrypted)
-    const encryptedGeminiFields = encryptUserFields({ geminiAuth: normalizedAuth });
+    // Update user with Gemini auth (encryption is automatic via Drizzle column type)
     await db
       .update(users)
-      .set(encryptedGeminiFields as typeof users.$inferInsert)
+      .set({ geminiAuth: normalizedAuth })
       .where(eq(users.id, authReq.user!.id));
 
     res.json({

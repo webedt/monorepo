@@ -4,7 +4,7 @@
  */
 
 import { Request } from 'express';
-import { ServiceProvider, AClaudeWebClient, withClaudeRemoteResilience, ensureValidToken, CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, logger } from '@webedt/shared';
+import { ServiceProvider, AClaudeWebClient, withClaudeRemoteResilience, tokenRefreshService, CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, logger } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 
 /**
@@ -31,16 +31,23 @@ export function getRequestOrigin(req: Request): string {
 }
 
 /**
- * Helper function to archive Claude Remote session
+ * Archive a Claude Remote session with token refresh.
+ * Uses centralized tokenRefreshService to ensure tokens are refreshed and persisted.
+ *
+ * @param remoteSessionId - The remote session ID to archive
+ * @param userId - The user ID for token refresh persistence
+ * @param claudeAuth - The Claude authentication credentials
+ * @param environmentId - Optional environment ID override
  */
 export async function archiveClaudeRemoteSession(
   remoteSessionId: string,
+  userId: string,
   claudeAuth: ClaudeAuth,
   environmentId?: string
 ): Promise<{ success: boolean; message: string }> {
   try {
-    // Refresh token if needed
-    const refreshedAuth = await ensureValidToken(claudeAuth);
+    // Use centralized token refresh service for Claude tokens with persistence
+    const refreshedAuth = await tokenRefreshService.ensureValidTokenForUser(userId, claudeAuth);
 
     const client = ServiceProvider.get(AClaudeWebClient);
     client.configure({

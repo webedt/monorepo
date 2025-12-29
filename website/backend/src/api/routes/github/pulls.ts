@@ -420,6 +420,7 @@ router.post('/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: Request
           if (session.remoteSessionId && authReq.user?.claudeAuth) {
             const archiveResult = await archiveClaudeRemoteSession(
               session.remoteSessionId,
+              authReq.user!.id,
               authReq.user.claudeAuth as ClaudeAuth
             );
             logger.info(`Archive remote session result: ${archiveResult.message}`, {

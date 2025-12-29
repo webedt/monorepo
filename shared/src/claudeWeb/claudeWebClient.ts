@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { AClaudeWebClient } from './AClaudeWebClient.js';
+import { parseGitUrl } from '../utils/helpers/gitUrlHelper.js';
 import type { ClaudeRemoteClientConfig } from './types.js';
 import type { ClaudeWebClientConfig } from './types.js';
 import type { CreateSessionParams } from './types.js';
@@ -126,9 +127,20 @@ export class ClaudeWebClient extends AClaudeWebClient {
     return `claude/${words || 'session'}`;
   }
 
+  /**
+   * Extract repository name (owner/repo format) from a Git URL.
+   * Uses the shared parseGitUrl utility for secure URL parsing.
+   *
+   * @param gitUrl - The Git URL to parse
+   * @returns Repository in "owner/repo" format, or "unknown/repo" if parsing fails
+   */
   private extractRepoName(gitUrl: string): string {
-    const match = gitUrl.match(/github\.com\/([^\/]+\/[^\/]+)/);
-    return match ? match[1].replace(/\.git$/, '') : 'unknown/repo';
+    const result = parseGitUrl(gitUrl);
+    if (result.isValid) {
+      return `${result.owner}/${result.repo}`;
+    }
+    // Fallback for invalid URLs (maintains backward compatibility)
+    return 'unknown/repo';
   }
 
   async createSession(params: CreateSessionParams): Promise<CreateSessionResult> {
