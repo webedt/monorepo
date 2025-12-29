@@ -11,7 +11,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
-import { SessionService, syncUserSessions } from '@webedt/shared';
+import { ASession, syncUserSessions } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
@@ -2378,6 +2378,11 @@ router.get('/:id/stream', requireAuth, streamEventsHandler);
  * 2. Importing new sessions with duplicate prevention
  * 3. Linking existing local sessions to remote sessions
  * 4. Cleaning up orphaned pending sessions
+ *
+ * Query params (for backward compatibility, logged but not all are used by shared sync):
+ * - activeOnly: boolean (default: true) - Note: shared sync skips archived sessions by default
+ * - stream: boolean (default: false) - Note: streaming should use /events/stream endpoint
+ * - limit: number (default: 50) - Note: shared sync uses CLAUDE_SYNC_LIMIT from env
  */
 router.post('/sync', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
@@ -2387,9 +2392,16 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
     return res.status(401).json({ success: false, error: 'Not authenticated' });
   }
 
+  // Parse query params for backward compatibility (logged for debugging)
+  const activeOnly = req.query.activeOnly !== 'false';
+  const shouldStream = req.query.stream === 'true';
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+
   logger.info('Starting session sync using shared syncUserSessions', {
     component: 'SessionSync',
     userId,
+    // Log query params for debugging, even though shared sync may not use them all
+    queryParams: { activeOnly, shouldStream, limit },
   });
 
   try {
@@ -2420,13 +2432,20 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
       skipped: result.skipped,
     });
 
+    // Return response with both new fields and backward-compatible structure
+    // Note: Some detailed fields from the old API are no longer available
+    // as the shared sync logic aggregates results internally
     return res.json({
       success: true,
       data: {
+        // New fields from shared sync
         imported: result.imported,
         updated: result.updated,
         errors: result.errors,
         skipped: result.skipped,
+        // Backward-compatible fields (best-effort mapping)
+        alreadyExists: result.skipped,
+        runningSessions: result.updated,
       }
     });
 
@@ -2501,28 +2520,61 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
       });
     }
 
-    // Use SessionService.sync() from shared package
+    // Count existing events before sync for backward-compatible response
+    const existingEventsBefore = await db
+      .select({ eventData: events.eventData })
+      .from(events)
+      .where(eq(events.chatSessionId, sessionId));
+    const existingEventsCount = existingEventsBefore.length;
+
+    // Use SessionService.sync() from shared package via ServiceProvider
     // This provides proper event deduplication, transaction safety, and status mapping
-    const sessionService = new SessionService();
+    const sessionService = ServiceProvider.get(ASession);
     const syncResult = await sessionService.sync(sessionId, {
       claudeAuth: user.claudeAuth,
       environmentId: CLAUDE_ENVIRONMENT_ID,
     });
 
+    // Count events after sync to calculate new events imported
+    const eventsAfter = await db
+      .select({ eventData: events.eventData })
+      .from(events)
+      .where(eq(events.chatSessionId, sessionId));
+    const totalEventsCount = eventsAfter.length;
+    const newEventsImported = totalEventsCount - existingEventsCount;
+
+    // Map local status back to remote status for backward compatibility
+    const statusToRemoteStatus: Record<string, string> = {
+      'completed': 'idle',
+      'running': 'running',
+      'error': 'failed',
+      'pending': 'idle',
+    };
+    const remoteStatus = statusToRemoteStatus[syncResult.status] || 'idle';
+
     logger.info(`Synced session using SessionService.sync()`, {
       component: 'SessionSync',
       sessionId,
       remoteSessionId: session.remoteSessionId,
+      existingEvents: existingEventsCount,
+      newEvents: newEventsImported,
       status: syncResult.status,
-      totalCost: syncResult.totalCost,
-      branch: syncResult.branch,
+      remoteStatus,
     });
 
+    // Return response with both new fields and backward-compatible structure
     return res.json({
       success: true,
       data: {
         sessionId: syncResult.id,
         remoteSessionId: syncResult.remoteSessionId,
+        // Backward-compatible fields
+        existingEvents: existingEventsCount,
+        newEventsImported,
+        totalEvents: totalEventsCount,
+        remoteStatus,
+        localStatus: syncResult.status,
+        // New fields from sync result
         status: syncResult.status,
         totalCost: syncResult.totalCost,
         branch: syncResult.branch,
