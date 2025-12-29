@@ -106,8 +106,8 @@ export class MidiPianoRoll extends Component {
 
     if (!fileInfo) return;
 
-    // Get notes from all tracks
-    const midiFile = (player as unknown as { midiFile: { tracks: { notes: MidiNoteEvent[] }[] } | null }).midiFile;
+    // Get notes from all tracks via public API
+    const midiFile = player.getMidiFile();
     if (!midiFile) return;
 
     for (let trackIndex = 0; trackIndex < midiFile.tracks.length; trackIndex++) {
