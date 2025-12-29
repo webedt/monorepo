@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { db, users, eq } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -228,7 +229,8 @@ async function generateWithGoogle(
 }
 
 // Main image generation endpoint
-router.post('/generate', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent abuse of expensive AI image generation (10/min per user)
+router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { prompt, imageData, selection, provider: requestedProvider, model: requestedModel } = req.body as ImageGenerationRequest;

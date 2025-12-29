@@ -10,6 +10,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
 import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
@@ -784,7 +785,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 // ============================================================================
 
 // Main execute endpoint (POST for new requests, GET for SSE reconnect)
-router.post('/', requireAuth, executeRemoteHandler);
-router.get('/', requireAuth, executeRemoteHandler);
+// Rate limited to prevent abuse of expensive AI operations (10/min per user)
+router.post('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
+router.get('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
 
 export default router;

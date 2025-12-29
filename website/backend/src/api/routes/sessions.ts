@@ -10,7 +10,7 @@ import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
-import { publicShareRateLimiter } from '../middleware/rateLimit.js';
+import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
@@ -2782,7 +2782,8 @@ router.get('/:id/stream', requireAuth, streamEventsHandler);
  * - stream: boolean (default: false) - Note: streaming should use /events/stream endpoint
  * - limit: number (default: 50) - Note: shared sync uses CLAUDE_SYNC_LIMIT from env
  */
-router.post('/sync', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent excessive sync requests to Claude Remote API (5/min per user)
+router.post('/sync', requireAuth, syncOperationRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.id;
 
@@ -2873,7 +2874,8 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
  * - Correct null/undefined normalization
  * - SessionPath generation
  */
-router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent excessive sync requests to Claude Remote API (5/min per user)
+router.post('/:id/sync-events', requireAuth, syncOperationRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.id;
   const sessionId = req.params.id;
