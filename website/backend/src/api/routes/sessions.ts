@@ -9,6 +9,7 @@ import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
+import { publicShareRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
@@ -78,18 +79,19 @@ router.use((req: Request, res: Response, next) => {
 // PUBLIC SHARE ROUTES (no authentication required)
 // These must be defined BEFORE /:id routes to avoid parameter conflicts
 //
-// SECURITY NOTE: These endpoints should be protected by rate limiting at the
-// infrastructure level (e.g., nginx, Traefik, or API gateway) to prevent
-// brute-force enumeration of share tokens. UUID v4 tokens provide 122 bits
-// of entropy, making guessing impractical, but rate limiting adds defense in depth.
+// SECURITY NOTE: These endpoints are protected by rate limiting middleware
+// to prevent brute-force enumeration of share tokens. UUID v4 tokens provide
+// 122 bits of entropy, making guessing impractical, but rate limiting adds
+// defense in depth alongside infrastructure-level limits (nginx, Traefik, etc).
 // ============================================================================
 
 /**
  * GET /api/sessions/shared/:token
  * Public endpoint to access a shared session via share token
  * No authentication required - anyone with the link can view
+ * Rate limited to prevent enumeration attacks
  */
-router.get('/shared/:token', async (req: Request, res: Response) => {
+router.get('/shared/:token', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const shareToken = req.params.token;
 
@@ -148,8 +150,9 @@ router.get('/shared/:token', async (req: Request, res: Response) => {
 /**
  * GET /api/sessions/shared/:token/events
  * Public endpoint to get events for a shared session
+ * Rate limited to prevent enumeration attacks
  */
-router.get('/shared/:token/events', async (req: Request, res: Response) => {
+router.get('/shared/:token/events', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const shareToken = req.params.token;
 
@@ -202,8 +205,9 @@ router.get('/shared/:token/events', async (req: Request, res: Response) => {
 /**
  * GET /api/sessions/shared/:token/events/stream
  * Public SSE endpoint to stream events for a shared session
+ * Rate limited to prevent enumeration attacks
  */
-router.get('/shared/:token/events/stream', async (req: Request, res: Response) => {
+router.get('/shared/:token/events/stream', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const shareToken = req.params.token;
 

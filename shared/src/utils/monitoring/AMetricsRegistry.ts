@@ -41,5 +41,7 @@ export abstract class AMetricsRegistry extends AService implements IMetricsRegis
 
   abstract getSummary(): MetricsSummary;
 
+  abstract recordRateLimitHit(tier: string, path: string): void;
+
   abstract reset(): void;
 }
