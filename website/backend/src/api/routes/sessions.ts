@@ -1499,7 +1499,7 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
   const expectedSecret = process.env.WORKER_CALLBACK_SECRET;
   if (!expectedSecret || workerSecret !== expectedSecret) {
     logger.warn(`Invalid worker secret for session ${sessionId}`, { component: 'Sessions' });
-    res.status(401).json({ success: false, error: 'Invalid worker secret' });
+    sendUnauthorized(res, 'Invalid worker secret');
     return;
   }
 
@@ -2026,7 +2026,8 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
   const userId = authReq.user?.id;
 
   if (!userId) {
-    return res.status(401).json({ success: false, error: 'Not authenticated' });
+    sendUnauthorized(res, 'Not authenticated');
+    return;
   }
 
   // Parse query params for backward compatibility (logged for debugging)
@@ -2116,7 +2117,8 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
   const sessionId = req.params.id;
 
   if (!userId) {
-    return res.status(401).json({ success: false, error: 'Not authenticated' });
+    sendUnauthorized(res, 'Not authenticated');
+    return;
   }
 
   try {
