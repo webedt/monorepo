@@ -74,6 +74,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: (() => void) | null = null;
   private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
+  private boundKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
   // Store subscriptions
   private unsubscribeStore: (() => void) | null = null;
@@ -190,10 +191,18 @@ export class ScenePage extends Page<ScenePageOptions> {
 
           <div class="toolbar-separator"></div>
 
+          <div class="toolbar-group z-order-group">
+            <span class="toolbar-label">Z:</span>
+            <button class="toolbar-btn" data-action="bring-to-front" title="Bring to Front (Shift+Ctrl+])">⤒</button>
+            <button class="toolbar-btn" data-action="bring-forward" title="Bring Forward (Ctrl+])">↑</button>
+            <button class="toolbar-btn" data-action="send-backward" title="Send Backward (Ctrl+[)">↓</button>
+            <button class="toolbar-btn" data-action="send-to-back" title="Send to Back (Shift+Ctrl+[)">⤓</button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
           <div class="toolbar-group">
-            <button class="toolbar-btn" data-action="move-up" title="Move Up">↑</button>
-            <button class="toolbar-btn" data-action="move-down" title="Move Down">↓</button>
-            <button class="toolbar-btn" data-action="delete" title="Delete">🗑</button>
+            <button class="toolbar-btn" data-action="delete" title="Delete (Del)">🗑</button>
           </div>
 
           <div class="toolbar-separator"></div>
@@ -293,6 +302,22 @@ export class ScenePage extends Page<ScenePageOptions> {
                         <label>Y</label>
                         <input type="number" class="property-input pivot-y" value="0.5" min="0" max="1" step="0.1">
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="property-section">
+                  <div class="property-label">Z-Order (Depth)</div>
+                  <div class="z-order-section">
+                    <div class="z-order-display">
+                      <label>Layer</label>
+                      <input type="number" class="property-input z-index-input" min="-999" max="999" step="1" value="0">
+                    </div>
+                    <div class="z-order-buttons">
+                      <button class="z-order-btn" data-z-action="bring-to-front" title="Bring to Front">⤒ Front</button>
+                      <button class="z-order-btn" data-z-action="bring-forward" title="Bring Forward">↑</button>
+                      <button class="z-order-btn" data-z-action="send-backward" title="Send Backward">↓</button>
+                      <button class="z-order-btn" data-z-action="send-to-back" title="Send to Back">⤓ Back</button>
                     </div>
                   </div>
                 </div>
@@ -515,13 +540,17 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (addUIProgressBtn) addUIProgressBtn.addEventListener('click', () => this.addUIProgressBar());
     if (addUICheckboxBtn) addUICheckboxBtn.addEventListener('click', () => this.addUICheckbox());
 
-    // Object manipulation buttons
-    const moveUpBtn = this.$('[data-action="move-up"]');
-    const moveDownBtn = this.$('[data-action="move-down"]');
+    // Z-order manipulation buttons
+    const bringToFrontBtn = this.$('[data-action="bring-to-front"]');
+    const bringForwardBtn = this.$('[data-action="bring-forward"]');
+    const sendBackwardBtn = this.$('[data-action="send-backward"]');
+    const sendToBackBtn = this.$('[data-action="send-to-back"]');
     const deleteBtn = this.$('[data-action="delete"]');
 
-    if (moveUpBtn) moveUpBtn.addEventListener('click', () => this.moveSelectedUp());
-    if (moveDownBtn) moveDownBtn.addEventListener('click', () => this.moveSelectedDown());
+    if (bringToFrontBtn) bringToFrontBtn.addEventListener('click', () => this.bringToFront());
+    if (bringForwardBtn) bringForwardBtn.addEventListener('click', () => this.bringForward());
+    if (sendBackwardBtn) sendBackwardBtn.addEventListener('click', () => this.sendBackward());
+    if (sendToBackBtn) sendToBackBtn.addEventListener('click', () => this.sendToBack());
     if (deleteBtn) deleteBtn.addEventListener('click', () => this.deleteSelected());
 
     // View toggles
@@ -778,6 +807,70 @@ export class ScenePage extends Page<ScenePageOptions> {
         }
       });
     }
+
+    // Z-order input handler
+    const zIndexInput = this.$('.z-index-input') as HTMLInputElement;
+    if (zIndexInput) {
+      zIndexInput.addEventListener('change', () => {
+        const activeScene = this.activeScene;
+        if (!this.selectedObjectId || !activeScene) return;
+        const newZIndex = parseInt(zIndexInput.value) || 0;
+        const updatedObjects = this.objects.map(o =>
+          o.id === this.selectedObjectId ? { ...o, zIndex: newZIndex } : o
+        );
+        sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+        this.updateHierarchy();
+        this.renderScene();
+      });
+    }
+
+    // Z-order button handlers in properties panel
+    const zOrderButtons = this.$$('[data-z-action]');
+    zOrderButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = (btn as HTMLElement).dataset.zAction;
+        switch (action) {
+          case 'bring-to-front': this.bringToFront(); break;
+          case 'bring-forward': this.bringForward(); break;
+          case 'send-backward': this.sendBackward(); break;
+          case 'send-to-back': this.sendToBack(); break;
+        }
+      });
+    });
+
+    // Keyboard shortcuts for z-order
+    this.boundKeydownHandler = (e: KeyboardEvent) => {
+      // Only handle if not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Ctrl+] = Bring Forward, Shift+Ctrl+] = Bring to Front
+      // Ctrl+[ = Send Backward, Shift+Ctrl+[ = Send to Back
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === ']') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            this.bringToFront();
+          } else {
+            this.bringForward();
+          }
+        } else if (e.key === '[') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            this.sendToBack();
+          } else {
+            this.sendBackward();
+          }
+        }
+      }
+
+      // Delete key to delete selected object
+      if (e.key === 'Delete' && this.selectedObjectId) {
+        this.deleteSelected();
+      }
+    };
+    document.addEventListener('keydown', this.boundKeydownHandler);
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -810,11 +903,11 @@ export class ScenePage extends Page<ScenePageOptions> {
       return;
     }
 
-    // Select mode: find clicked object (reverse order for top-most first)
+    // Select mode: find clicked object (highest zIndex first for proper depth picking)
     if (currentMode === 'select') {
+      const sortedByZ = this.getObjectsSortedByZ(false);
       let clickedObject: SceneObject | null = null;
-      for (let i = this.objects.length - 1; i >= 0; i--) {
-        const obj = this.objects[i];
+      for (const obj of sortedByZ) {
         if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
           clickedObject = obj;
           break;
@@ -1745,32 +1838,114 @@ export class ScenePage extends Page<ScenePageOptions> {
     return { width: Math.max(maxX - minX, 50), height: Math.max(maxY - minY, 50) };
   }
 
-  private moveSelectedUp(): void {
-    const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+  // Z-Order helper method to reduce code duplication
+  private getObjectsSortedByZ(ascending = true): SceneObject[] {
+    return [...this.objects].sort((a, b) =>
+      ascending ? a.zIndex - b.zIndex : b.zIndex - a.zIndex
+    );
+  }
 
-    const objects = [...this.objects];
-    const idx = objects.findIndex(o => o.id === this.selectedObjectId);
-    if (idx > 0) {
-      [objects[idx - 1], objects[idx]] = [objects[idx], objects[idx - 1]];
-      sceneStore.updateSceneObjects(activeScene.id, objects);
+  // Z-Order manipulation methods
+  private bringForward(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene || this.objects.length < 2) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the object with the next higher zIndex
+    const sortedByZ = this.getObjectsSortedByZ(true);
+    const currentIdx = sortedByZ.findIndex(o => o.id === obj.id);
+
+    if (currentIdx < sortedByZ.length - 1) {
+      const nextObj = sortedByZ[currentIdx + 1];
+      // If zIndex values are equal, increment current object's zIndex
+      // Otherwise swap the values
+      const updatedObjects = this.objects.map(o => {
+        if (o.id === obj.id) {
+          return { ...o, zIndex: obj.zIndex === nextObj.zIndex ? obj.zIndex + 1 : nextObj.zIndex };
+        }
+        if (o.id === nextObj.id && obj.zIndex !== nextObj.zIndex) {
+          return { ...o, zIndex: obj.zIndex };
+        }
+        return o;
+      });
+      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
       this.updateHierarchy();
+      this.updatePropertiesPanel();
       this.renderScene();
     }
   }
 
-  private moveSelectedDown(): void {
+  private sendBackward(): void {
     const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+    if (!this.selectedObjectId || !activeScene || this.objects.length < 2) return;
 
-    const objects = [...this.objects];
-    const idx = objects.findIndex(o => o.id === this.selectedObjectId);
-    if (idx < objects.length - 1) {
-      [objects[idx], objects[idx + 1]] = [objects[idx + 1], objects[idx]];
-      sceneStore.updateSceneObjects(activeScene.id, objects);
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the object with the next lower zIndex
+    const sortedByZ = this.getObjectsSortedByZ(true);
+    const currentIdx = sortedByZ.findIndex(o => o.id === obj.id);
+
+    if (currentIdx > 0) {
+      const prevObj = sortedByZ[currentIdx - 1];
+      // If zIndex values are equal, decrement current object's zIndex
+      // Otherwise swap the values
+      const updatedObjects = this.objects.map(o => {
+        if (o.id === obj.id) {
+          return { ...o, zIndex: obj.zIndex === prevObj.zIndex ? obj.zIndex - 1 : prevObj.zIndex };
+        }
+        if (o.id === prevObj.id && obj.zIndex !== prevObj.zIndex) {
+          return { ...o, zIndex: obj.zIndex };
+        }
+        return o;
+      });
+      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
       this.updateHierarchy();
+      this.updatePropertiesPanel();
       this.renderScene();
     }
+  }
+
+  private bringToFront(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene || this.objects.length === 0) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the maximum zIndex
+    const maxZ = Math.max(...this.objects.map(o => o.zIndex));
+
+    // Always bring to front (maxZ + 1), even if already at max
+    const updatedObjects = this.objects.map(o =>
+      o.id === obj.id ? { ...o, zIndex: maxZ + 1 } : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.renderScene();
+  }
+
+  private sendToBack(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene || this.objects.length === 0) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the minimum zIndex
+    const minZ = Math.min(...this.objects.map(o => o.zIndex));
+
+    // Always send to back (minZ - 1), even if already at min
+    const updatedObjects = this.objects.map(o =>
+      o.id === obj.id ? { ...o, zIndex: minZ - 1 } : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.renderScene();
   }
 
   private deleteSelected(): void {
@@ -2013,7 +2188,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Apply Y-flip once for all objects (viewport has Y+ up, canvas draws Y+ down)
     this.ctx.scale(1, -1);
 
-    for (const obj of this.objects) {
+    // Sort objects by zIndex for proper depth ordering (lower zIndex renders first = behind)
+    const sortedObjects = this.getObjectsSortedByZ(true);
+
+    for (const obj of sortedObjects) {
       if (!obj.visible) continue;
 
       const dims = this.getObjectDimensions(obj);
@@ -2642,11 +2820,15 @@ export class ScenePage extends Page<ScenePageOptions> {
       return;
     }
 
-    const items = this.objects.map(obj => `
+    // Sort by zIndex in descending order (highest z-index at top of list = front of scene)
+    const sortedObjects = this.getObjectsSortedByZ(false);
+
+    const items = sortedObjects.map(obj => `
       <div class="hierarchy-item ${obj.id === this.selectedObjectId ? 'selected' : ''}" data-id="${obj.id}">
         <span class="hierarchy-visibility">${obj.visible ? '👁' : '👁‍🗨'}</span>
         <span class="hierarchy-icon">${this.getObjectIcon(obj)}</span>
         <span class="hierarchy-name">${obj.name}</span>
+        <span class="hierarchy-z-index" title="Z-Index: ${obj.zIndex}">[${obj.zIndex}]</span>
         ${obj.locked ? '<span class="hierarchy-locked">🔒</span>' : ''}
       </div>
     `).join('');
@@ -2711,12 +2893,14 @@ export class ScenePage extends Page<ScenePageOptions> {
     const sliderValue = this.$('.slider-value') as HTMLElement;
     const visibleCheckbox = this.$('.visible-checkbox') as HTMLInputElement;
     const lockedCheckbox = this.$('.locked-checkbox') as HTMLInputElement;
+    const zIndexInput = this.$('.z-index-input') as HTMLInputElement;
 
     if (nameInput) nameInput.value = obj.name;
     if (opacitySlider) opacitySlider.value = String(obj.opacity * 100);
     if (sliderValue) sliderValue.textContent = `${Math.round(obj.opacity * 100)}%`;
     if (visibleCheckbox) visibleCheckbox.checked = obj.visible;
     if (lockedCheckbox) lockedCheckbox.checked = obj.locked;
+    if (zIndexInput) zIndexInput.value = String(obj.zIndex);
 
     // Update pivot inputs
     const pivotXInput = this.$('.pivot-x') as HTMLInputElement;
@@ -3135,11 +3319,17 @@ export class ScenePage extends Page<ScenePageOptions> {
       }
     }
 
+    // Remove document-level keyboard listener
+    if (this.boundKeydownHandler) {
+      document.removeEventListener('keydown', this.boundKeydownHandler);
+    }
+
     // Clear bound handler references
     this.boundHandleMouseDown = null;
     this.boundHandleMouseMove = null;
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
+    this.boundKeydownHandler = null;
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
