@@ -5,7 +5,7 @@
  * This ensures sessions created on claude.ai appear in the local UI without manual intervention.
  */
 
-import { db, chatSessions, events, users, sql, getPool } from '../db/index.js';
+import { db, chatSessions, events, users, getPool } from '../db/index.js';
 import { eq, and, or, isNotNull, isNull, gte, ne, lte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
@@ -27,38 +27,29 @@ const MAX_CONCURRENT_API_CALLS = 5;
 
 /**
  * Helper to run promises in parallel with a concurrency limit
+ * Uses a worker pool pattern for correct concurrency control
  */
 async function runWithConcurrency<T, R>(
   items: T[],
   fn: (item: T) => Promise<R>,
   concurrency: number
 ): Promise<R[]> {
-  const results: R[] = [];
-  const executing: Promise<void>[] = [];
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
 
-  for (const item of items) {
-    const p = fn(item).then(result => {
-      results.push(result);
-    });
-    executing.push(p);
-
-    if (executing.length >= concurrency) {
-      await Promise.race(executing);
-      // Remove completed promises
-      for (let i = executing.length - 1; i >= 0; i--) {
-        // Check if promise is settled by racing with an immediately resolved promise
-        const settled = await Promise.race([
-          executing[i].then(() => true).catch(() => true),
-          Promise.resolve(false)
-        ]);
-        if (settled) {
-          executing.splice(i, 1);
-        }
-      }
+  const worker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index]);
     }
-  }
+  };
 
-  await Promise.all(executing);
+  // Create worker pool with limited concurrency
+  const workers = Array(Math.min(concurrency, items.length))
+    .fill(null)
+    .map(() => worker());
+
+  await Promise.all(workers);
   return results;
 }
 
@@ -111,8 +102,8 @@ async function batchInsertEvents(
     );
   });
 
-  // Use ON CONFLICT DO NOTHING to handle any race conditions
-  // The unique constraint is on (chat_session_id, event_data->>'uuid')
+  // Use ON CONFLICT DO NOTHING to handle race conditions
+  // Relies on unique index idx_events_session_uuid on (chat_session_id, event_data->>'uuid')
   await pool.query(
     `INSERT INTO events (chat_session_id, event_data, timestamp)
      VALUES ${placeholders.join(', ')}

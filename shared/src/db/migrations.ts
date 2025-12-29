@@ -552,7 +552,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_messages_chat_session_id ON messages(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>'uuid')::text));
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>'uuid')::text)) WHERE event_data->>'uuid' IS NOT NULL;
 
     -- Live Chat messages table (branch-based chat)
     CREATE TABLE IF NOT EXISTS live_chat_messages (
@@ -715,8 +715,9 @@ const INDEX_DEFINITIONS: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_at ON chat_sessions(created_at)',
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_remote_session_id ON chat_sessions(remote_session_id)',
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_status ON chat_sessions(user_id, status)',
-  // Composite index for event deduplication by UUID (extracted from JSONB)
-  'CREATE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>\'uuid\')::text))',
+  // Unique index for event deduplication by UUID (extracted from JSONB)
+  // Partial index excludes NULL UUIDs; enables ON CONFLICT DO NOTHING for race condition handling
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>\'uuid\')::text)) WHERE event_data->>\'uuid\' IS NOT NULL',
 ];
 
 /**
