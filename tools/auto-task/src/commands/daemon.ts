@@ -103,6 +103,7 @@ export const daemonCommand = new Command('daemon')
       pollInterval: pollInterval,
       basePollInterval: pollInterval,
       refreshFailureCount: 0,
+      issueCooldowns: new Map(),
     };
 
     // Main loop
@@ -140,6 +141,29 @@ export const daemonCommand = new Command('daemon')
     console.log('\nDaemon stopped.');
   });
 
+/**
+ * Tracks cooldown state for an issue to prevent re-processing too quickly
+ */
+interface IssueCooldown {
+  /** Timestamp when the action was taken */
+  actionTime: Date;
+  /** What action was taken */
+  action: 'conflict_resolution' | 'review_started' | 'task_started' | 'rework_started';
+  /** Number of cycles we've been waiting */
+  cycleCount: number;
+  /** Session ID associated with this action (if any) */
+  sessionId?: string;
+}
+
+/** Default number of cycles to wait before re-checking an issue */
+const DEFAULT_COOLDOWN_CYCLES = 3;
+
+/** Maximum cycles before considering an operation stuck and restarting */
+const MAX_STUCK_CYCLES = 6;
+
+/** Maximum time (ms) a session can be "running" before considered stuck (30 minutes) */
+const MAX_RUNNING_TIME_MS = 30 * 60 * 1000;
+
 interface DaemonContext {
   rootDir: string;
   owner: string;
@@ -163,6 +187,8 @@ interface DaemonContext {
   basePollInterval: number;
   /** Count of consecutive token refresh failures */
   refreshFailureCount: number;
+  /** Tracks cooldown state for issues to prevent re-processing too quickly */
+  issueCooldowns: Map<number, IssueCooldown>;
 }
 
 /**
@@ -225,11 +251,80 @@ async function refreshTokenIfNeeded(ctx: DaemonContext): Promise<void> {
   }
 }
 
+/**
+ * Increment cycle counts for all active cooldowns
+ */
+function incrementCooldownCycles(ctx: DaemonContext): void {
+  for (const [issueNumber, cooldown] of ctx.issueCooldowns.entries()) {
+    cooldown.cycleCount++;
+
+    // Clean up expired cooldowns (more than max stuck cycles)
+    if (cooldown.cycleCount > MAX_STUCK_CYCLES * 2) {
+      ctx.issueCooldowns.delete(issueNumber);
+    }
+  }
+}
+
+/**
+ * Check if an issue is in cooldown (should be skipped this cycle)
+ */
+function isInCooldown(ctx: DaemonContext, issueNumber: number): boolean {
+  const cooldown = ctx.issueCooldowns.get(issueNumber);
+  if (!cooldown) return false;
+
+  return cooldown.cycleCount < DEFAULT_COOLDOWN_CYCLES;
+}
+
+/**
+ * Check if an issue is stuck (past max stuck cycles, needs restart)
+ */
+function isStuck(ctx: DaemonContext, issueNumber: number): boolean {
+  const cooldown = ctx.issueCooldowns.get(issueNumber);
+  if (!cooldown) return false;
+
+  return cooldown.cycleCount >= MAX_STUCK_CYCLES;
+}
+
+/**
+ * Set cooldown for an issue
+ */
+function setCooldown(
+  ctx: DaemonContext,
+  issueNumber: number,
+  action: IssueCooldown['action'],
+  sessionId?: string
+): void {
+  ctx.issueCooldowns.set(issueNumber, {
+    actionTime: new Date(),
+    action,
+    cycleCount: 0,
+    sessionId,
+  });
+}
+
+/**
+ * Clear cooldown for an issue (operation completed successfully)
+ */
+function clearCooldown(ctx: DaemonContext, issueNumber: number): void {
+  ctx.issueCooldowns.delete(issueNumber);
+}
+
+/**
+ * Check if a session has been running too long (30 min timeout)
+ */
+function isSessionTimedOut(startTime: Date): boolean {
+  const elapsed = Date.now() - startTime.getTime();
+  return elapsed > MAX_RUNNING_TIME_MS;
+}
+
 async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
   const { projectsService, projectCache, maxReady, maxInProgress } = ctx;
 
   console.log('\n--- Daemon Cycle ---');
   console.log(new Date().toISOString());
+
+  // Increment cycle counts for all active cooldowns
+  incrementCooldownCycles(ctx);
 
   // Get current project items from GitHub (source of truth)
   console.log('\nFetching project items from GitHub...');
@@ -798,7 +893,50 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           );
         }
       } else {
-        console.log(`   Still running...`);
+        // Session is still running - check for timeout
+        const commentTime = new Date(taskInfo.createdAt);
+
+        // Track this session in cooldown if not already tracked
+        if (!ctx.issueCooldowns.has(item.number)) {
+          setCooldown(ctx, item.number, 'task_started', taskInfo.sessionId);
+        }
+
+        // Check if stuck (30 min timeout OR max cycles reached)
+        if (isSessionTimedOut(commentTime) || isStuck(ctx, item.number)) {
+          const elapsed = Math.round((Date.now() - commentTime.getTime()) / 60000);
+          console.log(`   Session stuck (running for ${elapsed} min), interrupting and moving to backlog`);
+
+          // Interrupt the stuck session
+          try {
+            await claudeClient.interruptSession(taskInfo.sessionId);
+            console.log(`   Interrupted session ${taskInfo.sessionId}`);
+          } catch (interruptError) {
+            console.log(`   Failed to interrupt: ${interruptError}`);
+          }
+
+          // Move back to backlog for retry
+          if (backlogId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              backlogId
+            );
+          }
+
+          // Clear cooldown so it gets picked up fresh
+          clearCooldown(ctx, item.number);
+
+          // Add comment about timeout
+          await issuesService.addComment(
+            owner,
+            repo,
+            item.number,
+            `### ⏱️ Session Timeout\n\nThe Claude session was running for ${elapsed} minutes without completing.\n\nSession interrupted and task moved back to backlog for retry.\n\n**Previous Session:** ${taskInfo.sessionId}`
+          );
+        } else {
+          console.log(`   Still running...`);
+        }
       }
     } catch (error) {
       console.error(`   Error checking task: ${error}`);
@@ -957,11 +1095,80 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
     inReview.map(async (item) => {
       if (!item.number) return;
 
+      // Check cooldown - skip if we recently took action on this issue
+      if (isInCooldown(ctx, item.number)) {
+        const cooldown = ctx.issueCooldowns.get(item.number);
+        console.log(`   #${item.number}: In cooldown (${cooldown?.action}, cycle ${cooldown?.cycleCount}/${DEFAULT_COOLDOWN_CYCLES})`);
+        return;
+      }
+
       // Get task info from GitHub comments to find PR number
       const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
       if (!taskInfo?.prNumber) {
         console.log(`   #${item.number}: No PR found in comments, skipping review`);
         return;
+      }
+
+      // Check if a conflict resolution or rework is in progress
+      if (taskInfo.type === 'conflict' || taskInfo.type === 'rework') {
+        // Check if session is still running or stuck
+        if (taskInfo.sessionId) {
+          const claudeClient = new ClaudeWebClient({
+            accessToken: claudeAuth.accessToken,
+            environmentId,
+          });
+
+          try {
+            const session = await claudeClient.getSession(taskInfo.sessionId);
+            console.log(`   #${item.number}: ${taskInfo.type} session status: ${session.session_status}`);
+
+            if (session.session_status === 'running') {
+              // Check if stuck (too many cycles or timed out)
+              const commentTime = new Date(taskInfo.createdAt);
+              if (isStuck(ctx, item.number) || isSessionTimedOut(commentTime)) {
+                console.log(`   #${item.number}: Session stuck/timed out, interrupting and restarting`);
+
+                // Interrupt the stuck session
+                try {
+                  await claudeClient.interruptSession(taskInfo.sessionId);
+                  console.log(`   Interrupted session ${taskInfo.sessionId}`);
+                } catch (interruptError) {
+                  console.log(`   Failed to interrupt: ${interruptError}`);
+                }
+
+                // Clear cooldown so it gets processed next cycle as a fresh task
+                clearCooldown(ctx, item.number);
+
+                // Add comment about restart
+                await issuesService.addComment(
+                  owner,
+                  repo,
+                  item.number,
+                  `### ⚠️ Session Timeout\n\nThe ${taskInfo.type} session was stuck and has been restarted.\n\n**Previous Session:** ${taskInfo.sessionId}`
+                );
+                return;
+              }
+
+              // Still running, not stuck yet - set/update cooldown
+              if (!ctx.issueCooldowns.has(item.number)) {
+                setCooldown(ctx, item.number, 'conflict_resolution', taskInfo.sessionId);
+              }
+              console.log(`   Still running, waiting...`);
+              return;
+            } else if (session.session_status === 'idle' || session.session_status === 'completed') {
+              // Session finished - clear cooldown and continue with review
+              console.log(`   ${taskInfo.type} session completed, proceeding with review`);
+              clearCooldown(ctx, item.number);
+            } else {
+              // Session failed or archived
+              console.log(`   ${taskInfo.type} session ${session.session_status}, clearing and retrying`);
+              clearCooldown(ctx, item.number);
+            }
+          } catch (error) {
+            console.log(`   Session check failed: ${error}, proceeding with review`);
+            clearCooldown(ctx, item.number);
+          }
+        }
       }
 
       try {
@@ -1066,6 +1273,9 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
             if (mergeResult.conflictResolutionStarted) {
               // Claude is fixing conflicts - add comment with new session
               console.log(`   Conflict resolution session started`);
+
+              // Set cooldown to prevent re-processing while conflict resolution runs
+              setCooldown(ctx, item.number, 'conflict_resolution', mergeResult.sessionId);
 
               await issuesService.addComment(
                 owner,
