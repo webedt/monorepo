@@ -616,51 +616,51 @@ function createImageLayersStore() {
     async exportAs(format: ExportFormat, quality?: number): Promise<Blob | null> {
       const state = store.getState();
 
-      // Create composite canvas for merged image
-      const compositeCanvas = createLayerCanvas(state.width, state.height);
-      this.compositeToCanvas(compositeCanvas);
+      // For PNG/JPG, use getCompositeBlob which creates its own canvas
+      // For ORA/PSD, we need a composite canvas for the merged image
+      switch (format) {
+        case 'png':
+          return this.getCompositeBlob('image/png');
 
-      let result: Blob | null = null;
+        case 'jpg':
+          return this.getCompositeBlob('image/jpeg', quality ?? 0.92);
 
-      try {
-        switch (format) {
-          case 'png':
-            result = await this.getCompositeBlob('image/png');
-            break;
-
-          case 'jpg':
-            result = await this.getCompositeBlob('image/jpeg', quality ?? 0.92);
-            break;
-
-          case 'ora':
-            result = await exportToOra(
+        case 'ora': {
+          const compositeCanvas = createLayerCanvas(state.width, state.height);
+          this.compositeToCanvas(compositeCanvas);
+          try {
+            return await exportToOra(
               state.layers,
               state.width,
               state.height,
               compositeCanvas
             );
-            break;
-
-          case 'psd':
-            result = exportToPsd(
-              state.layers,
-              state.width,
-              state.height,
-              compositeCanvas
-            );
-            break;
-
-          default:
-            console.warn(`Unknown export format: ${format}`);
-            result = await this.getCompositeBlob('image/png');
+          } finally {
+            compositeCanvas.width = 0;
+            compositeCanvas.height = 0;
+          }
         }
-      } finally {
-        // Clean up composite canvas
-        compositeCanvas.width = 0;
-        compositeCanvas.height = 0;
-      }
 
-      return result;
+        case 'psd': {
+          const compositeCanvas = createLayerCanvas(state.width, state.height);
+          this.compositeToCanvas(compositeCanvas);
+          try {
+            return exportToPsd(
+              state.layers,
+              state.width,
+              state.height,
+              compositeCanvas
+            );
+          } finally {
+            compositeCanvas.width = 0;
+            compositeCanvas.height = 0;
+          }
+        }
+
+        default:
+          console.warn(`Unknown export format: ${format}`);
+          return this.getCompositeBlob('image/png');
+      }
     },
 
     /**

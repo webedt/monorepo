@@ -11,6 +11,8 @@ import type { BlendMode } from '../../stores/imageLayersStore';
 
 /**
  * Maps our blend modes to PSD blend mode keys (4 characters)
+ * Note: PSD uses non-intuitive keys - 'smud' is Adobe's key for exclusion blend mode
+ * Reference: Adobe Photoshop File Format Specification
  */
 function blendModeToPsdKey(blendMode: BlendMode): string {
   const mapping: Record<BlendMode, string> = {
@@ -25,7 +27,7 @@ function blendModeToPsdKey(blendMode: BlendMode): string {
     'hard-light': 'hLit',
     'soft-light': 'sLit',
     'difference': 'diff',
-    'exclusion': 'smud',
+    'exclusion': 'smud', // Adobe PSD uses 'smud' for exclusion blend mode
   };
   return mapping[blendMode] || 'norm';
 }
@@ -267,19 +269,6 @@ function writeLayerAndMaskInfo(
   width: number,
   height: number
 ): void {
-  // Write layer info directly to the writer
-  writeLayerInfoDirect(writer, layers, width, height);
-}
-
-/**
- * Write layer info directly to the writer
- */
-function writeLayerInfoDirect(
-  writer: BinaryWriter,
-  layers: Layer[],
-  width: number,
-  height: number
-): void {
   // Prepare all layer data first
   const layerData: Array<{
     layer: Layer;
@@ -287,6 +276,14 @@ function writeLayerInfoDirect(
   }> = [];
 
   for (const layer of layers) {
+    // Validate layer canvas dimensions match document dimensions
+    if (layer.canvas.width !== width || layer.canvas.height !== height) {
+      console.warn(
+        `Layer "${layer.name}" dimensions (${layer.canvas.width}x${layer.canvas.height}) ` +
+        `don't match document dimensions (${width}x${height}). Using document dimensions.`
+      );
+    }
+
     const imageData = getCanvasImageData(layer.canvas);
     const pixelCount = width * height;
 
