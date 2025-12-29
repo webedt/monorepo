@@ -37,11 +37,13 @@ export const daemonCommand = new Command('daemon')
   .option('--once', 'Run once and exit')
   .option('--max-ready <n>', 'Max tasks in Ready column', parseInt)
   .option('--max-in-progress <n>', 'Max tasks in In Progress', parseInt)
+  .option('--no-discover', 'Disable task discovery (only process existing tasks)')
   .action(async (options) => {
     const rootDir = path.resolve(options.root);
     const pollInterval = options.pollInterval || POLL_INTERVAL_MS;
     const maxReady = options.maxReady || 6;
     const maxInProgress = options.maxInProgress || 6;
+    const enableDiscovery = options.discover !== false;
 
     console.log('\nAuto-Task Daemon Starting');
     console.log('='.repeat(60));
@@ -66,6 +68,7 @@ export const daemonCommand = new Command('daemon')
     console.log(`Project: #${options.project}`);
     console.log(`Poll interval: ${pollInterval / 1000}s`);
     console.log(`Max Ready: ${maxReady}, Max In Progress: ${maxInProgress}`);
+    console.log(`Task discovery: ${enableDiscovery ? 'enabled' : 'disabled'}`);
     console.log('');
 
     // Initialize services
@@ -101,6 +104,7 @@ export const daemonCommand = new Command('daemon')
       githubToken: githubCreds.token,
       maxReady,
       maxInProgress,
+      enableDiscovery,
       tokenRefreshService,
       pollInterval: pollInterval,
       basePollInterval: pollInterval,
@@ -188,6 +192,8 @@ interface DaemonContext {
   githubToken: string;
   maxReady: number;
   maxInProgress: number;
+  /** Whether to discover new tasks (TODOs and AI discovery) */
+  enableDiscovery: boolean;
   /** Service for refreshing Claude tokens */
   tokenRefreshService: DaemonTokenRefreshService;
   /** Current poll interval (may increase with backoff on refresh failures) */
@@ -374,7 +380,13 @@ async function discoverAndSync(
   readyCount: number,
   maxReady: number
 ): Promise<void> {
-  const { rootDir, owner, repo, issuesService, projectsService, projectCache, claudeAuth } = ctx;
+  const { rootDir, owner, repo, issuesService, projectsService, projectCache, claudeAuth, enableDiscovery } = ctx;
+
+  // Skip discovery if disabled
+  if (!enableDiscovery) {
+    console.log('   Task discovery disabled');
+    return;
+  }
 
   // Check throttling
   if (backlogCount > 10) {
