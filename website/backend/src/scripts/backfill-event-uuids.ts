@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     const countResult = await client.query(`
       SELECT COUNT(*) as total,
              COUNT(*) FILTER (WHERE uuid IS NULL) as null_uuid,
-             COUNT(*) FILTER (WHERE uuid IS NULL AND event_data->>'uuid' IS NOT NULL) as needs_backfill
+             COUNT(*) FILTER (WHERE uuid IS NULL AND event_data->>'uuid' IS NOT NULL AND event_data->>'uuid' != '') as needs_backfill
       FROM events
     `);
 
@@ -62,13 +62,14 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Perform the backfill
+    // Perform the backfill (excluding empty strings to match extractEventUuid behavior)
     console.log('🔄 Backfilling uuid column from eventData...');
     const updateResult = await client.query(`
       UPDATE events
       SET uuid = event_data->>'uuid'
       WHERE uuid IS NULL
         AND event_data->>'uuid' IS NOT NULL
+        AND event_data->>'uuid' != ''
     `);
 
     console.log(`✅ Updated ${updateResult.rowCount} events`);
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     // Verify the results
     console.log('📊 Verifying results...');
     const verifyResult = await client.query(`
-      SELECT COUNT(*) FILTER (WHERE uuid IS NULL AND event_data->>'uuid' IS NOT NULL) as remaining
+      SELECT COUNT(*) FILTER (WHERE uuid IS NULL AND event_data->>'uuid' IS NOT NULL AND event_data->>'uuid' != '') as remaining
       FROM events
     `);
 
