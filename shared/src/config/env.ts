@@ -61,6 +61,11 @@ export const AI_WORKER_URL = process.env.AI_WORKER_URL || '';  // e.g., http://l
 export const AI_WORKER_SECRET = process.env.AI_WORKER_SECRET || '';  // Authentication secret for worker
 export const AI_WORKER_ENABLED = process.env.AI_WORKER_ENABLED === 'true';  // Explicitly enable worker provider
 
+// Gemini AI configuration
+// Gemini uses OAuth tokens from ~/.gemini/oauth_creds.json (users authenticate with `gemini auth login`)
+export const GEMINI_API_BASE_URL = process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+export const GEMINI_DEFAULT_MODEL = process.env.GEMINI_DEFAULT_MODEL || 'gemini-2.0-flash-exp';
+
 // Background sync configuration
 // Automatically syncs Claude Remote sessions from Anthropic API
 export const CLAUDE_SYNC_ENABLED = process.env.CLAUDE_SYNC_ENABLED !== 'false';  // Enabled by default

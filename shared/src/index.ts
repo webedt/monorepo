@@ -61,6 +61,21 @@ export type {
   TitleGenerationCallback,
 } from './claudeWeb/index.js';
 
+// Gemini AI API
+export { GeminiClient, AGeminiClient, GeminiError } from './gemini/index.js';
+export type {
+  GeminiClientConfig,
+  GenerateContentParams,
+  GeminiSessionEvent,
+  GeminiSessionResult,
+  Content as GeminiContent,
+  Part as GeminiPart,
+  TextPart as GeminiTextPart,
+  InlineDataPart as GeminiInlineDataPart,
+  StreamOptions as GeminiStreamOptions,
+  GeminiEventCallback,
+} from './gemini/index.js';
+
 // Session management
 // Note: Exports BroadcastEvent (renamed from SessionEvent) to avoid conflict with ClaudeSessionEvent
 export * from './sessions/index.js';
