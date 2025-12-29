@@ -23,7 +23,7 @@ import {
   sendUnauthorized,
 } from '../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../middleware/sessionMiddleware.js';
-import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, type ClaudeWebClientConfig } from '@webedt/shared';
+import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, extractEventUuid, type ClaudeWebClientConfig } from '@webedt/shared';
 import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -903,11 +903,13 @@ router.post('/:id/events', requireAuth, validateSessionId, requireSessionOwnersh
     return;
   }
 
-  // Create event
+  // Create event - extract uuid for efficient deduplication queries
+  const eventUuid = extractEventUuid(eventData as Record<string, unknown>);
   const [newEvent] = await db
     .insert(events)
     .values({
       chatSessionId: sessionId,
+      uuid: eventUuid,
       eventData,
     })
     .returning();
@@ -1341,6 +1343,7 @@ router.post('/:id/send', requireAuth, validateSessionId, asyncHandler(async (req
 
   await db.insert(events).values({
     chatSessionId: sessionId,
+    uuid: null, // Local input_preview events don't have UUIDs
     eventData: userMessageEvent,
   });
 
@@ -2187,6 +2190,7 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
         };
         await db.insert(events).values({
           chatSessionId: sessionId,
+          uuid: null, // Local input_preview events don't have UUIDs
           eventData: inputPreviewEvent,
         });
         logger.info('RESUME: Sending input_preview event', {
@@ -2292,7 +2296,7 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
               sseWrite(res, sseData);
 
               // Store event in database - deduplicate by UUID
-              const eventUuid = (event as { uuid?: string }).uuid;
+              const eventUuid = extractEventUuid(event as Record<string, unknown>);
               if (eventUuid && storedEventUuids.has(eventUuid)) {
                 // Skip duplicate event storage
                 logger.debug(`Resume event #${eventCount} - SKIPPED (duplicate)`, {
@@ -2306,6 +2310,7 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
 
               await db.insert(events).values({
                 chatSessionId: sessionId,
+                uuid: eventUuid,
                 eventData: eventWithTimestamp,
               });
 

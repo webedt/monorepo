@@ -25,3 +25,6 @@ export {
   readWebedtConfig,
 } from './previewUrlHelper.js';
 export type { WebedtConfig } from './previewUrlHelper.js';
+
+// Event Helper
+export { extractEventUuid } from './eventHelper.js';
