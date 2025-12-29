@@ -205,3 +205,19 @@ export type { EditModeToolbarOptions } from './edit-mode-toolbar';
 // DebugOutputPanel
 export { DebugOutputPanel } from './debug-output';
 export type { DebugOutputPanelOptions } from './debug-output';
+
+// SceneViewport
+export { SceneViewport } from './scene-viewport';
+export type { SceneViewportOptions } from './scene-viewport';
+
+// SceneHierarchyPanel
+export { SceneHierarchyPanel } from './scene-hierarchy-panel';
+export type { SceneHierarchyPanelOptions } from './scene-hierarchy-panel';
+
+// WaveformEditor
+export { WaveformEditor } from './waveform-editor';
+export type { WaveformEditorOptions, AudioSelection } from './waveform-editor';
+
+// SynthesizerPanel
+export { SynthesizerPanel } from './synthesizer-panel';
+export type { SynthesizerPanelOptions } from './synthesizer-panel';
