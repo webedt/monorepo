@@ -1,6 +1,7 @@
 /**
  * AI Input Box Component
- * Text input for sending AI prompts from the code editor
+ * Text input for AI requests with auto-resizing textarea and send button.
+ * Can be used standalone with custom onSubmit handler or with session integration.
  */
 
 import { Component, ComponentOptions } from '../base';
@@ -10,9 +11,12 @@ import { sessionsApi } from '../../lib/api';
 import './ai-input-box.css';
 
 export interface AIInputBoxOptions extends ComponentOptions {
-  sessionId: string;
+  sessionId?: string;
   placeholder?: string;
+  disabled?: boolean;
+  showHint?: boolean;
   onSend?: (content: string) => void;
+  onSubmit?: (content: string) => Promise<void> | void;
   onNavigateToChat?: () => void;
 }
 
@@ -29,7 +33,9 @@ export class AIInputBox extends Component<HTMLDivElement> {
     });
 
     this.options = {
-      placeholder: 'Ask AI about this code...',
+      placeholder: 'Ask AI...',
+      showHint: true,
+      disabled: false,
       ...options,
     };
 
@@ -37,6 +43,7 @@ export class AIInputBox extends Component<HTMLDivElement> {
     this.textareaElement.className = 'ai-input-box-textarea';
     this.textareaElement.placeholder = this.options.placeholder || '';
     this.textareaElement.rows = 1;
+    this.textareaElement.disabled = this.options.disabled || false;
 
     this.sendButton = new Button('Send', {
       variant: 'primary',
@@ -64,12 +71,14 @@ export class AIInputBox extends Component<HTMLDivElement> {
     wrapper.appendChild(inputContainer);
     wrapper.appendChild(controlsContainer);
 
-    const hint = document.createElement('p');
-    hint.className = 'ai-input-box-hint';
-    hint.textContent = 'Press Enter to send, Shift+Enter for new line';
-
     this.element.appendChild(wrapper);
-    this.element.appendChild(hint);
+
+    if (this.options.showHint) {
+      const hint = document.createElement('p');
+      hint.className = 'ai-input-box-hint';
+      hint.textContent = 'Press Enter to send, Shift+Enter for new line';
+      this.element.appendChild(hint);
+    }
   }
 
   private setupEventListeners(): void {
@@ -103,28 +112,33 @@ export class AIInputBox extends Component<HTMLDivElement> {
     this.sendButton.setDisabled(true);
 
     try {
-      // Call the onSend callback if provided
+      // Call the onSend callback if provided (fires before submission)
       if (this.options.onSend) {
         this.options.onSend(content);
       }
 
-      // Send message to the session
-      const response = await sessionsApi.sendMessage(this.options.sessionId, content);
+      // If a custom onSubmit handler is provided, use it
+      if (this.options.onSubmit) {
+        await this.options.onSubmit(content);
+      } else if (this.options.sessionId) {
+        // Fall back to session-based API call if sessionId is provided
+        const response = await sessionsApi.sendMessage(this.options.sessionId, content);
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to send message');
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to send message');
+        }
+
+        toast.success('Message sent');
+
+        // Navigate to chat view if callback provided
+        if (this.options.onNavigateToChat) {
+          this.options.onNavigateToChat();
+        }
       }
 
       // Clear input
       this.textareaElement.value = '';
       this.textareaElement.style.height = 'auto';
-
-      toast.success('Message sent');
-
-      // Navigate to chat view if callback provided
-      if (this.options.onNavigateToChat) {
-        this.options.onNavigateToChat();
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send message';
       toast.error(message);
@@ -165,6 +179,19 @@ export class AIInputBox extends Component<HTMLDivElement> {
       this.handleInputChange();
     }
     return this;
+  }
+
+  setPlaceholder(placeholder: string): this {
+    this.textareaElement.placeholder = placeholder;
+    return this;
+  }
+
+  isEmpty(): boolean {
+    return this.textareaElement.value.trim().length === 0;
+  }
+
+  isLoading(): boolean {
+    return this.isSending;
   }
 
   protected onUnmount(): void {
