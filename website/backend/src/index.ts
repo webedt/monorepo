@@ -17,6 +17,8 @@ import {
   ORPHAN_CLEANUP_INTERVAL_MINUTES,
   CLAUDE_SYNC_ENABLED,
   CLAUDE_SYNC_INTERVAL_MS,
+  SHUTDOWN_TIMEOUT_MS,
+  LB_DRAIN_DELAY_MS,
   validateEnv,
   logEnvConfig,
   bootstrapServices,
@@ -544,8 +546,8 @@ app.use(
 
 // Graceful shutdown configuration
 const shutdownConfig: GracefulShutdownConfig = {
-  shutdownTimeoutMs: parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '30000', 10),
-  loadBalancerDrainDelayMs: parseInt(process.env.LB_DRAIN_DELAY_MS || '2000', 10),
+  shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+  loadBalancerDrainDelayMs: LB_DRAIN_DELAY_MS,
   exitProcess: true,
 };
 

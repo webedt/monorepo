@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService } from '@webedt/shared';
+import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService, FRONTEND_URL, FRONTEND_PORT } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -193,7 +193,7 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Build success and cancel URLs (provider-specific placeholders)
-    const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
+    const baseUrl = FRONTEND_URL || `http://localhost:${FRONTEND_PORT}`;
     // Stripe replaces {CHECKOUT_SESSION_ID}; PayPal appends its own token/PayerID params
     const successUrl = provider === 'stripe'
       ? `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}&provider=stripe`

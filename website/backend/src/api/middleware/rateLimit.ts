@@ -31,6 +31,27 @@ import {
   metrics,
   createSlidingWindowStore,
   circuitBreakerRegistry,
+  RATE_LIMIT_AUTH_WINDOW_MS,
+  RATE_LIMIT_AUTH_MAX,
+  RATE_LIMIT_PUBLIC_WINDOW_MS,
+  RATE_LIMIT_PUBLIC_MAX,
+  RATE_LIMIT_STANDARD_WINDOW_MS,
+  RATE_LIMIT_STANDARD_MAX,
+  RATE_LIMIT_AI_WINDOW_MS,
+  RATE_LIMIT_AI_MAX,
+  RATE_LIMIT_SYNC_WINDOW_MS,
+  RATE_LIMIT_SYNC_MAX,
+  RATE_LIMIT_SEARCH_WINDOW_MS,
+  RATE_LIMIT_SEARCH_MAX,
+  RATE_LIMIT_COLLABORATION_WINDOW_MS,
+  RATE_LIMIT_COLLABORATION_MAX,
+  RATE_LIMIT_SSE_WINDOW_MS,
+  RATE_LIMIT_SSE_MAX,
+  RATE_LIMIT_FILE_WINDOW_MS,
+  RATE_LIMIT_FILE_MAX,
+  SKIP_RATE_LIMITING,
+  RATE_LIMIT_SKIP_ADMINS,
+  RATE_LIMIT_CB_DEGRADATION,
 } from '@webedt/shared';
 import type { SlidingWindowStore } from '@webedt/shared';
 
@@ -51,59 +72,59 @@ export type RateLimitTier =
   | 'file';
 
 /**
- * Rate limit configuration from environment variables
+ * Rate limit configuration from centralized config
  */
 const config = {
   // Strict limits for auth endpoints (default: 5 requests per minute)
-  authWindowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW_MS || '60000', 10),
-  authMaxRequests: parseInt(process.env.RATE_LIMIT_AUTH_MAX || '5', 10),
+  authWindowMs: RATE_LIMIT_AUTH_WINDOW_MS,
+  authMaxRequests: RATE_LIMIT_AUTH_MAX,
 
   // Moderate limits for public share endpoints (default: 30 requests per minute)
-  publicWindowMs: parseInt(process.env.RATE_LIMIT_PUBLIC_WINDOW_MS || '60000', 10),
-  publicMaxRequests: parseInt(process.env.RATE_LIMIT_PUBLIC_MAX || '30', 10),
+  publicWindowMs: RATE_LIMIT_PUBLIC_WINDOW_MS,
+  publicMaxRequests: RATE_LIMIT_PUBLIC_MAX,
 
   // Standard limits for authenticated endpoints (default: 100 requests per minute)
-  standardWindowMs: parseInt(process.env.RATE_LIMIT_STANDARD_WINDOW_MS || '60000', 10),
-  standardMaxRequests: parseInt(process.env.RATE_LIMIT_STANDARD_MAX || '100', 10),
+  standardWindowMs: RATE_LIMIT_STANDARD_WINDOW_MS,
+  standardMaxRequests: RATE_LIMIT_STANDARD_MAX,
 
   // AI operation limits (default: 10 requests per minute)
   // Applies to: execute-remote, imageGen, transcribe
-  aiWindowMs: parseInt(process.env.RATE_LIMIT_AI_WINDOW_MS || '60000', 10),
-  aiMaxRequests: parseInt(process.env.RATE_LIMIT_AI_MAX || '10', 10),
+  aiWindowMs: RATE_LIMIT_AI_WINDOW_MS,
+  aiMaxRequests: RATE_LIMIT_AI_MAX,
 
   // Sync operation limits (default: 5 requests per minute)
   // Applies to: sessions/sync, sessions/:id/sync-events
-  syncWindowMs: parseInt(process.env.RATE_LIMIT_SYNC_WINDOW_MS || '60000', 10),
-  syncMaxRequests: parseInt(process.env.RATE_LIMIT_SYNC_MAX || '5', 10),
+  syncWindowMs: RATE_LIMIT_SYNC_WINDOW_MS,
+  syncMaxRequests: RATE_LIMIT_SYNC_MAX,
 
   // Search operation limits (default: 30 requests per minute)
   // Applies to: universal search, autocomplete
-  searchWindowMs: parseInt(process.env.RATE_LIMIT_SEARCH_WINDOW_MS || '60000', 10),
-  searchMaxRequests: parseInt(process.env.RATE_LIMIT_SEARCH_MAX || '30', 10),
+  searchWindowMs: RATE_LIMIT_SEARCH_WINDOW_MS,
+  searchMaxRequests: RATE_LIMIT_SEARCH_MAX,
 
   // Collaboration limits (default: 60 requests per minute)
   // Applies to: workspace presence, events
-  collaborationWindowMs: parseInt(process.env.RATE_LIMIT_COLLABORATION_WINDOW_MS || '60000', 10),
-  collaborationMaxRequests: parseInt(process.env.RATE_LIMIT_COLLABORATION_MAX || '60', 10),
+  collaborationWindowMs: RATE_LIMIT_COLLABORATION_WINDOW_MS,
+  collaborationMaxRequests: RATE_LIMIT_COLLABORATION_MAX,
 
   // SSE reconnection limits (default: 10 reconnects per minute per session)
   // Applies to: SSE streaming endpoints to prevent aggressive reconnection patterns
-  sseWindowMs: parseInt(process.env.RATE_LIMIT_SSE_WINDOW_MS || '60000', 10),
-  sseMaxRequests: parseInt(process.env.RATE_LIMIT_SSE_MAX || '10', 10),
+  sseWindowMs: RATE_LIMIT_SSE_WINDOW_MS,
+  sseMaxRequests: RATE_LIMIT_SSE_MAX,
 
   // File operation limits (default: 100 requests per minute)
   // Applies to: file read/write operations
-  fileWindowMs: parseInt(process.env.RATE_LIMIT_FILE_WINDOW_MS || '60000', 10),
-  fileMaxRequests: parseInt(process.env.RATE_LIMIT_FILE_MAX || '100', 10),
+  fileWindowMs: RATE_LIMIT_FILE_WINDOW_MS,
+  fileMaxRequests: RATE_LIMIT_FILE_MAX,
 
   // Whether to skip rate limiting (for testing/development)
-  skipRateLimiting: process.env.SKIP_RATE_LIMITING === 'true',
+  skipRateLimiting: SKIP_RATE_LIMITING,
 
   // Whether to skip rate limiting for admins (default: true)
-  skipForAdmins: process.env.RATE_LIMIT_SKIP_ADMINS !== 'false',
+  skipForAdmins: RATE_LIMIT_SKIP_ADMINS,
 
   // Circuit breaker degradation multiplier (reduce limits when circuit is open)
-  circuitBreakerDegradationFactor: parseFloat(process.env.RATE_LIMIT_CB_DEGRADATION || '0.5'),
+  circuitBreakerDegradationFactor: RATE_LIMIT_CB_DEGRADATION,
 };
 
 /**

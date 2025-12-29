@@ -32,6 +32,14 @@ import {
   type MigrationResult,
   type SchemaValidationResult,
 } from './migrations.js';
+import {
+  DATABASE_URL,
+  QUIET_DB,
+  DEBUG_SQL,
+  NODE_ENV,
+  SKIP_MIGRATIONS,
+  BACKUP_DIR,
+} from '../config/env.js';
 
 const { Pool } = pg;
 
@@ -49,14 +57,14 @@ let initializationError: Error | null = null;
 let initializationPromise: Promise<void> | null = null;
 
 // Skip verbose logging if QUIET_DB is set (for CLI commands)
-const quietMode = process.env.QUIET_DB === 'true';
+const quietMode = QUIET_DB;
 
 /**
  * Get or create the database pool (lazy initialization)
  */
 function ensurePool(): pg.Pool {
   if (!_pool) {
-    if (!process.env.DATABASE_URL) {
+    if (!DATABASE_URL) {
       throw new Error(
         'DATABASE_URL environment variable is required. PostgreSQL is the only supported database.\n' +
         'Set DATABASE_URL in your environment:\n' +
@@ -69,11 +77,11 @@ function ensurePool(): pg.Pool {
     }
 
     _pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: DATABASE_URL,
       max: LIMITS.DATABASE.MAX_CONNECTIONS,
       idleTimeoutMillis: TIMEOUTS.DATABASE.IDLE,
       connectionTimeoutMillis: TIMEOUTS.DATABASE.CONNECTION,
-      ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
+      ssl: DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
     });
   }
   return _pool;
@@ -87,7 +95,7 @@ function getDbInstance(): NodePgDatabase<typeof schema> {
     const pool = ensurePool();
     _db = drizzle(pool, {
       schema,
-      logger: process.env.NODE_ENV === 'development' && process.env.DEBUG_SQL === 'true'
+      logger: NODE_ENV === 'development' && DEBUG_SQL
     });
   }
   return _db;
@@ -201,15 +209,15 @@ async function doInitialize(): Promise<void> {
     console.log('  ✅ Database connection established');
 
     // Run migrations unless skipped
-    const skipMigrations = process.env.SKIP_MIGRATIONS === 'true';
+    const skipMigrations = SKIP_MIGRATIONS;
 
     if (!skipMigrations) {
       console.log('');
       console.log('Running database migrations...');
 
-      const migrationResult = await runMigrations(process.env.DATABASE_URL!, {
-        backup: process.env.NODE_ENV === 'production',
-        backupDir: process.env.BACKUP_DIR || '/tmp/db-backups',
+      const migrationResult = await runMigrations(DATABASE_URL!, {
+        backup: NODE_ENV === 'production',
+        backupDir: BACKUP_DIR,
       });
 
       if (!migrationResult.success) {
@@ -278,7 +286,7 @@ async function doInitialize(): Promise<void> {
       console.error('');
       console.error(formatSchemaErrors(validation));
 
-      if (process.env.NODE_ENV === 'production') {
+      if (NODE_ENV === 'production') {
         console.warn('⚠️  Schema validation failed - some features may not work correctly');
       }
     } else if (validation.warnings.length > 0) {
@@ -294,7 +302,7 @@ async function doInitialize(): Promise<void> {
     await showDatabaseStats();
 
     // Set up connection manager for health checks
-    connectionManager = createConnection(process.env.DATABASE_URL!, {
+    connectionManager = createConnection(DATABASE_URL!, {
       maxConnections: 1,  // Health checks only need 1 connection
       minConnections: 0,
       maxRetries: RETRY.DEFAULT.MAX_ATTEMPTS,
