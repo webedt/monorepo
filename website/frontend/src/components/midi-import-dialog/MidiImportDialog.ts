@@ -150,15 +150,22 @@ export class MidiImportDialog extends Component {
   }
 
   private selectFile(file: File): void {
-    // Validate file type
+    // Validate file type - require valid extension for MIDI files
     const validTypes = ['audio/midi', 'audio/x-midi', 'audio/mid'];
     const validExtensions = ['.mid', '.midi'];
     const hasValidExtension = validExtensions.some((ext) =>
       file.name.toLowerCase().endsWith(ext)
     );
-    const hasValidType = validTypes.includes(file.type) || file.type === '';
+    const hasValidType = validTypes.includes(file.type);
 
-    if (!hasValidExtension && !hasValidType) {
+    // Require valid extension; MIME type is optional since browsers may not recognize MIDI
+    if (!hasValidExtension) {
+      this.showError('Please select a valid MIDI file (.mid or .midi)');
+      return;
+    }
+
+    // If a MIME type is provided, it must be a valid MIDI type
+    if (file.type !== '' && !hasValidType) {
       this.showError('Please select a valid MIDI file (.mid or .midi)');
       return;
     }
