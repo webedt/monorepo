@@ -32,6 +32,8 @@ export class EventSourceManager {
   private pendingTimeouts: number[] = [];
   private isClosed = false;
   private lastEventId: string | null = null;
+  /** Track registered event listeners for proper cleanup */
+  private registeredListeners: Array<{ type: string; handler: EventListener }> = [];
 
   constructor(url: string, options: SSEOptions = {}) {
     this.url = url;
@@ -103,14 +105,21 @@ export class EventSourceManager {
       'error',
     ];
 
+    // Clear any previously registered listeners
+    this.registeredListeners = [];
+
     for (const type of eventTypes) {
-      this.eventSource.addEventListener(type, (event: MessageEvent) => {
+      const handler: EventListener = (evt: Event) => {
+        const event = evt as MessageEvent;
         // Track last event ID for reliable resumption on reconnect
         if (event.lastEventId) {
           this.lastEventId = event.lastEventId;
         }
         this.handleEventData(type, event.data);
-      });
+      };
+      this.eventSource.addEventListener(type, handler);
+      // Track for cleanup
+      this.registeredListeners.push({ type, handler });
     }
   }
 
@@ -175,6 +184,12 @@ export class EventSourceManager {
     this.clearPendingTimeouts();
 
     if (this.eventSource) {
+      // Remove all registered event listeners to prevent memory leaks
+      for (const { type, handler } of this.registeredListeners) {
+        this.eventSource.removeEventListener(type, handler);
+      }
+      this.registeredListeners = [];
+
       this.eventSource.close();
       this.eventSource = null;
       console.log('[SSE] Closed');

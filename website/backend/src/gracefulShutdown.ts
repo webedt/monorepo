@@ -19,6 +19,7 @@ import {
   stopBackgroundSync,
   sessionEventBroadcaster,
   sessionListBroadcaster,
+  trashCleanupService,
   closeDatabase,
 } from '@webedt/shared';
 
@@ -153,7 +154,11 @@ export async function gracefulShutdown(
     sessionEventBroadcaster.shutdown();
     sessionListBroadcaster.shutdown();
 
-    // Step 5.5: Clean up rate limit stores
+    // Step 5b: Stop trash cleanup service
+    logger.info('Stopping trash cleanup service', { component: 'GracefulShutdown' });
+    await trashCleanupService.dispose();
+
+    // Step 5c: Clean up rate limit stores
     logger.info('Cleaning up rate limit stores', { component: 'GracefulShutdown' });
     cleanupRateLimitStores();
 
