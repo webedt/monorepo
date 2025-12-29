@@ -1030,12 +1030,19 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           }
           console.log(`   Moved to In Review`);
 
-          // Add comment to issue with branch/PR info (for future lookups)
+          // Extract implementation summary from the session
+          const implementationSummary = extractImplementationSummary(events.data);
+
+          // Add comment to issue with branch/PR info and implementation summary
+          const summarySection = implementationSummary
+            ? `\n\n<details>\n<summary>Implementation Details</summary>\n\n${implementationSummary}\n\n</details>`
+            : '';
+
           await issuesService.addComment(
             owner,
             repo,
             item.number,
-            `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}\n\nThe PR is now being reviewed.`
+            `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}${summarySection}\n\nThe PR is now being reviewed.`
           );
         } else {
           // No branch created - session failed to produce output
@@ -1226,6 +1233,56 @@ function extractBranchFromEvents(
       for (const pattern of patterns) {
         const match = content.match(pattern);
         if (match) return match[1];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract a summary of what was implemented from the session events.
+ * Looks for the final assistant message that summarizes the work done.
+ */
+function extractImplementationSummary(events: ClaudeSessionEvent[]): string | undefined {
+  // Look for the last assistant/result message that contains implementation details
+  // Go in reverse to find the most recent summary
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type === 'result' || event.type === 'assistant') {
+      let content = '';
+      if (typeof event.message?.content === 'string') {
+        content = event.message.content;
+      } else if (Array.isArray(event.message?.content)) {
+        content = event.message.content
+          .map((c: { text?: string }) => c.text || '')
+          .join('');
+      }
+
+      // Skip very short messages or tool results
+      if (content.length < 100) continue;
+
+      // Look for summary-like content (implementation complete, changes made, etc.)
+      const summaryIndicators = [
+        /(?:completed|finished|implemented|done|pushed|created|added)/i,
+        /(?:changes|modifications|updates|fixes)/i,
+        /(?:branch|PR|pull request)/i,
+      ];
+
+      const hasSummaryContent = summaryIndicators.some(pattern => pattern.test(content));
+      if (hasSummaryContent) {
+        // Truncate if too long, keeping the most relevant part
+        if (content.length > 2000) {
+          // Try to find a natural break point
+          const lines = content.split('\n');
+          let truncated = '';
+          for (const line of lines) {
+            if (truncated.length + line.length > 1800) break;
+            truncated += line + '\n';
+          }
+          return truncated.trim() + '\n\n*[truncated]*';
+        }
+        return content;
       }
     }
   }
@@ -1500,12 +1557,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               }
             }
 
-            // Add completion comment
+            // Add completion comment with review summary
+            const reviewSummarySection = result.summary
+              ? `\n\n<details>\n<summary>Review Summary</summary>\n\n${result.summary}\n\n</details>`
+              : '';
+
             await issuesService.addComment(
               owner,
               repo,
               item.number,
-              `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
+              `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.${reviewSummarySection}\n\nThis issue is now closed.`
             );
           } else if (mergeResult.hasConflicts) {
             // Has merge conflicts - needs resolution
