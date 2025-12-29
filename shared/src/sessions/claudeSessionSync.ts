@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
 import { generateSessionPath, normalizeRepoUrl } from '../utils/helpers/sessionPathHelper.js';
 import { logger } from '../utils/logging/logger.js';
+import { runWithCorrelation } from '../utils/logging/correlationContext.js';
 import { ensureValidToken, isClaudeAuthDb } from '../auth/claudeAuth.js';
 import { sessionListBroadcaster } from './sessionListBroadcaster.js';
 import {
@@ -799,6 +800,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
 /**
  * Run sync for all users with Claude auth configured
+ * Wraps the sync operation in a correlation context for tracing
  */
 async function runSync(): Promise<void> {
   if (syncStats.isRunning) {
@@ -806,65 +808,71 @@ async function runSync(): Promise<void> {
     return;
   }
 
-  syncStats.isRunning = true;
-  const startTime = Date.now();
+  // Generate a correlation ID for this sync cycle
+  const syncCorrelationId = `sync-${uuidv4()}`;
 
-  try {
-    // Find all users with Claude auth configured
-    const usersWithClaudeAuth = await db
-      .select({
-        id: users.id,
-        claudeAuth: users.claudeAuth
-      })
-      .from(users)
-      .where(isNotNull(users.claudeAuth));
+  // Run the sync with its own correlation context
+  await runWithCorrelation(syncCorrelationId, async () => {
+    syncStats.isRunning = true;
+    const startTime = Date.now();
 
-    if (usersWithClaudeAuth.length === 0) {
-      logger.debug('[SessionSync] No users with Claude auth configured', { component: 'SessionSync' });
-      return;
+    try {
+      // Find all users with Claude auth configured
+      const usersWithClaudeAuth = await db
+        .select({
+          id: users.id,
+          claudeAuth: users.claudeAuth
+        })
+        .from(users)
+        .where(isNotNull(users.claudeAuth));
+
+      if (usersWithClaudeAuth.length === 0) {
+        logger.debug('[SessionSync] No users with Claude auth configured', { component: 'SessionSync' });
+        return;
+      }
+
+      logger.info(`[SessionSync] Starting sync for ${usersWithClaudeAuth.length} user(s)`, {
+        component: 'SessionSync'
+      });
+
+      let totalImported = 0;
+      let totalUpdated = 0;
+      let totalErrors = 0;
+      let totalSkipped = 0;
+
+      for (const user of usersWithClaudeAuth) {
+        if (!user.claudeAuth) continue;
+
+        const result = await syncUserSessions(user.id, user.claudeAuth);
+        totalImported += result.imported;
+        totalUpdated += result.updated;
+        totalErrors += result.errors;
+        totalSkipped += result.skipped;
+      }
+
+      syncStats.totalSyncs++;
+      syncStats.totalImported += totalImported;
+      syncStats.totalUpdated += totalUpdated;
+      syncStats.totalErrors += totalErrors;
+      syncStats.lastSyncTime = new Date();
+
+      const durationMs = Date.now() - startTime;
+      logger.info(`[SessionSync] Sync completed in ${durationMs}ms`, {
+        component: 'SessionSync',
+        imported: totalImported,
+        updated: totalUpdated,
+        errors: totalErrors,
+        skipped: totalSkipped,
+        users: usersWithClaudeAuth.length
+      });
+
+    } catch (error) {
+      syncStats.totalErrors++;
+      logger.error('[SessionSync] Sync cycle failed', error as Error, { component: 'SessionSync' });
+    } finally {
+      syncStats.isRunning = false;
     }
-
-    logger.info(`[SessionSync] Starting sync for ${usersWithClaudeAuth.length} user(s)`, {
-      component: 'SessionSync'
-    });
-
-    let totalImported = 0;
-    let totalUpdated = 0;
-    let totalErrors = 0;
-    let totalSkipped = 0;
-
-    for (const user of usersWithClaudeAuth) {
-      if (!user.claudeAuth) continue;
-
-      const result = await syncUserSessions(user.id, user.claudeAuth);
-      totalImported += result.imported;
-      totalUpdated += result.updated;
-      totalErrors += result.errors;
-      totalSkipped += result.skipped;
-    }
-
-    syncStats.totalSyncs++;
-    syncStats.totalImported += totalImported;
-    syncStats.totalUpdated += totalUpdated;
-    syncStats.totalErrors += totalErrors;
-    syncStats.lastSyncTime = new Date();
-
-    const durationMs = Date.now() - startTime;
-    logger.info(`[SessionSync] Sync completed in ${durationMs}ms`, {
-      component: 'SessionSync',
-      imported: totalImported,
-      updated: totalUpdated,
-      errors: totalErrors,
-      skipped: totalSkipped,
-      users: usersWithClaudeAuth.length
-    });
-
-  } catch (error) {
-    syncStats.totalErrors++;
-    logger.error('[SessionSync] Sync cycle failed', error as Error, { component: 'SessionSync' });
-  } finally {
-    syncStats.isRunning = false;
-  }
+  });
 }
 
 /**
