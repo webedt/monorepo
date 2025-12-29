@@ -4,10 +4,8 @@
  * Uses mock implementations for GitHelper and GitHubClient dependencies.
  */
 
-import { describe, it, beforeEach, afterEach, mock } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert';
-import * as fs from 'fs';
-import * as path from 'path';
 
 import type { InitSessionOptions, CommitAndPushOptions, CreatePullRequestOptions, MergePullRequestOptions, AutoPullRequestOptions, ProgressCallback } from '../../src/github/operations.js';
 
@@ -28,27 +26,6 @@ interface MockGitHelper {
   branchExists: ReturnType<typeof mock.fn>;
 }
 
-interface MockGitHubClient {
-  pullRepository: ReturnType<typeof mock.fn>;
-  extractRepoName: ReturnType<typeof mock.fn>;
-  extractOwner: ReturnType<typeof mock.fn>;
-}
-
-interface MockOctokit {
-  pulls: {
-    create: ReturnType<typeof mock.fn>;
-    merge: ReturnType<typeof mock.fn>;
-    list: ReturnType<typeof mock.fn>;
-    get: ReturnType<typeof mock.fn>;
-  };
-  repos: {
-    merge: ReturnType<typeof mock.fn>;
-  };
-  git: {
-    deleteRef: ReturnType<typeof mock.fn>;
-  };
-}
-
 // ============================================================================
 // Test Suite: GitHubOperations.initSession()
 // ============================================================================
@@ -65,8 +42,8 @@ describe('GitHubOperations.initSession()', () => {
       };
 
       // Verify expected structure
-      const expectedSessionRoot = path.join(options.workspaceRoot, `session-${options.sessionId}`);
-      const expectedWorkspaceDir = path.join(expectedSessionRoot, 'workspace');
+      const expectedSessionRoot = `${options.workspaceRoot}/session-${options.sessionId}`;
+      const expectedWorkspaceDir = `${expectedSessionRoot}/workspace`;
 
       assert.ok(expectedSessionRoot.includes('session-test-session-12345678'));
       assert.ok(expectedWorkspaceDir.endsWith('/workspace'));
@@ -114,7 +91,6 @@ describe('GitHubOperations.initSession()', () => {
 
   describe('error handling and cleanup', () => {
     it('should clean up session directory on clone failure', async () => {
-      const sessionRoot = '/tmp/workspace/session-test-123';
       let cleanupCalled = false;
 
       // Simulate clone failure and cleanup
@@ -653,7 +629,7 @@ describe('GitHubOperations.createPullRequest()', () => {
 describe('GitHubOperations.mergePullRequest()', () => {
   describe('PR merging', () => {
     it('should merge PR with default method', async () => {
-      const mockMerge = mock.fn(async (options: MergePullRequestOptions) => {
+      const mockMerge = mock.fn(async (_options: MergePullRequestOptions) => {
         return {
           merged: true,
           sha: 'merge123abc',
