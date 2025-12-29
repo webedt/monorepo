@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import { z } from 'zod';
 import { generateIdFromEntropySize } from 'lucia';
 import { db, users, eq } from '@webedt/shared';
 import { lucia } from '@webedt/shared';
@@ -12,23 +13,38 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
+import {
+  sendSuccess,
+  sendError,
+  sendValidationError,
+  sendUnauthorized,
+  sendInternalError,
+  validateRequest,
+  ApiErrorCode,
+} from '@webedt/shared';
+
+// Validation schemas
+const registerSchema = {
+  body: z.object({
+    email: z.string().email('Invalid email address'),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+  }),
+};
+
+const loginSchema = {
+  body: z.object({
+    email: z.string().email('Invalid email address'),
+    password: z.string().min(1, 'Password is required'),
+    rememberMe: z.boolean().optional().default(false),
+  }),
+};
 
 const router = Router();
 
 // Register
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', validateRequest(registerSchema), async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      res.status(400).json({ success: false, error: 'Email and password are required' });
-      return;
-    }
-
-    if (password.length < 8) {
-      res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
-      return;
-    }
 
     // Normalize email to lowercase for case-insensitive comparison
     const normalizedEmail = email.toLowerCase().trim();
@@ -37,7 +53,7 @@ router.post('/register', async (req: Request, res: Response) => {
     const existingUser = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
 
     if (existingUser.length > 0) {
-      res.status(400).json({ success: false, error: 'Email already in use' });
+      sendError(res, 'Email already in use', 400, ApiErrorCode.CONFLICT);
       return;
     }
 
@@ -65,46 +81,36 @@ router.post('/register', async (req: Request, res: Response) => {
     const session = await lucia.createSession(newUser.id, {});
     const sessionCookie = lucia.createSessionCookie(session.id);
 
-    res
-      .status(201)
-      .appendHeader('Set-Cookie', sessionCookie.serialize())
-      .json({
-        success: true,
-        data: {
-          user: {
-            id: newUser.id,
-            email: newUser.email,
-            displayName: newUser.displayName,
-            githubId: newUser.githubId,
-            githubAccessToken: newUser.githubAccessToken,
-            claudeAuth: newUser.claudeAuth,
-            codexAuth: newUser.codexAuth,
-            geminiAuth: newUser.geminiAuth,
-            preferredProvider: newUser.preferredProvider || 'claude',
-            imageResizeMaxDimension: newUser.imageResizeMaxDimension,
-            voiceCommandKeywords: newUser.voiceCommandKeywords || [],
-            defaultLandingPage: newUser.defaultLandingPage || 'store',
-            preferredModel: newUser.preferredModel,
-            isAdmin: newUser.isAdmin,
-            createdAt: newUser.createdAt,
-          },
-        },
-      });
+    res.status(201).appendHeader('Set-Cookie', sessionCookie.serialize());
+    sendSuccess(res, {
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        displayName: newUser.displayName,
+        githubId: newUser.githubId,
+        githubAccessToken: newUser.githubAccessToken,
+        claudeAuth: newUser.claudeAuth,
+        codexAuth: newUser.codexAuth,
+        geminiAuth: newUser.geminiAuth,
+        preferredProvider: newUser.preferredProvider || 'claude',
+        imageResizeMaxDimension: newUser.imageResizeMaxDimension,
+        voiceCommandKeywords: newUser.voiceCommandKeywords || [],
+        defaultLandingPage: newUser.defaultLandingPage || 'store',
+        preferredModel: newUser.preferredModel,
+        isAdmin: newUser.isAdmin,
+        createdAt: newUser.createdAt,
+      },
+    }, 201);
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    sendInternalError(res);
   }
 });
 
 // Login
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', validateRequest(loginSchema), async (req: Request, res: Response) => {
   try {
     const { email, password, rememberMe } = req.body;
-
-    if (!email || !password) {
-      res.status(400).json({ success: false, error: 'Email and password are required' });
-      return;
-    }
 
     // Normalize email to lowercase for case-insensitive comparison
     const normalizedEmail = email.toLowerCase().trim();
@@ -113,7 +119,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const [user] = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
 
     if (!user) {
-      res.status(400).json({ success: false, error: 'Invalid email or password' });
+      sendError(res, 'Invalid email or password', 401, ApiErrorCode.UNAUTHORIZED);
       return;
     }
 
@@ -121,7 +127,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const validPassword = await bcrypt.compare(password, user.passwordHash);
 
     if (!validPassword) {
-      res.status(400).json({ success: false, error: 'Invalid email or password' });
+      sendError(res, 'Invalid email or password', 401, ApiErrorCode.UNAUTHORIZED);
       return;
     }
 
@@ -141,33 +147,29 @@ router.post('/login', async (req: Request, res: Response) => {
       sessionCookie = lucia.createSessionCookie(session.id);
     }
 
-    res
-      .appendHeader('Set-Cookie', sessionCookie.serialize())
-      .json({
-        success: true,
-        data: {
-          user: {
-            id: user.id,
-            email: user.email,
-            displayName: user.displayName,
-            githubId: user.githubId,
-            githubAccessToken: user.githubAccessToken,
-            claudeAuth: user.claudeAuth,
-            codexAuth: user.codexAuth,
-            geminiAuth: user.geminiAuth,
-            preferredProvider: user.preferredProvider || 'claude',
-            imageResizeMaxDimension: user.imageResizeMaxDimension,
-            voiceCommandKeywords: user.voiceCommandKeywords || [],
-            defaultLandingPage: user.defaultLandingPage || 'store',
-            preferredModel: user.preferredModel,
-            isAdmin: user.isAdmin,
-            createdAt: user.createdAt,
-          },
-        },
-      });
+    res.appendHeader('Set-Cookie', sessionCookie.serialize());
+    sendSuccess(res, {
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        githubId: user.githubId,
+        githubAccessToken: user.githubAccessToken,
+        claudeAuth: user.claudeAuth,
+        codexAuth: user.codexAuth,
+        geminiAuth: user.geminiAuth,
+        preferredProvider: user.preferredProvider || 'claude',
+        imageResizeMaxDimension: user.imageResizeMaxDimension,
+        voiceCommandKeywords: user.voiceCommandKeywords || [],
+        defaultLandingPage: user.defaultLandingPage || 'store',
+        preferredModel: user.preferredModel,
+        isAdmin: user.isAdmin,
+        createdAt: user.createdAt,
+      },
+    });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    sendInternalError(res);
   }
 });
 
@@ -177,19 +179,18 @@ router.post('/logout', async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     if (!authReq.authSession) {
-      res.status(401).json({ success: false, error: 'Unauthorized' });
+      sendUnauthorized(res);
       return;
     }
 
     await lucia.invalidateSession(authReq.authSession.id);
     const blankCookie = lucia.createBlankSessionCookie();
 
-    res
-      .appendHeader('Set-Cookie', blankCookie.serialize())
-      .json({ success: true, data: { message: 'Logged out successfully' } });
+    res.appendHeader('Set-Cookie', blankCookie.serialize());
+    sendSuccess(res, { message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    sendInternalError(res);
   }
 });
 
@@ -199,7 +200,7 @@ router.get('/session', async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     if (!authReq.user || !authReq.authSession) {
-      res.status(401).json({ success: false, error: 'Unauthorized' });
+      sendUnauthorized(res);
       return;
     }
 
@@ -211,7 +212,7 @@ router.get('/session', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!freshUser) {
-      res.status(401).json({ success: false, error: 'User not found' });
+      sendError(res, 'User not found', 401, ApiErrorCode.NOT_FOUND);
       return;
     }
 
@@ -268,32 +269,29 @@ router.get('/session', async (req: Request, res: Response) => {
       }
     }
 
-    res.json({
-      success: true,
-      data: {
-        user: {
-          id: freshUser.id,
-          email: freshUser.email,
-          displayName: freshUser.displayName,
-          githubId: freshUser.githubId,
-          githubAccessToken: freshUser.githubAccessToken,
-          claudeAuth: claudeAuth,
-          codexAuth: codexAuth,
-          geminiAuth: freshUser.geminiAuth,
-          preferredProvider: freshUser.preferredProvider || 'claude',
-          imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
-          voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
-          defaultLandingPage: freshUser.defaultLandingPage || 'store',
-          preferredModel: freshUser.preferredModel,
-          isAdmin: freshUser.isAdmin,
-          createdAt: freshUser.createdAt,
-        },
-        session: authReq.authSession,
+    sendSuccess(res, {
+      user: {
+        id: freshUser.id,
+        email: freshUser.email,
+        displayName: freshUser.displayName,
+        githubId: freshUser.githubId,
+        githubAccessToken: freshUser.githubAccessToken,
+        claudeAuth: claudeAuth,
+        codexAuth: codexAuth,
+        geminiAuth: freshUser.geminiAuth,
+        preferredProvider: freshUser.preferredProvider || 'claude',
+        imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
+        voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
+        defaultLandingPage: freshUser.defaultLandingPage || 'store',
+        preferredModel: freshUser.preferredModel,
+        isAdmin: freshUser.isAdmin,
+        createdAt: freshUser.createdAt,
       },
+      session: authReq.authSession,
     });
   } catch (error) {
     console.error('Session error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    sendInternalError(res);
   }
 });
 

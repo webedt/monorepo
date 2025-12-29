@@ -242,11 +242,47 @@ export interface OrchestratorTask {
 }
 
 // API Response types
+export interface ApiError {
+  message: string;
+  code?: string;
+  fields?: Record<string, string[]>;
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
-  error?: string;
+  error?: string | ApiError;
   message?: string;
+  timestamp?: string;
+}
+
+/**
+ * Extract error message from API response
+ * Handles both old format (error: string) and new format (error: { message, code, fields })
+ */
+export function extractApiErrorMessage(response: unknown): string {
+  if (!response || typeof response !== 'object') {
+    return 'Unknown error';
+  }
+  const resp = response as Record<string, unknown>;
+
+  // Handle new format: { error: { message: '...' } }
+  if (resp.error && typeof resp.error === 'object') {
+    const err = resp.error as ApiError;
+    return err.message || 'Unknown error';
+  }
+
+  // Handle old format: { error: '...' }
+  if (typeof resp.error === 'string') {
+    return resp.error;
+  }
+
+  // Handle message field
+  if (typeof resp.message === 'string') {
+    return resp.message;
+  }
+
+  return 'Unknown error';
 }
 
 // Admin types
