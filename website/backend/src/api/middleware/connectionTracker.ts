@@ -2,24 +2,24 @@
  * Connection Tracker Middleware
  *
  * Tracks active HTTP connections for graceful shutdown.
- * Maintains a count of in-flight requests and SSE connections.
+ * Maintains a count of in-flight requests including long-lived SSE connections.
+ *
+ * SSE connections are tracked automatically via the middleware since they are
+ * standard HTTP connections that remain open. The 'close' event on the response
+ * fires when the SSE connection ends, decrementing the active count.
  */
 
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from '@webedt/shared';
 
 interface ConnectionStats {
-  activeRequests: number;
-  activeSSEConnections: number;
-  totalRequestsServed: number;
-  totalSSEConnectionsServed: number;
+  activeConnections: number;
+  totalConnectionsServed: number;
 }
 
 class ConnectionTracker {
-  private activeRequests = 0;
-  private activeSSEConnections = 0;
-  private totalRequestsServed = 0;
-  private totalSSEConnectionsServed = 0;
+  private activeConnections = 0;
+  private totalConnectionsServed = 0;
   private isShuttingDown = false;
 
   /**
@@ -30,8 +30,7 @@ class ConnectionTracker {
     this.isShuttingDown = true;
     logger.info('Connection tracker entering shutdown mode', {
       component: 'ConnectionTracker',
-      activeRequests: this.activeRequests,
-      activeSSEConnections: this.activeSSEConnections,
+      activeConnections: this.activeConnections,
     });
   }
 
@@ -43,33 +42,24 @@ class ConnectionTracker {
   }
 
   /**
-   * Track a new request starting
+   * Track a new connection starting
    */
-  requestStarted(): void {
-    this.activeRequests++;
+  connectionStarted(): void {
+    this.activeConnections++;
   }
 
   /**
-   * Track a request completing
+   * Track a connection completing
    */
-  requestEnded(): void {
-    this.activeRequests = Math.max(0, this.activeRequests - 1);
-    this.totalRequestsServed++;
-  }
-
-  /**
-   * Track a new SSE connection
-   */
-  sseConnectionStarted(): void {
-    this.activeSSEConnections++;
-  }
-
-  /**
-   * Track an SSE connection closing
-   */
-  sseConnectionEnded(): void {
-    this.activeSSEConnections = Math.max(0, this.activeSSEConnections - 1);
-    this.totalSSEConnectionsServed++;
+  connectionEnded(): void {
+    if (this.activeConnections <= 0) {
+      logger.warn('Connection count underflow detected - connectionEnded called more times than connectionStarted', {
+        component: 'ConnectionTracker',
+        activeConnections: this.activeConnections,
+      });
+    }
+    this.activeConnections = Math.max(0, this.activeConnections - 1);
+    this.totalConnectionsServed++;
   }
 
   /**
@@ -77,10 +67,8 @@ class ConnectionTracker {
    */
   getStats(): ConnectionStats {
     return {
-      activeRequests: this.activeRequests,
-      activeSSEConnections: this.activeSSEConnections,
-      totalRequestsServed: this.totalRequestsServed,
-      totalSSEConnectionsServed: this.totalSSEConnectionsServed,
+      activeConnections: this.activeConnections,
+      totalConnectionsServed: this.totalConnectionsServed,
     };
   }
 
@@ -88,14 +76,14 @@ class ConnectionTracker {
    * Check if all connections have drained
    */
   isDrained(): boolean {
-    return this.activeRequests === 0 && this.activeSSEConnections === 0;
+    return this.activeConnections === 0;
   }
 
   /**
    * Get total active connections
    */
   getActiveConnectionCount(): number {
-    return this.activeRequests + this.activeSSEConnections;
+    return this.activeConnections;
   }
 
   /**
@@ -106,13 +94,15 @@ class ConnectionTracker {
    */
   async waitForDrain(timeoutMs: number, pollIntervalMs = 100): Promise<boolean> {
     const startTime = Date.now();
+    let lastLogTime = startTime;
 
     while (!this.isDrained()) {
-      if (Date.now() - startTime >= timeoutMs) {
+      const now = Date.now();
+
+      if (now - startTime >= timeoutMs) {
         logger.warn('Connection drain timeout reached', {
           component: 'ConnectionTracker',
-          activeRequests: this.activeRequests,
-          activeSSEConnections: this.activeSSEConnections,
+          activeConnections: this.activeConnections,
           timeoutMs,
         });
         return false;
@@ -120,15 +110,15 @@ class ConnectionTracker {
 
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
 
-      // Log progress every second
-      const elapsed = Date.now() - startTime;
-      if (elapsed > 0 && elapsed % 1000 < pollIntervalMs) {
+      // Log progress every second (reliably using lastLogTime tracking)
+      const currentTime = Date.now();
+      if (currentTime - lastLogTime >= 1000) {
         logger.info('Waiting for connections to drain', {
           component: 'ConnectionTracker',
-          activeRequests: this.activeRequests,
-          activeSSEConnections: this.activeSSEConnections,
-          elapsedMs: elapsed,
+          activeConnections: this.activeConnections,
+          elapsedMs: currentTime - startTime,
         });
+        lastLogTime = currentTime;
       }
     }
 
@@ -153,6 +143,7 @@ export function connectionTrackerMiddleware(
 ): void {
   // During shutdown, reject new requests with 503
   if (connectionTracker.isInShutdown()) {
+    res.setHeader('Retry-After', '5');
     res.status(503).json({
       success: false,
       error: 'Service is shutting down',
@@ -161,12 +152,12 @@ export function connectionTrackerMiddleware(
     return;
   }
 
-  // Track the request
-  connectionTracker.requestStarted();
+  // Track the connection
+  connectionTracker.connectionStarted();
 
-  // Clean up when response finishes
+  // Clean up when response finishes (works for both regular requests and SSE)
   const cleanup = () => {
-    connectionTracker.requestEnded();
+    connectionTracker.connectionEnded();
     res.removeListener('finish', cleanup);
     res.removeListener('close', cleanup);
     res.removeListener('error', cleanup);
@@ -177,20 +168,4 @@ export function connectionTrackerMiddleware(
   res.on('error', cleanup);
 
   next();
-}
-
-/**
- * Helper to track SSE connections
- * Call sseStarted when setting up SSE, returns cleanup function
- */
-export function trackSSEConnection(): () => void {
-  connectionTracker.sseConnectionStarted();
-  let cleaned = false;
-
-  return () => {
-    if (!cleaned) {
-      cleaned = true;
-      connectionTracker.sseConnectionEnded();
-    }
-  };
 }

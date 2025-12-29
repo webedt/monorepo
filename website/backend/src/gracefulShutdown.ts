@@ -121,8 +121,7 @@ export async function gracefulShutdown(
   const stats = connectionTracker.getStats();
   logger.info('Current connection state', {
     component: 'GracefulShutdown',
-    activeRequests: stats.activeRequests,
-    activeSSEConnections: stats.activeSSEConnections,
+    activeConnections: stats.activeConnections,
   });
 
   try {
@@ -149,16 +148,9 @@ export async function gracefulShutdown(
     // Step 5: Notify SSE clients of shutdown and close broadcaster intervals
     logger.info('Shutting down SSE broadcasters', { component: 'GracefulShutdown' });
 
-    // Cast to implementation type to access shutdown method
-    const eventBroadcaster = sessionEventBroadcaster as { shutdown?: () => void };
-    const listBroadcaster = sessionListBroadcaster as { shutdown?: () => void };
-
-    if (typeof eventBroadcaster.shutdown === 'function') {
-      eventBroadcaster.shutdown();
-    }
-    if (typeof listBroadcaster.shutdown === 'function') {
-      listBroadcaster.shutdown();
-    }
+    // shutdown() is defined in the abstract base classes ASessionEventBroadcaster and ASessionListBroadcaster
+    sessionEventBroadcaster.shutdown();
+    sessionListBroadcaster.shutdown();
 
     // Step 6: Stop accepting new connections on the server
     logger.info('Closing HTTP server to new connections', { component: 'GracefulShutdown' });
@@ -166,6 +158,16 @@ export async function gracefulShutdown(
 
     // Step 7: Wait for existing connections to drain
     const drainTimeout = Math.max(0, settings.shutdownTimeoutMs - settings.loadBalancerDrainDelayMs);
+
+    // Warn if drain timeout is very short due to configuration
+    if (drainTimeout < 5000) {
+      logger.warn('Drain timeout is very short - connections may not have time to complete', {
+        component: 'GracefulShutdown',
+        drainTimeoutMs: drainTimeout,
+        shutdownTimeoutMs: settings.shutdownTimeoutMs,
+        loadBalancerDrainDelayMs: settings.loadBalancerDrainDelayMs,
+      });
+    }
 
     logger.info('Waiting for connections to drain', {
       component: 'GracefulShutdown',
@@ -178,8 +180,7 @@ export async function gracefulShutdown(
       const finalStats = connectionTracker.getStats();
       logger.warn('Shutdown timeout reached with active connections', {
         component: 'GracefulShutdown',
-        activeRequests: finalStats.activeRequests,
-        activeSSEConnections: finalStats.activeSSEConnections,
+        activeConnections: finalStats.activeConnections,
       });
     }
 

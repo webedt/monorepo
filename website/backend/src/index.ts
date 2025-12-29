@@ -599,8 +599,7 @@ async function startServer() {
   const connStats = connectionTracker.getStats();
   logger.info('Connection tracking initialized', {
     component: 'Startup',
-    activeRequests: connStats.activeRequests,
-    activeSSEConnections: connStats.activeSSEConnections,
+    activeConnections: connStats.activeConnections,
     shutdownTimeoutMs: shutdownConfig.shutdownTimeoutMs,
   });
   });
