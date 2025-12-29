@@ -25,6 +25,11 @@ export class DebugOutputPanel extends Component<HTMLDivElement> {
   private isResizing = false;
   private startY = 0;
   private startHeight = 0;
+  // Track state for granular change detection
+  private lastEntriesLength = 0;
+  private lastFilter: LogLevel | 'all' = 'all';
+  private lastSearchQuery = '';
+  private lastIsOpen = false;
 
   constructor(options: DebugOutputPanelOptions = {}) {
     super('div', { className: 'debug-output-panel' });
@@ -65,7 +70,7 @@ export class DebugOutputPanel extends Component<HTMLDivElement> {
     const filters = document.createElement('div');
     filters.className = 'debug-output-filters';
 
-    const levels: (LogLevel | 'all')[] = ['all', 'log', 'info', 'warn', 'error'];
+    const levels: (LogLevel | 'all')[] = ['all', 'log', 'info', 'warn', 'error', 'debug'];
     for (const level of levels) {
       const filterBtn = document.createElement('button');
       filterBtn.type = 'button';
@@ -188,28 +193,59 @@ export class DebugOutputPanel extends Component<HTMLDivElement> {
     document.addEventListener('mouseup', onMouseUp);
   }
 
-  private renderEntries(): void {
+  private renderEntries(forceFullRender = false): void {
     if (!this.entriesContainer) return;
 
     const entries = debugStore.getFilteredEntries();
-    this.entriesContainer.innerHTML = '';
+    const state = debugStore.getState();
 
-    if (entries.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'debug-output-empty';
-      empty.textContent = 'No console output';
-      this.entriesContainer.appendChild(empty);
-      return;
+    // Check if we need a full re-render (filter/search changed or cleared)
+    const filterChanged = state.filter !== this.lastFilter;
+    const searchChanged = state.searchQuery !== this.lastSearchQuery;
+    const needsFullRender = forceFullRender || filterChanged || searchChanged || entries.length < this.lastEntriesLength;
+
+    // Update tracking state
+    this.lastFilter = state.filter;
+    this.lastSearchQuery = state.searchQuery;
+    this.lastEntriesLength = entries.length;
+
+    if (needsFullRender) {
+      // Full re-render
+      this.entriesContainer.innerHTML = '';
+
+      if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'debug-output-empty';
+        empty.textContent = 'No console output';
+        this.entriesContainer.appendChild(empty);
+        return;
+      }
+
+      for (const entry of entries) {
+        const entryEl = this.createEntryElement(entry);
+        this.entriesContainer.appendChild(entryEl);
+      }
+    } else if (entries.length > 0) {
+      // Remove empty message if present
+      const emptyEl = this.entriesContainer.querySelector('.debug-output-empty');
+      if (emptyEl) {
+        emptyEl.remove();
+      }
+
+      // Incremental append - only add new entries
+      const existingCount = this.entriesContainer.children.length;
+      const newEntries = entries.slice(existingCount);
+
+      for (const entry of newEntries) {
+        const entryEl = this.createEntryElement(entry);
+        this.entriesContainer.appendChild(entryEl);
+      }
     }
 
-    // Render entries in reverse order (newest at bottom)
-    for (const entry of entries) {
-      const entryEl = this.createEntryElement(entry);
-      this.entriesContainer.appendChild(entryEl);
+    // Scroll to bottom only if there are entries
+    if (entries.length > 0) {
+      this.entriesContainer.scrollTop = this.entriesContainer.scrollHeight;
     }
-
-    // Scroll to bottom
-    this.entriesContainer.scrollTop = this.entriesContainer.scrollHeight;
   }
 
   private createEntryElement(entry: LogEntry): HTMLDivElement {
@@ -254,31 +290,46 @@ export class DebugOutputPanel extends Component<HTMLDivElement> {
   }
 
   protected onMount(): void {
-    // Subscribe to store changes
+    // Subscribe to store changes with granular change detection
     this.unsubscribe = debugStore.subscribe(() => {
       const state = debugStore.getState();
 
-      // Handle visibility
-      if (state.isOpen) {
-        this.show();
-      } else {
-        this.hide();
+      // Handle visibility changes
+      const visibilityChanged = state.isOpen !== this.lastIsOpen;
+      this.lastIsOpen = state.isOpen;
+
+      if (visibilityChanged) {
+        if (state.isOpen) {
+          this.show();
+          // Force full render when opening to ensure correct state
+          this.renderEntries(true);
+        } else {
+          this.hide();
+          return; // Skip updates when hidden
+        }
       }
 
-      // Update counts
-      this.updateCounts();
-
-      // Render new entries if visible
+      // Only update when panel is visible
       if (state.isOpen) {
-        this.renderEntries();
+        // Update counts (cheap operation)
+        this.updateCounts();
+
+        // Render entries (uses incremental updates when possible)
+        if (!visibilityChanged) {
+          this.renderEntries();
+        }
       }
     });
 
     // Initial render
     const state = debugStore.getState();
+    this.lastIsOpen = state.isOpen;
+    this.lastFilter = state.filter;
+    this.lastSearchQuery = state.searchQuery;
+
     if (state.isOpen) {
       this.show();
-      this.renderEntries();
+      this.renderEntries(true);
     } else {
       this.hide();
     }

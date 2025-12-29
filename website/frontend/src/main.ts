@@ -275,10 +275,18 @@ function createThemeDropdown(): HTMLElement {
   return container;
 }
 
+// Cached debug toggle element (created once, reused across header updates)
+let cachedDebugToggle: HTMLElement | null = null;
+
 /**
- * Create the debug console toggle button
+ * Get or create the debug console toggle button.
+ * The toggle is created once and cached to avoid memory leaks from repeated subscriptions.
  */
-function createDebugToggle(): HTMLElement {
+function getDebugToggle(): HTMLElement {
+  if (cachedDebugToggle) {
+    return cachedDebugToggle;
+  }
+
   const container = document.createElement('div');
   container.className = 'debug-toggle-btn';
 
@@ -300,7 +308,7 @@ function createDebugToggle(): HTMLElement {
   container.appendChild(button);
   container.appendChild(badge);
 
-  // Update badge on store changes
+  // Update badge on store changes (subscription created only once)
   const updateBadge = () => {
     const counts = debugStore.getCounts();
     const errorCount = counts.error + counts.warn;
@@ -314,6 +322,7 @@ function createDebugToggle(): HTMLElement {
     debugStore.toggle();
   });
 
+  cachedDebugToggle = container;
   return container;
 }
 
@@ -397,8 +406,8 @@ function updateHeader(): void {
     actions.appendChild(settingsBtn.getElement());
   }
 
-  // Debug console toggle
-  const debugToggle = createDebugToggle();
+  // Debug console toggle (cached to avoid memory leaks)
+  const debugToggle = getDebugToggle();
   actions.appendChild(debugToggle);
 
   // Theme dropdown

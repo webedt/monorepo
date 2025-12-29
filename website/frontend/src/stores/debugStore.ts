@@ -13,7 +13,8 @@ export interface LogEntry {
   message: string;
   timestamp: Date;
   category?: string;
-  args?: unknown[];
+  // Note: We intentionally don't store the original args to avoid memory leaks
+  // from holding references to potentially large objects
 }
 
 export interface DebugState {
@@ -25,7 +26,10 @@ export interface DebugState {
   isCapturing: boolean;
 }
 
-// Store original console methods
+// Store original console methods at module load time.
+// This captures the native console methods before any other code might wrap them.
+// The actual interception doesn't happen until initialize() is called,
+// so any console calls before that use the original unintercepted methods.
 const originalConsole = {
   log: console.log.bind(console),
   info: console.info.bind(console),
@@ -116,7 +120,6 @@ class DebugStore extends Store<DebugState> {
       message,
       timestamp: new Date(),
       category,
-      args,
     };
 
     // Limit entries to maxEntries
