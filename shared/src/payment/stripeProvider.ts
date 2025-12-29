@@ -6,6 +6,7 @@
 import Stripe from 'stripe';
 import { APaymentProvider } from './APaymentProvider.js';
 import { logger } from '../utils/logging/logger.js';
+import { STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET } from '../config/env.js';
 
 import type { CheckoutSession } from './types.js';
 import type { CreateCheckoutRequest } from './types.js';
@@ -463,8 +464,8 @@ export class StripeProvider extends APaymentProvider {
  * Create Stripe provider from environment variables
  */
 export function createStripeProvider(): StripeProvider | null {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const secretKey = STRIPE_SECRET_KEY;
+  const webhookSecret = STRIPE_WEBHOOK_SECRET;
 
   if (!secretKey || !webhookSecret) {
     logger.warn('Stripe provider not configured: missing environment variables', {

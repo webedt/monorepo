@@ -29,7 +29,7 @@ import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, WORKER_CALLBACK_SECRET } from '@webedt/shared';
 
 /**
  * Helper to write SSE data safely using the shared SSE helper service.
@@ -1899,7 +1899,7 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
   const { status, completedAt, workerSecret } = req.body;
 
   // Validate worker secret
-  const expectedSecret = process.env.WORKER_CALLBACK_SECRET;
+  const expectedSecret = WORKER_CALLBACK_SECRET;
   if (!expectedSecret || workerSecret !== expectedSecret) {
     logger.warn(`Invalid worker secret for session ${sessionId}`, { component: 'Sessions' });
     sendUnauthorized(res, 'Invalid worker secret');

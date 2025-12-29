@@ -8,6 +8,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
 import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
+import { OPENAI_API_KEY } from '@webedt/shared';
 
 const router = express.Router();
 
@@ -90,7 +91,7 @@ const upload = multer({
  */
 router.post('/transcribe', aiOperationRateLimiter, upload.single('audio'), async (req: Request, res: Response) => {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = OPENAI_API_KEY;
 
     // Check if OpenAI API key is configured
     if (!apiKey) {

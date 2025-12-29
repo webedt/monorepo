@@ -9,6 +9,7 @@
 import { Lucia } from 'lucia';
 import { NodePostgresAdapter } from '@lucia-auth/adapter-postgresql';
 import { pool } from '../db/index.js';
+import { isProduction } from '../config/env.js';
 import type { ClaudeAuth } from './claudeAuth.js';
 import type { CodexAuth } from './codexAuth.js';
 
@@ -47,7 +48,7 @@ export const lucia = new Lucia(adapter, {
   sessionCookie: {
     name: 'auth_session',
     attributes: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction(),
       sameSite: 'lax',
       path: '/',
       // Domain is intentionally not set - allows cookie to work on the origin domain

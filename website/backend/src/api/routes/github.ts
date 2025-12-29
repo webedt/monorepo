@@ -11,7 +11,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { logger, ServiceProvider, AClaudeWebClient, withGitHubResilience, withClaudeRemoteResilience, tokenRefreshService } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, ALLOWED_ORIGINS, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET } from '@webedt/shared';
 
 const router = Router();
 
@@ -30,7 +30,7 @@ function getFrontendUrl(path: string, storedOrigin?: string): string {
   if (storedOrigin) {
     return `${storedOrigin}${path}`;
   }
-  const origin = process.env.ALLOWED_ORIGINS?.split(',')[0];
+  const origin = ALLOWED_ORIGINS?.[0];
   if (origin) {
     return `${origin}${path}`;
   }
@@ -140,7 +140,7 @@ router.get('/oauth', requireAuth, (req: Request, res: Response) => {
   const redirectUri = `${returnOrigin}/api/github/oauth/callback`;
 
   const params = new URLSearchParams({
-    client_id: process.env.GITHUB_CLIENT_ID!,
+    client_id: GITHUB_CLIENT_ID,
     redirect_uri: redirectUri,
     scope: 'repo workflow user:email',
     state,
@@ -187,8 +187,8 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        client_id: process.env.GITHUB_CLIENT_ID,
-        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
         code,
       }),
     });

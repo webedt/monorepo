@@ -11,7 +11,7 @@ import { ACodeAnalyzer } from './ACodeAnalyzer.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { getClaudeCredentials, CLAUDE_CREDENTIALS_PATH } from '../auth/claudeAuth.js';
 import { logger } from '../utils/logging/logger.js';
-import { CLAUDE_ENVIRONMENT_ID, LLM_FALLBACK_REPO_URL } from '../config/env.js';
+import { CLAUDE_ENVIRONMENT_ID, LLM_FALLBACK_REPO_URL, CLAUDE_ACCESS_TOKEN } from '../config/env.js';
 
 import type { CodeAnalysisParams } from './types.js';
 import type { CodeAnalysisResult } from './types.js';
@@ -333,7 +333,7 @@ export class CodeAnalyzer extends ACodeAnalyzer {
 
     // Check for environment variable or credentials file
     // Note: This doesn't verify token validity, just availability
-    const hasEnvToken = Boolean(process.env.CLAUDE_ACCESS_TOKEN);
+    const hasEnvToken = Boolean(CLAUDE_ACCESS_TOKEN);
     const hasCredentialsFile = existsSync(CLAUDE_CREDENTIALS_PATH);
 
     return hasEnvToken || hasCredentialsFile;
