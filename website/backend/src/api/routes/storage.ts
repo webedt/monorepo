@@ -4,11 +4,58 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { StorageService, STORAGE_TIERS } from '@webedt/shared';
+import { z } from 'zod';
+import { StorageService, STORAGE_TIERS, validateRequest, CommonSchemas } from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
+
+// ============================================================================
+// Validation Schemas
+// ============================================================================
+
+const checkQuotaSchema = {
+  body: z.object({
+    bytes: z.number().nonnegative('Bytes must be a non-negative number'),
+  }),
+};
+
+const userIdParamsSchema = {
+  params: z.object({
+    userId: CommonSchemas.uuid,
+  }),
+};
+
+const setQuotaSchema = {
+  params: z.object({
+    userId: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    quotaBytes: z.string().min(1, 'quotaBytes is required').refine(
+      (val) => {
+        try {
+          const parsed = BigInt(val);
+          return parsed >= 0;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'quotaBytes must be a valid number string' }
+    ),
+  }),
+};
+
+const setTierSchema = {
+  params: z.object({
+    userId: CommonSchemas.uuid,
+  }),
+  body: z.object({
+    tier: z.enum(['free', 'basic', 'pro', 'enterprise'] as const, {
+      errorMap: () => ({ message: `Invalid tier. Must be one of: ${Object.keys(STORAGE_TIERS).join(', ')}` }),
+    }),
+  }),
+};
 
 const router = Router();
 
@@ -114,18 +161,10 @@ router.post('/recalculate', requireAuth, async (req: Request, res: Response) => 
 /**
  * Check if additional bytes can be added (quota check)
  */
-router.post('/check', requireAuth, async (req: Request, res: Response) => {
+router.post('/check', requireAuth, validateRequest(checkQuotaSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { bytes } = req.body;
-
-    if (typeof bytes !== 'number' || bytes < 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid bytes value. Must be a non-negative number.',
-      });
-      return;
-    }
 
     const check = await StorageService.checkQuota(authReq.user!.id, bytes);
 
@@ -177,9 +216,9 @@ router.get('/tiers', requireAuth, async (_req: Request, res: Response) => {
 /**
  * Get storage stats for a specific user (admin only)
  */
-router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.get('/admin/:userId', requireAuth, requireAdmin, validateRequest(userIdParamsSchema), async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { userId } = (req as Request & { validatedParams: { userId: string } }).validatedParams;
 
     // Validate target user exists
     const exists = await StorageService.userExists(userId);
@@ -212,9 +251,9 @@ router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res
 /**
  * Set storage quota for a user (admin only)
  */
-router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.post('/admin/:userId/quota', requireAuth, requireAdmin, validateRequest(setQuotaSchema), async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { userId } = (req as Request & { validatedParams: { userId: string } }).validatedParams;
     const { quotaBytes } = req.body;
 
     // Validate target user exists
@@ -224,33 +263,18 @@ router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Reque
       return;
     }
 
-    if (!quotaBytes || typeof quotaBytes !== 'string') {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid quotaBytes. Must be a string representing bytes.',
-      });
-      return;
-    }
+    const quota = BigInt(quotaBytes);
+    await StorageService.setQuota(userId, quota);
 
-    try {
-      const quota = BigInt(quotaBytes);
-      await StorageService.setQuota(userId, quota);
-
-      res.json({
-        success: true,
-        data: {
-          message: 'Storage quota updated',
-          userId,
-          newQuotaBytes: quota.toString(),
-          newQuotaFormatted: StorageService.formatBytes(quota),
-        },
-      });
-    } catch {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid quotaBytes value. Must be a valid number string.',
-      });
-    }
+    res.json({
+      success: true,
+      data: {
+        message: 'Storage quota updated',
+        userId,
+        newQuotaBytes: quota.toString(),
+        newQuotaFormatted: StorageService.formatBytes(quota),
+      },
+    });
   } catch (error) {
     console.error('Admin set storage quota error:', error);
     res.status(500).json({ success: false, error: 'Failed to set user storage quota' });
@@ -260,24 +284,15 @@ router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Reque
 /**
  * Set storage tier for a user (admin only)
  */
-router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.post('/admin/:userId/tier', requireAuth, requireAdmin, validateRequest(setTierSchema), async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { userId } = (req as Request & { validatedParams: { userId: string } }).validatedParams;
     const { tier } = req.body;
 
     // Validate target user exists
     const exists = await StorageService.userExists(userId);
     if (!exists) {
       res.status(404).json({ success: false, error: 'User not found' });
-      return;
-    }
-
-    const validTiers = Object.keys(STORAGE_TIERS);
-    if (!tier || !validTiers.includes(tier)) {
-      res.status(400).json({
-        success: false,
-        error: `Invalid tier. Must be one of: ${validTiers.join(', ')}`,
-      });
       return;
     }
 
@@ -303,9 +318,9 @@ router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Reques
 /**
  * Recalculate storage usage for a user (admin only)
  */
-router.post('/admin/:userId/recalculate', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.post('/admin/:userId/recalculate', requireAuth, requireAdmin, validateRequest(userIdParamsSchema), async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    const { userId } = (req as Request & { validatedParams: { userId: string } }).validatedParams;
 
     // Validate target user exists
     const exists = await StorageService.userExists(userId);

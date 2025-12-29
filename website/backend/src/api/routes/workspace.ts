@@ -1,8 +1,58 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc } from '@webedt/shared';
+import { validateRequest, CommonSchemas } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+
+// ============================================================================
+// Validation Schemas
+// ============================================================================
+
+const presenceUpdateSchema = {
+  body: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+    branch: CommonSchemas.githubBranch,
+    page: z.string().optional(),
+    cursorX: z.number().optional(),
+    cursorY: z.number().optional(),
+    selection: z.string().optional(),
+  }),
+};
+
+const presenceParamsSchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+    branch: z.string().min(1, 'Branch is required'),
+  }),
+};
+
+const workspaceEventSchema = {
+  body: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+    branch: CommonSchemas.githubBranch,
+    eventType: z.string().min(1, 'Event type is required'),
+    page: z.string().optional(),
+    path: z.string().optional(),
+    payload: z.unknown().optional(),
+  }),
+};
+
+const eventsQuerySchema = {
+  params: z.object({
+    owner: CommonSchemas.githubOwner,
+    repo: CommonSchemas.githubRepo,
+    branch: z.string().min(1, 'Branch is required'),
+  }),
+  query: z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    since: z.string().datetime().optional(),
+  }),
+};
 
 const router = Router();
 
@@ -16,17 +66,13 @@ const OFFLINE_THRESHOLD_MS = 30 * 1000;
  * PUT /api/workspace/presence
  * Update presence for the current user on a branch
  */
-router.put('/presence', async (req: Request, res: Response) => {
+router.put('/presence', validateRequest(presenceUpdateSchema), async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { owner, repo, branch, page, cursorX, cursorY, selection } = req.body;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    if (!owner || !repo || !branch) {
-      return res.status(400).json({ error: 'Missing required fields: owner, repo, branch' });
     }
 
     // Create composite ID for upsert
@@ -72,9 +118,9 @@ router.put('/presence', async (req: Request, res: Response) => {
  * GET /api/workspace/presence/:owner/:repo/:branch
  * Get active users on a branch
  */
-router.get('/presence/:owner/:repo/:branch', async (req: Request, res: Response) => {
+router.get('/presence/:owner/:repo/:branch', validateRequest(presenceParamsSchema), async (req: Request, res: Response) => {
   try {
-    const { owner, repo, branch } = req.params;
+    const { owner, repo, branch } = (req as Request & { validatedParams: { owner: string; repo: string; branch: string } }).validatedParams;
     const userId = req.user?.id;
 
     if (!userId) {
@@ -134,9 +180,9 @@ router.get('/presence/:owner/:repo/:branch', async (req: Request, res: Response)
  * DELETE /api/workspace/presence/:owner/:repo/:branch
  * Remove presence (user leaving the workspace)
  */
-router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Response) => {
+router.delete('/presence/:owner/:repo/:branch', validateRequest(presenceParamsSchema), async (req: Request, res: Response) => {
   try {
-    const { owner, repo, branch } = req.params;
+    const { owner, repo, branch } = (req as Request & { validatedParams: { owner: string; repo: string; branch: string } }).validatedParams;
     const userId = req.user?.id;
 
     if (!userId) {
@@ -159,17 +205,13 @@ router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Respon
  * POST /api/workspace/events
  * Log a workspace event
  */
-router.post('/events', async (req: Request, res: Response) => {
+router.post('/events', validateRequest(workspaceEventSchema), async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { owner, repo, branch, eventType, page, path, payload } = req.body;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    if (!owner || !repo || !branch || !eventType) {
-      return res.status(400).json({ error: 'Missing required fields: owner, repo, branch, eventType' });
     }
 
     const event = {
@@ -201,12 +243,12 @@ router.post('/events', async (req: Request, res: Response) => {
  * GET /api/workspace/events/:owner/:repo/:branch
  * Get recent events for a branch
  */
-router.get('/events/:owner/:repo/:branch', async (req: Request, res: Response) => {
+router.get('/events/:owner/:repo/:branch', validateRequest(eventsQuerySchema), async (req: Request, res: Response) => {
   try {
-    const { owner, repo, branch } = req.params;
+    const { owner, repo, branch } = (req as Request & { validatedParams: { owner: string; repo: string; branch: string } }).validatedParams;
+    const { limit, since: sinceStr } = (req as Request & { validatedQuery: { limit: number; since?: string } }).validatedQuery;
     const userId = req.user?.id;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const since = req.query.since ? new Date(req.query.since as string) : null;
+    const since = sinceStr ? new Date(sinceStr) : null;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -266,8 +308,8 @@ router.get('/events/:owner/:repo/:branch', async (req: Request, res: Response) =
  * GET /api/workspace/events/:owner/:repo/:branch/stream
  * SSE stream for workspace events (real-time updates)
  */
-router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Response) => {
-  const { owner, repo, branch } = req.params;
+router.get('/events/:owner/:repo/:branch/stream', validateRequest(presenceParamsSchema), async (req: Request, res: Response) => {
+  const { owner, repo, branch } = (req as Request & { validatedParams: { owner: string; repo: string; branch: string } }).validatedParams;
   const userId = req.user?.id;
 
   if (!userId) {
