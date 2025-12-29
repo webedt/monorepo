@@ -26,6 +26,7 @@ import type {
   ExecutionResult,
   ExecutionEventCallback,
   ExecutionEvent,
+  ExecutionEventType,
   ContentBlock,
 } from './types.js';
 
@@ -390,8 +391,9 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
               const event = JSON.parse(currentData) as ExecutionEvent;
 
               // Override type if event type was specified
+              // Cast is safe as worker should only send valid ExecutionEventTypes
               if (currentEventType) {
-                event.type = currentEventType;
+                event.type = currentEventType as ExecutionEventType;
               }
 
               // Add source if not present
