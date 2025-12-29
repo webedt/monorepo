@@ -254,12 +254,6 @@ export class MidiPianoRoll extends Component {
       });
     }
 
-    // Handle scroll sync with playback
-    if (this.scrollContainer) {
-      this.scrollContainer.addEventListener('scroll', () => {
-        // Could be used for scroll position tracking
-      });
-    }
   }
 
   private updatePlayhead(): void {
