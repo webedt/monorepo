@@ -34,6 +34,12 @@ export class SseHelper extends ASseHelper {
     return this.write(res, `data: ${JSON.stringify(event)}\n\n`);
   }
 
+  writeEventWithId(res: SseWritable, eventId: string, event: Record<string, unknown>): boolean {
+    // Format: id: <eventId>\ndata: <json>\n\n
+    // This allows clients to use Last-Event-ID for reliable resumption
+    return this.write(res, `id: ${eventId}\ndata: ${JSON.stringify(event)}\n\n`);
+  }
+
   writeHeartbeat(res: SseWritable): boolean {
     return this.write(res, ': heartbeat\n\n');
   }

@@ -24,7 +24,7 @@ import type { AuthRequest } from './auth.js';
 /**
  * Rate limit tier types for metrics tracking
  */
-export type RateLimitTier = 'auth' | 'public' | 'standard' | 'ai' | 'sync' | 'search' | 'collaboration';
+export type RateLimitTier = 'auth' | 'public' | 'standard' | 'ai' | 'sync' | 'search' | 'collaboration' | 'sse';
 
 /**
  * Rate limit configuration from environment variables
@@ -62,6 +62,11 @@ const config = {
   collaborationWindowMs: parseInt(process.env.RATE_LIMIT_COLLABORATION_WINDOW_MS || '60000', 10),
   collaborationMaxRequests: parseInt(process.env.RATE_LIMIT_COLLABORATION_MAX || '60', 10),
 
+  // SSE reconnection limits (default: 10 reconnects per minute per session)
+  // Applies to: SSE streaming endpoints to prevent aggressive reconnection patterns
+  sseWindowMs: parseInt(process.env.RATE_LIMIT_SSE_WINDOW_MS || '60000', 10),
+  sseMaxRequests: parseInt(process.env.RATE_LIMIT_SSE_MAX || '10', 10),
+
   // Whether to skip rate limiting (for testing/development)
   skipRateLimiting: process.env.SKIP_RATE_LIMITING === 'true',
 };
@@ -87,6 +92,7 @@ const rateLimitMetrics: RateLimitMetrics = {
     sync: 0,
     search: 0,
     collaboration: 0,
+    sse: 0,
   },
   hitsByPath: {},
   hitsByUser: {},
@@ -113,6 +119,7 @@ export function resetRateLimitMetrics(): void {
     sync: 0,
     search: 0,
     collaboration: 0,
+    sse: 0,
   };
   rateLimitMetrics.hitsByPath = {};
   rateLimitMetrics.hitsByUser = {};
@@ -378,6 +385,49 @@ export const collaborationRateLimiter = rateLimit({
 });
 
 /**
+ * SSE rate limiter for streaming endpoints
+ *
+ * Applies to:
+ * - GET /api/sessions/:id/events/stream (Session event streaming)
+ * - GET /api/resume/:sessionId (Resume session streaming)
+ * - Other SSE endpoints
+ *
+ * Default: 10 reconnects per minute per session
+ * Uses session-based key generator that combines user ID and session ID
+ * to prevent aggressive reconnection patterns per session
+ */
+
+/**
+ * Key generator for SSE endpoints that includes session ID
+ * This allows rate limiting per-session to prevent reconnection flooding
+ */
+function sseKeyGenerator(req: Request): string {
+  const authReq = req as AuthRequest;
+  const ip = keyGenerator(req);
+  const userId = authReq.user?.id || 'anonymous';
+
+  // Extract session ID from URL parameters or path
+  const sessionId = req.params.sessionId || req.params.id || 'unknown';
+
+  // Rate limit per user per session to prevent aggressive reconnection on specific sessions
+  return `sse:${userId}:${sessionId}:${ip}`;
+}
+
+export const sseRateLimiter = rateLimit({
+  windowMs: config.sseWindowMs,
+  max: config.sseMaxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: sseKeyGenerator,
+  skip: skipRateLimiting,
+  handler: createRateLimitHandler('sse'),
+  message: {
+    success: false,
+    error: 'Too many SSE reconnection attempts. Please wait before reconnecting.',
+  },
+});
+
+/**
  * Create a custom rate limiter with specific settings
  *
  * @param windowMs - Time window in milliseconds
@@ -391,7 +441,7 @@ export function createRateLimiter(
   tier: RateLimitTier = 'standard'
 ) {
   // Use authenticated key generator for user-specific tiers
-  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration'].includes(tier);
+  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration', 'sse'].includes(tier);
 
   return rateLimit({
     windowMs,
@@ -452,6 +502,11 @@ export function logRateLimitConfig(): void {
       windowMs: config.collaborationWindowMs,
       maxRequests: config.collaborationMaxRequests,
       description: 'Workspace presence, events',
+    },
+    sse: {
+      windowMs: config.sseWindowMs,
+      maxRequests: config.sseMaxRequests,
+      description: 'SSE streaming endpoints - per session',
     },
   });
 }

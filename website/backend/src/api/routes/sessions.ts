@@ -24,7 +24,7 @@ import {
 } from '../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../middleware/sessionMiddleware.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, extractEventUuid, type ClaudeWebClientConfig } from '@webedt/shared';
-import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
+import { publicShareRateLimiter, syncOperationRateLimiter, sseRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
@@ -734,7 +734,8 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
  *
  * This eliminates the need for polling the sessions list.
  */
-router.get('/updates', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent aggressive reconnection patterns (10 reconnects/min per user)
+router.get('/updates', requireAuth, sseRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user!.id;
   const subscriberId = uuidv4();
@@ -2392,11 +2393,12 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
 
 // Register the stream events endpoint
 // Primary: GET /api/sessions/:id/events/stream (aligns with Claude's /v1/sessions/:id/events pattern)
-router.get('/:id/events/stream', requireAuth, validateSessionId, requireSessionOwnership, streamEventsHandler);
+// Rate limited to prevent aggressive reconnection patterns (10 reconnects/min per session)
+router.get('/:id/events/stream', requireAuth, sseRateLimiter, validateSessionId, requireSessionOwnership, streamEventsHandler);
 
 // Backwards compatibility: GET /api/sessions/:id/stream
 // DEPRECATED: Use /api/sessions/:id/events/stream instead
-router.get('/:id/stream', requireAuth, validateSessionId, requireSessionOwnership, streamEventsHandler);
+router.get('/:id/stream', requireAuth, sseRateLimiter, validateSessionId, requireSessionOwnership, streamEventsHandler);
 
 /**
  * POST /api/sessions/sync
