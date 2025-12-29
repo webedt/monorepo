@@ -65,6 +65,7 @@ import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionSt
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';
 import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
+import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -204,6 +205,11 @@ app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 
 
 // Add auth middleware
 app.use(authMiddleware);
+
+// Apply standard rate limiting to all API routes
+// This provides defense-in-depth alongside infrastructure-level limits
+// Note: Auth and public share endpoints have stricter limits applied at the route level
+app.use('/api', standardRateLimiter);
 
 // Initialize health monitoring with database health check
 healthMonitor.registerCheck('database', createDatabaseHealthCheck(async () => {
@@ -403,6 +409,9 @@ async function startServer() {
 
   // Log environment configuration
   logEnvConfig();
+
+  // Log rate limit configuration
+  logRateLimitConfig();
 
   console.log('');
   console.log('Available endpoints:');
