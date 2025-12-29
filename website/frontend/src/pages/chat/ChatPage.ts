@@ -5,11 +5,11 @@
 
 import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
-import { sessionsApi, createSessionExecuteEventSource } from '../../lib/api';
+import { sessionsApi, userApi, createSessionExecuteEventSource } from '../../lib/api';
 import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
-import type { Session } from '../../types';
+import type { Session, VerbosityLevel } from '../../types';
 import './chat.css';
 
 // View mode determines the level of detail shown
@@ -280,23 +280,44 @@ export class ChatPage extends Page<ChatPageOptions> {
     this.loadSession();
   }
 
+  /**
+   * Map user's verbosity preference to view mode
+   * - 'verbose' -> 'detailed' (shows all events)
+   * - 'normal' -> 'normal' (summarized view for regular users)
+   * - 'minimal' -> 'normal' (also uses summarized view)
+   */
+  private verbosityToViewMode(verbosity: VerbosityLevel | undefined): ViewMode {
+    if (verbosity === 'verbose') {
+      return 'detailed';
+    }
+    // Both 'normal' and 'minimal' use normal (summarized) view
+    return 'normal';
+  }
+
   private loadSettings(): void {
     try {
-      // Load view mode (normal, detailed, or raw)
+      // First, check user's stored preference (from database via authStore)
+      const user = authStore.getUser();
+      const userVerbosity = user?.chatVerbosityLevel;
+
+      // Check localStorage for any user override
       const savedViewMode = localStorage.getItem('chat_viewMode');
+
       if (savedViewMode === 'normal' || savedViewMode === 'detailed') {
+        // User has explicitly set a preference in this session
         this.viewMode = savedViewMode;
         this.showRawJson = false;
       } else if (savedViewMode === 'raw') {
         this.viewMode = 'detailed'; // Raw view uses detailed mode data
         this.showRawJson = true;
+      } else if (userVerbosity) {
+        // Use user's stored preference from database
+        this.viewMode = this.verbosityToViewMode(userVerbosity);
+        this.showRawJson = false;
       } else {
-        // Legacy: check old showRawJson setting
-        const savedRawJson = localStorage.getItem('chat_showRawJson');
-        if (savedRawJson === 'true') {
-          this.showRawJson = true;
-          this.viewMode = 'detailed';
-        }
+        // Default: 'normal' mode for regular users (cleaner view)
+        this.viewMode = 'normal';
+        this.showRawJson = false;
       }
 
       // Load timestamps setting
@@ -336,6 +357,28 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
+  /**
+   * Persist verbosity preference to user's account settings.
+   * This saves the preference to the database so it persists across sessions.
+   * Fire-and-forget: we don't wait for the response or show errors.
+   */
+  private persistVerbosityPreference(verbosity: VerbosityLevel): void {
+    // Only persist if user is logged in
+    const user = authStore.getUser();
+    if (!user) return;
+
+    // Don't persist if it's the same as current preference
+    if (user.chatVerbosityLevel === verbosity) return;
+
+    // Update local state immediately
+    authStore.updateUser({ chatVerbosityLevel: verbosity });
+
+    // Persist to database (fire-and-forget)
+    userApi.updateChatVerbosity(verbosity).catch((error) => {
+      console.warn('Failed to persist verbosity preference:', error);
+    });
+  }
+
   private setupToolbar(): void {
     // View toggle buttons
     const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
@@ -346,6 +389,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.viewMode = 'normal';
       this.showRawJson = false;
       this.saveSettings();
+      this.persistVerbosityPreference('normal');
       this.updateToolbarState();
       this.renderContent();
     });
@@ -354,6 +398,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.viewMode = 'detailed';
       this.showRawJson = false;
       this.saveSettings();
+      this.persistVerbosityPreference('verbose');
       this.updateToolbarState();
       this.renderContent();
     });
@@ -362,6 +407,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.viewMode = 'detailed'; // Raw uses detailed mode data
       this.showRawJson = true;
       this.saveSettings();
+      this.persistVerbosityPreference('verbose');
       this.updateToolbarState();
       this.renderContent();
     });
