@@ -521,6 +521,9 @@ export type {
 
 // Re-export table definitions from schema
 export {
+  // Organization role utilities
+  isOrganizationRole,
+  ORGANIZATION_ROLES,
   liveChatMessages,
   workspacePresence,
   workspaceEvents,

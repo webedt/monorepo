@@ -328,8 +328,12 @@ export interface ExecutionEvent {
     input: Record<string, unknown>;
   };
   name?: string;
+  input?: unknown;
+  tool_use_id?: string;
 
-  // Result event (remote)
+  // Result event (metrics)
+  inputTokens?: number;
+  outputTokens?: number;
   total_cost_usd?: number;
   result_status?: string;
 
