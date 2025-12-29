@@ -195,6 +195,16 @@ export class ScenePage extends Page<ScenePageOptions> {
             <button class="toolbar-btn" data-action="reset-view" title="Reset View (Center on Origin)">⌂</button>
           </div>
 
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group mode-toggle-group">
+            <button class="toolbar-btn mode-toggle-btn" data-action="toggle-mode" title="Toggle Edit/Play Mode">
+              <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display: none;"><rect x="6" y="6" width="12" height="12"/></svg>
+              <span class="mode-label">Play</span>
+            </button>
+          </div>
+
           <div class="toolbar-spacer"></div>
 
           <div class="toolbar-group ai-group">
@@ -524,6 +534,12 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.renderScene();
         }
       });
+    }
+
+    // Mode toggle (Edit/Play)
+    const toggleModeBtn = this.$('[data-action="toggle-mode"]');
+    if (toggleModeBtn) {
+      toggleModeBtn.addEventListener('click', () => this.toggleEditorMode());
     }
 
     // Custom components library
@@ -1472,6 +1488,57 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (panel) panel.style.display = this.showComponentsLibrary ? 'flex' : 'none';
     if (toggleBtn) toggleBtn.classList.toggle('active', this.showComponentsLibrary);
     if (this.showComponentsLibrary) this.updateComponentsLibrary();
+  }
+
+  private toggleEditorMode(): void {
+    sceneStore.toggleEditorMode();
+    this.updateModeToggleUI();
+    this.updateEditingState();
+    this.renderScene();
+  }
+
+  private updateModeToggleUI(): void {
+    const toggleBtn = this.$('[data-action="toggle-mode"]');
+    const playIcon = this.$('.mode-toggle-btn .play-icon') as HTMLElement;
+    const stopIcon = this.$('.mode-toggle-btn .stop-icon') as HTMLElement;
+    const modeLabel = this.$('.mode-toggle-btn .mode-label') as HTMLElement;
+    const scenePage = this.$('.scene-page');
+
+    const isPlayMode = sceneStore.isPlayMode();
+
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('active', isPlayMode);
+      toggleBtn.classList.toggle('playing', isPlayMode);
+    }
+    if (playIcon) playIcon.style.display = isPlayMode ? 'none' : 'inline';
+    if (stopIcon) stopIcon.style.display = isPlayMode ? 'inline' : 'none';
+    if (modeLabel) modeLabel.textContent = isPlayMode ? 'Stop' : 'Play';
+    if (scenePage) scenePage.classList.toggle('play-mode', isPlayMode);
+  }
+
+  private updateEditingState(): void {
+    const isPlayMode = sceneStore.isPlayMode();
+    const toolbar = this.$('.scene-toolbar') as HTMLElement;
+    const hierarchyPanel = this.$('.hierarchy-panel') as HTMLElement;
+    const propertiesPanel = this.$('.properties-panel') as HTMLElement;
+
+    // Disable editing controls in play mode
+    if (toolbar) {
+      const editingBtns = toolbar.querySelectorAll('.toolbar-btn:not(.mode-toggle-btn):not([data-action="toggle-mode"])');
+      editingBtns.forEach(btn => {
+        (btn as HTMLButtonElement).disabled = isPlayMode;
+      });
+    }
+
+    // Dim panels in play mode
+    if (hierarchyPanel) hierarchyPanel.classList.toggle('disabled', isPlayMode);
+    if (propertiesPanel) propertiesPanel.classList.toggle('disabled', isPlayMode);
+
+    // Deselect objects when entering play mode
+    if (isPlayMode && this.selectedObjectId) {
+      this.selectedObjectId = null;
+      this.updatePropertiesPanel();
+    }
   }
 
   private escapeHtmlForComponent(str: string): string {
