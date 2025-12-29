@@ -5,6 +5,9 @@
 
 /// <reference types="vite/client" />
 
+import {
+  extractApiErrorMessage,
+} from '../types';
 import type {
   User,
   Session,
@@ -137,9 +140,9 @@ async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions 
   const response = await fetch(fullUrl, config);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    console.error(`[API] Error:`, error);
-    throw new Error(error.error || error.message || 'Request failed');
+    const errorBody = await response.json().catch(() => ({ error: 'Request failed' }));
+    console.error(`[API] Error:`, errorBody);
+    throw new Error(extractApiErrorMessage(errorBody));
   }
 
   return response.json();
