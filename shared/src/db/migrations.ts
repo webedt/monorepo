@@ -546,9 +546,13 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_number ON chat_sessions(issue_number);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_repo ON chat_sessions(issue_number, repository_owner, repository_name);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_at ON chat_sessions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_remote_session_id ON chat_sessions(remote_session_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_status ON chat_sessions(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_messages_chat_session_id ON messages(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>'uuid')::text));
 
     -- Live Chat messages table (branch-based chat)
     CREATE TABLE IF NOT EXISTS live_chat_messages (
@@ -707,6 +711,12 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
 const INDEX_DEFINITIONS: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_number ON chat_sessions(issue_number)',
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_repo ON chat_sessions(issue_number, repository_owner, repository_name)',
+  // Session sync performance indexes
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_at ON chat_sessions(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_remote_session_id ON chat_sessions(remote_session_id)',
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_status ON chat_sessions(user_id, status)',
+  // Composite index for event deduplication by UUID (extracted from JSONB)
+  'CREATE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>\'uuid\')::text))',
 ];
 
 /**

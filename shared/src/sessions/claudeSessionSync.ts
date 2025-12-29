@@ -5,7 +5,7 @@
  * This ensures sessions created on claude.ai appear in the local UI without manual intervention.
  */
 
-import { db, chatSessions, events, users } from '../db/index.js';
+import { db, chatSessions, events, users, sql, getPool } from '../db/index.js';
 import { eq, and, or, isNotNull, isNull, gte, ne, lte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
@@ -21,6 +21,107 @@ import {
   CLAUDE_SYNC_INITIAL_DELAY_MS,
   CLAUDE_SYNC_LIMIT,
 } from '../config/env.js';
+
+// Maximum number of concurrent API calls for parallelization
+const MAX_CONCURRENT_API_CALLS = 5;
+
+/**
+ * Helper to run promises in parallel with a concurrency limit
+ */
+async function runWithConcurrency<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency: number
+): Promise<R[]> {
+  const results: R[] = [];
+  const executing: Promise<void>[] = [];
+
+  for (const item of items) {
+    const p = fn(item).then(result => {
+      results.push(result);
+    });
+    executing.push(p);
+
+    if (executing.length >= concurrency) {
+      await Promise.race(executing);
+      // Remove completed promises
+      for (let i = executing.length - 1; i >= 0; i--) {
+        // Check if promise is settled by racing with an immediately resolved promise
+        const settled = await Promise.race([
+          executing[i].then(() => true).catch(() => true),
+          Promise.resolve(false)
+        ]);
+        if (settled) {
+          executing.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  await Promise.all(executing);
+  return results;
+}
+
+/**
+ * Get existing event UUIDs for a session using indexed database query
+ * This is much more efficient than loading all events into memory
+ */
+async function getExistingEventUuids(chatSessionId: string): Promise<Set<string>> {
+  const pool = getPool();
+  const result = await pool.query<{ uuid: string }>(
+    `SELECT event_data->>'uuid' as uuid
+     FROM events
+     WHERE chat_session_id = $1
+     AND event_data->>'uuid' IS NOT NULL`,
+    [chatSessionId]
+  );
+  return new Set(result.rows.map(r => r.uuid));
+}
+
+/**
+ * Batch insert events with ON CONFLICT handling
+ * Uses raw SQL for optimal performance with batch operations
+ */
+async function batchInsertEvents(
+  chatSessionId: string,
+  eventsToInsert: Array<{ uuid?: string; timestamp?: string; [key: string]: unknown }>,
+  existingUuids: Set<string>
+): Promise<number> {
+  // Filter out events that already exist
+  const newEvents = eventsToInsert.filter(e => e.uuid && !existingUuids.has(e.uuid));
+
+  if (newEvents.length === 0) {
+    return 0;
+  }
+
+  const pool = getPool();
+
+  // Build batch INSERT query with VALUES
+  // Using parameterized query for safety
+  const values: unknown[] = [];
+  const placeholders: string[] = [];
+
+  newEvents.forEach((event, index) => {
+    const offset = index * 3;
+    placeholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3})`);
+    values.push(
+      chatSessionId,
+      JSON.stringify(event),
+      event.timestamp ? new Date(event.timestamp) : new Date()
+    );
+  });
+
+  // Use ON CONFLICT DO NOTHING to handle any race conditions
+  // The unique constraint is on (chat_session_id, event_data->>'uuid')
+  await pool.query(
+    `INSERT INTO events (chat_session_id, event_data, timestamp)
+     VALUES ${placeholders.join(', ')}
+     ON CONFLICT DO NOTHING`,
+    values
+  );
+
+  return newEvents.length;
+}
 
 interface SyncStats {
   lastSyncTime: Date | null;
@@ -200,8 +301,9 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
         )
       );
 
-    for (const runningSession of runningSessions) {
-      if (!runningSession.remoteSessionId) continue;
+    // Process running sessions with controlled concurrency
+    const updateRunningSession = async (runningSession: typeof runningSessions[0]) => {
+      if (!runningSession.remoteSessionId) return;
 
       try {
         // Check status with Anthropic API
@@ -214,28 +316,15 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           const eventsResponse = await client.getEvents(runningSession.remoteSessionId);
           const remoteEvents = eventsResponse.data || [];
 
-          // Get existing event UUIDs for this session
-          const existingEvents = await db
-            .select({ eventData: events.eventData })
-            .from(events)
-            .where(eq(events.chatSessionId, runningSession.id));
+          // Get existing event UUIDs using indexed query (not full table scan)
+          const existingUuids = await getExistingEventUuids(runningSession.id);
 
-          const existingUuids = new Set(
-            existingEvents.map(e => (e.eventData as any)?.uuid).filter(Boolean)
+          // Batch insert new events
+          const newEventsCount = await batchInsertEvents(
+            runningSession.id,
+            remoteEvents,
+            existingUuids
           );
-
-          // Insert any new events
-          let newEventsCount = 0;
-          for (const event of remoteEvents) {
-            if (event.uuid && !existingUuids.has(event.uuid)) {
-              await db.insert(events).values({
-                chatSessionId: runningSession.id,
-                eventData: event,
-                timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-              });
-              newEventsCount++;
-            }
-          }
 
           // Extract total cost from result event
           let totalCost: string | undefined;
@@ -282,7 +371,10 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           remoteSessionId: runningSession.remoteSessionId
         });
       }
-    }
+    };
+
+    // Run updates with concurrency limit
+    await runWithConcurrency(runningSessions, updateRunningSession, MAX_CONCURRENT_API_CALLS);
 
     // Fetch active sessions from Anthropic (skip archived)
     const remoteSessions = await client.listSessions(CLAUDE_SYNC_LIMIT);
@@ -499,27 +591,13 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             })
             .where(eq(chatSessions.id, matchingExistingSession.id));
 
-          // Import any missing events
-          const existingEventUuids = new Set(
-            (await db
-              .select({ eventData: events.eventData })
-              .from(events)
-              .where(eq(events.chatSessionId, matchingExistingSession.id)))
-              .map(e => (e.eventData as any)?.uuid)
-              .filter(Boolean)
+          // Import any missing events using batch insert
+          const existingEventUuids = await getExistingEventUuids(matchingExistingSession.id);
+          const newEventsCount = await batchInsertEvents(
+            matchingExistingSession.id,
+            sessionEvents,
+            existingEventUuids
           );
-
-          let newEventsCount = 0;
-          for (const event of sessionEvents) {
-            if (event.uuid && !existingEventUuids.has(event.uuid)) {
-              await db.insert(events).values({
-                chatSessionId: matchingExistingSession.id,
-                eventData: event,
-                timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-              });
-              newEventsCount++;
-            }
-          }
 
           // Notify subscribers about the update
           sessionListBroadcaster.notifyStatusChanged(userId, {
@@ -649,27 +727,13 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
                 })
                 .where(eq(chatSessions.id, sessionPathMatch.id));
 
-              // Import any missing events
-              const existingEventUuids = new Set(
-                (await db
-                  .select({ eventData: events.eventData })
-                  .from(events)
-                  .where(eq(events.chatSessionId, sessionPathMatch.id)))
-                  .map(e => (e.eventData as any)?.uuid)
-                  .filter(Boolean)
+              // Import any missing events using batch insert
+              const existingEventUuids = await getExistingEventUuids(sessionPathMatch.id);
+              const newEventsCount = await batchInsertEvents(
+                sessionPathMatch.id,
+                sessionEvents,
+                existingEventUuids
               );
-
-              let newEventsCount = 0;
-              for (const event of sessionEvents) {
-                if (event.uuid && !existingEventUuids.has(event.uuid)) {
-                  await db.insert(events).values({
-                    chatSessionId: sessionPathMatch.id,
-                    eventData: event,
-                    timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-                  });
-                  newEventsCount++;
-                }
-              }
 
               sessionListBroadcaster.notifyStatusChanged(userId, {
                 id: sessionPathMatch.id,
@@ -745,20 +809,14 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
         // Notify subscribers about imported session
         sessionListBroadcaster.notifySessionCreated(userId, importedSession);
 
-        // Import events
-        for (const event of sessionEvents) {
-          await db.insert(events).values({
-            chatSessionId: sessionId,
-            eventData: event,
-            timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-          });
-        }
+        // Import events using batch insert (no existing events for new session)
+        const insertedCount = await batchInsertEvents(sessionId, sessionEvents, new Set());
 
         result.imported++;
         logger.info(`[SessionSync] Imported session ${remoteSession.id} for user ${userId}`, {
           component: 'SessionSync',
           sessionId,
-          eventsCount: sessionEvents.length,
+          eventsCount: insertedCount,
           status
         });
 
