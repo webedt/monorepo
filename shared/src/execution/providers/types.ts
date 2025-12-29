@@ -6,6 +6,7 @@
  */
 
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
+import type { GeminiAuth } from '../../auth/lucia.js';
 
 /**
  * Event types emitted during execution
@@ -104,8 +105,10 @@ export interface ExecuteParams {
   gitUrl: string;
   /** Model to use (optional) */
   model?: string;
-  /** Claude auth credentials */
-  claudeAuth: ClaudeAuth;
+  /** Claude auth credentials (required for Claude provider) */
+  claudeAuth?: ClaudeAuth;
+  /** Gemini auth credentials (required for Gemini provider) */
+  geminiAuth?: GeminiAuth;
   /** Environment ID for Claude Remote (optional, uses config default if not provided) */
   environmentId?: string;
   /** Abort signal for cancellation */
@@ -124,8 +127,10 @@ export interface ResumeParams {
   remoteSessionId: string;
   /** New prompt/message to send - can be string or content blocks with images */
   prompt: string | ContentBlock[];
-  /** Claude auth credentials */
-  claudeAuth: ClaudeAuth;
+  /** Claude auth credentials (required for Claude provider) */
+  claudeAuth?: ClaudeAuth;
+  /** Gemini auth credentials (required for Gemini provider) */
+  geminiAuth?: GeminiAuth;
   /** Environment ID for Claude Remote (optional, uses config default if not provided) */
   environmentId?: string;
   /** Abort signal for cancellation */
@@ -185,6 +190,8 @@ export interface ExecutionProvider {
 
   /**
    * Interrupt a running session
+   * @param remoteSessionId - The remote session ID to interrupt
+   * @param auth - Authentication credentials (ClaudeAuth or GeminiAuth depending on provider)
    */
-  interrupt(remoteSessionId: string, claudeAuth: ClaudeAuth): Promise<void>;
+  interrupt(remoteSessionId: string, auth?: ClaudeAuth | GeminiAuth): Promise<void>;
 }

@@ -10,7 +10,10 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
+import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@webedt/shared';
+import type { ClaudeAuth } from '@webedt/shared';
+import type { GeminiAuth } from '@webedt/shared';
+import type { ProviderType } from '@webedt/shared';
 import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
@@ -192,38 +195,75 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       return;
     }
 
-    // Get user's Claude auth first (needed for auto-detecting environment ID)
+    // Get user data for authentication
     const [userData] = await db
       .select()
       .from(users)
       .where(eq(users.id, user.id))
       .limit(1);
 
-    if (!userData?.claudeAuth) {
-      res.status(400).json({ success: false, error: 'Claude authentication not configured. Please connect your Claude account in settings.' });
-      return;
-    }
+    // Determine which provider to use based on user preference
+    const preferredProvider = userData?.preferredProvider || 'claude';
+    let providerType: ProviderType = 'claude-remote';
+    let claudeAuth: ClaudeAuth | undefined;
+    let geminiAuth: GeminiAuth | undefined;
 
-    // Refresh token if needed
-    let claudeAuth = userData.claudeAuth as ClaudeAuth;
-    try {
-      const refreshedAuth = await ensureValidToken(claudeAuth);
-      if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
-        // Token was refreshed, save it
-        await db.update(users)
-          .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-          .where(eq(users.id, user.id));
-        claudeAuth = refreshedAuth;
+    if (preferredProvider === 'gemini') {
+      // Use Gemini provider
+      if (!userData?.geminiAuth || !isValidGeminiAuth(userData.geminiAuth)) {
+        res.status(400).json({ success: false, error: 'Gemini authentication not configured. Please connect your Gemini account in settings.' });
+        return;
       }
-    } catch (error) {
-      logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
-      res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
-      return;
+
+      geminiAuth = userData.geminiAuth as GeminiAuth;
+      try {
+        const refreshedAuth = await ensureValidGeminiToken(geminiAuth);
+        if (refreshedAuth.accessToken !== geminiAuth.accessToken) {
+          // Token was refreshed, save it
+          await db.update(users)
+            .set({ geminiAuth: refreshedAuth as unknown as typeof users.$inferInsert['geminiAuth'] })
+            .where(eq(users.id, user.id));
+          geminiAuth = refreshedAuth;
+        }
+      } catch (error) {
+        logger.error('Failed to refresh Gemini token', error, { component: 'ExecuteRemoteRoute' });
+        res.status(401).json({ success: false, error: 'Gemini token expired. Please reconnect your Gemini account.' });
+        return;
+      }
+
+      providerType = 'gemini';
+
+      logger.info('Using Gemini provider', {
+        component: 'ExecuteRemoteRoute',
+        userId: user.id,
+      });
+    } else {
+      // Use Claude provider (default)
+      if (!userData?.claudeAuth) {
+        res.status(400).json({ success: false, error: 'Claude authentication not configured. Please connect your Claude account in settings.' });
+        return;
+      }
+
+      claudeAuth = userData.claudeAuth as ClaudeAuth;
+      try {
+        const refreshedAuth = await ensureValidToken(claudeAuth);
+        if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
+          // Token was refreshed, save it
+          await db.update(users)
+            .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
+            .where(eq(users.id, user.id));
+          claudeAuth = refreshedAuth;
+        }
+      } catch (error) {
+        logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
+        res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
+        return;
+      }
     }
 
-    // Get environment ID - from config or auto-detect from user's recent sessions
+    // Get environment ID - only needed for Claude provider
     let environmentId = CLAUDE_ENVIRONMENT_ID;
-    if (!environmentId) {
+    if (providerType === 'claude-remote' && !environmentId && claudeAuth) {
       logger.info('CLAUDE_ENVIRONMENT_ID not configured, attempting auto-detection from user sessions', {
         component: 'ExecuteRemoteRoute',
       });
@@ -549,8 +589,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       res.write(`data: ${JSON.stringify(sessionCreatedData)}\n\n`);
     }
 
-    // Get execution provider
-    const provider = getExecutionProvider();
+    // Get execution provider based on user preference
+    const provider = getExecutionProvider(providerType);
 
     // Register this stream so interrupt requests can abort it
     const abortController = registerActiveStream(chatSessionId);
@@ -568,6 +608,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             remoteSessionId: chatSession.remoteSessionId,
             prompt: userRequest,
             claudeAuth,
+            geminiAuth,
             environmentId,
             abortSignal: abortController.signal,
           },
@@ -583,6 +624,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             prompt: userRequest,
             gitUrl: repoUrl,
             claudeAuth,
+            geminiAuth,
             environmentId,
             abortSignal: abortController.signal,
           },

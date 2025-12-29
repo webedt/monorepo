@@ -142,6 +142,10 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       throw new Error('AI Worker URL not configured. Set AI_WORKER_URL environment variable.');
     }
 
+    if (!claudeAuth) {
+      throw new Error('Claude authentication required for SelfHostedWorkerProvider');
+    }
+
     logger.info('Starting self-hosted worker execution', {
       component: 'SelfHostedWorkerProvider',
       chatSessionId,
@@ -180,6 +184,10 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       throw new Error('AI Worker URL not configured. Set AI_WORKER_URL environment variable.');
     }
 
+    if (!claudeAuth) {
+      throw new Error('Claude authentication required for SelfHostedWorkerProvider');
+    }
+
     logger.info('Resuming session via self-hosted worker', {
       component: 'SelfHostedWorkerProvider',
       chatSessionId,
@@ -207,9 +215,13 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
   /**
    * Interrupt a running session
    */
-  async interrupt(remoteSessionId: string, claudeAuth: ClaudeAuth): Promise<void> {
+  async interrupt(remoteSessionId: string, auth?: ClaudeAuth): Promise<void> {
     if (!this.config.workerUrl) {
       throw new Error('AI Worker URL not configured');
+    }
+
+    if (!auth) {
+      throw new Error('Claude authentication required for SelfHostedWorkerProvider interrupt');
     }
 
     logger.info('Interrupting session via self-hosted worker', {
@@ -223,7 +235,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       body: JSON.stringify({
         remoteSessionId,
         claudeAuth: {
-          accessToken: claudeAuth.accessToken,
+          accessToken: auth.accessToken,
         },
       }),
     });
