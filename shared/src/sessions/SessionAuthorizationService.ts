@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { ASessionAuthorizationService } from './ASessionAuthorizationService.js';
 import { organizationService } from '../organizations/OrganizationService.js';
 
@@ -246,7 +247,15 @@ export class SessionAuthorizationService extends ASessionAuthorizationService {
       };
     }
 
-    if (session.shareToken !== shareToken) {
+    // Use timing-safe comparison to prevent timing attacks
+    const storedTokenBuffer = Buffer.from(session.shareToken, 'utf8');
+    const providedTokenBuffer = Buffer.from(shareToken, 'utf8');
+
+    // If lengths differ, tokens don't match (but still do constant-time comparison)
+    const lengthsMatch = storedTokenBuffer.length === providedTokenBuffer.length;
+    const tokensMatch = lengthsMatch && timingSafeEqual(storedTokenBuffer, providedTokenBuffer);
+
+    if (!tokensMatch) {
       return {
         authorized: false,
         error: 'Invalid share token',

@@ -76,6 +76,11 @@ router.use((req: Request, res: Response, next) => {
 // ============================================================================
 // PUBLIC SHARE ROUTES (no authentication required)
 // These must be defined BEFORE /:id routes to avoid parameter conflicts
+//
+// SECURITY NOTE: These endpoints should be protected by rate limiting at the
+// infrastructure level (e.g., nginx, Traefik, or API gateway) to prevent
+// brute-force enumeration of share tokens. UUID v4 tokens provide 122 bits
+// of entropy, making guessing impractical, but rate limiting adds defense in depth.
 // ============================================================================
 
 /**
@@ -985,7 +990,8 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
 /**
  * POST /api/sessions/:id/share
  * Generate a share token for a session (public but unlisted - shareable if you know the link)
- * Optional body: { expiresInDays?: number } - defaults to no expiration
+ * Optional body: { expiresInDays?: number } - defaults to preserving existing expiration or no expiration
+ * Max expiration: 365 days
  */
 router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -996,6 +1002,14 @@ router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
     if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
+    }
+
+    // Validate expiresInDays if provided
+    if (expiresInDays !== undefined) {
+      if (typeof expiresInDays !== 'number' || expiresInDays < 1 || expiresInDays > 365) {
+        res.status(400).json({ success: false, error: 'expiresInDays must be between 1 and 365' });
+        return;
+      }
     }
 
     // Verify session ownership
@@ -1023,22 +1037,23 @@ router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
     // Generate new share token (or reuse existing if already shared)
     const shareToken = session.shareToken || uuidv4();
 
-    // Calculate expiration date if provided
-    let shareExpiresAt: Date | null = null;
-    if (expiresInDays && expiresInDays > 0) {
+    // Calculate expiration date:
+    // - If expiresInDays is explicitly provided, use it
+    // - Otherwise, preserve existing expiration (or null if never set)
+    let shareExpiresAt: Date | null = session.shareExpiresAt;
+    if (expiresInDays !== undefined) {
       shareExpiresAt = new Date();
       shareExpiresAt.setDate(shareExpiresAt.getDate() + expiresInDays);
     }
 
     // Update session with share token
-    const [updatedSession] = await db
+    await db
       .update(chatSessions)
       .set({
         shareToken,
         shareExpiresAt,
       })
-      .where(eq(chatSessions.id, sessionId))
-      .returning();
+      .where(eq(chatSessions.id, sessionId));
 
     logger.info(`Session ${sessionId} share token generated`, {
       component: 'Sessions',
