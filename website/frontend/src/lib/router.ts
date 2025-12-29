@@ -3,6 +3,8 @@
  * Hash-based routing for simplicity
  */
 
+import { saveHmrState } from './hmr';
+
 export interface Route {
   path: string;
   component: (params?: Record<string, string>) => HTMLElement | Promise<HTMLElement>;
@@ -220,6 +222,13 @@ class Router {
   }
 
   /**
+   * Save current state for HMR
+   */
+  saveForHmr(): void {
+    saveHmrState('router:path', this.getCurrentPath());
+  }
+
+  /**
    * Render matched route to outlet
    */
   private async renderToOutlet(match: RouteMatch | null): Promise<void> {
@@ -275,4 +284,12 @@ export function link(path: string, text: string, className?: string): HTMLAnchor
     a.className = className;
   }
   return a;
+}
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    router.saveForHmr();
+  });
 }

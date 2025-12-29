@@ -197,3 +197,11 @@ export type { SceneTabsOptions } from './scene-tabs';
 // ConstraintEditor
 export { ConstraintEditor } from './constraint-editor';
 export type { ConstraintEditorOptions } from './constraint-editor';
+
+// EditModeToolbar
+export { EditModeToolbar } from './edit-mode-toolbar';
+export type { EditModeToolbarOptions } from './edit-mode-toolbar';
+
+// DebugOutputPanel
+export { DebugOutputPanel } from './debug-output';
+export type { DebugOutputPanelOptions } from './debug-output';

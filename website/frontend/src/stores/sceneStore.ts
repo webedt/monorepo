@@ -12,6 +12,13 @@ import type { Constraint } from '../lib/constraints/types';
 export type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
 export type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
 
+/**
+ * Editor mode for the scene editor
+ * - 'edit': Design mode for arranging and modifying objects
+ * - 'play': Preview/test mode for running the scene
+ */
+export type EditorMode = 'edit' | 'play';
+
 // UI Component specific types
 export type UIButtonStyle = 'primary' | 'secondary' | 'outline' | 'ghost';
 export type UIPanelStyle = 'solid' | 'bordered' | 'glass';
@@ -91,6 +98,7 @@ export interface SceneStoreState {
   openSceneIds: string[];
   activeSceneId: string | null;
   sceneOrder: string[];
+  editorMode: EditorMode;
 }
 
 const DEFAULT_SETTINGS: SceneSettings = {
@@ -145,12 +153,20 @@ export const sceneStore = createStore<SceneStoreState, {
   loadScenes: (scenes: Scene[]) => void;
   closeAllScenes: () => void;
   saveAllScenes: () => void;
+
+  // Editor Mode
+  getEditorMode: () => EditorMode;
+  setEditorMode: (mode: EditorMode) => void;
+  toggleEditorMode: () => void;
+  isPlayMode: () => boolean;
+  isEditMode: () => boolean;
 }>(
   {
     scenes: {},
     openSceneIds: [],
     activeSceneId: null,
     sceneOrder: [],
+    editorMode: 'edit',
   },
   (set, get) => ({
     createScene(name?: string): Scene {
@@ -416,6 +432,27 @@ export const sceneStore = createStore<SceneStoreState, {
       }
 
       set({ scenes: updatedScenes });
+    },
+
+    getEditorMode(): EditorMode {
+      return get().editorMode;
+    },
+
+    setEditorMode(mode: EditorMode): void {
+      set({ editorMode: mode });
+    },
+
+    toggleEditorMode(): void {
+      const current = get().editorMode;
+      set({ editorMode: current === 'edit' ? 'play' : 'edit' });
+    },
+
+    isPlayMode(): boolean {
+      return get().editorMode === 'play';
+    },
+
+    isEditMode(): boolean {
+      return get().editorMode === 'edit';
     },
   })
 );

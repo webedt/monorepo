@@ -5,6 +5,8 @@
  * Components manage their own DOM element and lifecycle.
  */
 
+import { createHmrId, registerComponent, unregisterComponent } from '../../lib/hmr';
+
 export interface ComponentOptions {
   className?: string;
   id?: string;
@@ -19,6 +21,8 @@ export abstract class Component<T extends HTMLElement = HTMLElement> {
     handler: EventListener;
     options?: AddEventListenerOptions;
   }> = [];
+  private hmrId: string | null = null;
+  protected hmrParent: HTMLElement | null = null;
 
   constructor(
     tagName: keyof HTMLElementTagNameMap = 'div',
@@ -61,7 +65,19 @@ export abstract class Component<T extends HTMLElement = HTMLElement> {
     }
 
     parentElement.appendChild(this.element);
+    this.hmrParent = parentElement;
     this.onMount();
+
+    // Register for HMR if enabled
+    if (this.hmrId) {
+      registerComponent(
+        this.hmrId,
+        this.element,
+        parentElement,
+        () => this.recreateForHmr()
+      );
+    }
+
     return this;
   }
 
@@ -71,7 +87,14 @@ export abstract class Component<T extends HTMLElement = HTMLElement> {
   unmount(): this {
     this.onUnmount();
     this.removeAllEventListeners();
+
+    // Unregister from HMR
+    if (this.hmrId) {
+      unregisterComponent(this.hmrId);
+    }
+
     this.element.remove();
+    this.hmrParent = null;
     return this;
   }
 
@@ -301,4 +324,36 @@ export abstract class Component<T extends HTMLElement = HTMLElement> {
   render(): this {
     return this;
   }
+
+  /**
+   * Enable HMR tracking for this component
+   * Components with HMR enabled can be hot-reloaded
+   */
+  enableHmr(id?: string): this {
+    this.hmrId = id || createHmrId(this.constructor.name);
+    return this;
+  }
+
+  /**
+   * Get the HMR ID for this component
+   */
+  getHmrId(): string | null {
+    return this.hmrId;
+  }
+
+  /**
+   * Recreate the component for HMR
+   * Override in subclasses to provide custom recreation logic
+   */
+  protected recreateForHmr(): HTMLElement {
+    // Default: just return the current element
+    // Subclasses can override to re-render
+    this.render();
+    return this.element;
+  }
+}
+
+// HMR setup for Component base class
+if (import.meta.hot) {
+  import.meta.hot.accept();
 }

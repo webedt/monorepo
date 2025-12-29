@@ -12,3 +12,4 @@ export { onionSkinningStore } from './onionSkinningStore';
 export { beatGridStore } from './beatGridStore';
 export { customComponentsStore } from './customComponentsStore';
 export { constraintStore } from './constraintStore';
+export { editModeStore } from './editModeStore';
