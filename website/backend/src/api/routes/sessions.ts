@@ -4,12 +4,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql } from '@webedt/shared';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService, sql, withTransactionOrThrow } from '@webedt/shared';
+import type { TransactionContext } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, requestDeduplicatorRegistry, generateRequestKey, type ClaudeWebClientConfig } from '@webedt/shared';
-import { publicShareRateLimiter } from '../middleware/rateLimit.js';
+import { publicShareRateLimiter, syncOperationRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { ASession, syncUserSessions } from '@webedt/shared';
@@ -1676,6 +1677,13 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       remoteSessions: []
     };
 
+    // External cleanup operations (branch deletion, remote archiving) are performed BEFORE
+    // the database soft-delete. This ordering is intentional:
+    // - External API calls cannot be rolled back, so they're not part of the DB transaction
+    // - If external cleanup succeeds but DB update fails, branches are cleaned up (good)
+    //   and the operation can be retried - the retry will skip already-deleted branches
+    // - If we did DB first, a rollback would leave orphaned remote resources
+
     // Delete GitHub branches for all sessions that have branch info
     if (authReq.user?.githubAccessToken) {
       const branchDeletions = sessions
@@ -1706,16 +1714,29 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       cleanupResults.remoteSessions = await Promise.all(remoteSessionArchives);
     }
 
-    // Soft delete all sessions from database
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: new Date() })
-      .where(
-        and(
-          inArray(chatSessions.id, ids),
-          eq(chatSessions.userId, authReq.user!.id)
-        )
-      );
+    // Soft delete all sessions from database within a transaction
+    // This ensures atomicity - either all sessions are soft-deleted or none are
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .update(chatSessions)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            inArray(chatSessions.id, ids),
+            eq(chatSessions.userId, authReq.user!.id)
+          )
+        );
+    }, {
+      context: { operation: 'bulkSoftDelete', userId: authReq.user!.id, sessionCount: ids.length },
+    });
+
+    logger.info(`Bulk soft-deleted ${ids.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      sessionCount: ids.length,
+      branchesDeleted: cleanupResults.branches.filter(b => b.success).length,
+      remoteSessionsArchived: cleanupResults.remoteSessions.filter(r => r.success).length,
+    });
 
     res.json({
       success: true,
@@ -1762,16 +1783,27 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
       return;
     }
 
-    // Restore all sessions
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: null })
-      .where(
-        and(
-          inArray(chatSessions.id, ids),
-          eq(chatSessions.userId, authReq.user!.id)
-        )
-      );
+    // Restore all sessions within a transaction
+    // This ensures atomicity - either all sessions are restored or none are
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .update(chatSessions)
+        .set({ deletedAt: null })
+        .where(
+          and(
+            inArray(chatSessions.id, ids),
+            eq(chatSessions.userId, authReq.user!.id)
+          )
+        );
+    }, {
+      context: { operation: 'bulkRestore', userId: authReq.user!.id, sessionCount: ids.length },
+    });
+
+    logger.info(`Bulk restored ${ids.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      sessionCount: ids.length,
+    });
 
     res.json({
       success: true,
@@ -1817,7 +1849,9 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
       return;
     }
 
-    // Archive Claude Remote sessions before permanently deleting from local DB
+    // Archive Claude Remote sessions before permanently deleting from local DB.
+    // External archiving is done BEFORE the database delete (same rationale as bulk-delete):
+    // external API calls can't be rolled back, so archive first, then delete from DB.
     const archiveResults: { sessionId: string; remoteSessionId: string | null; archived: boolean; message: string }[] = [];
 
     for (const session of sessions) {
@@ -1860,21 +1894,45 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
       }
     }
 
-    // Permanently delete all sessions from database
-    await db
-      .delete(chatSessions)
-      .where(
-        and(
-          inArray(chatSessions.id, ids),
-          eq(chatSessions.userId, authReq.user!.id)
-        )
-      );
+    // Permanently delete all sessions from database within a transaction
+    // This ensures atomicity - either all sessions are permanently deleted or none are
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx
+        .delete(chatSessions)
+        .where(
+          and(
+            inArray(chatSessions.id, ids),
+            eq(chatSessions.userId, authReq.user!.id)
+          )
+        );
+    }, {
+      context: { operation: 'bulkPermanentDelete', userId: authReq.user!.id, sessionCount: ids.length },
+    });
 
     // Recalculate storage usage after permanent deletion
-    await StorageService.recalculateUsage(authReq.user!.id);
+    // Note: This is done outside the transaction as it's a best-effort update.
+    // If it fails, storage will be corrected on the next recalculation.
+    try {
+      await StorageService.recalculateUsage(authReq.user!.id);
+    } catch (storageError) {
+      logger.error('Failed to recalculate storage after permanent delete', storageError as Error, {
+        component: 'Sessions',
+        userId: authReq.user!.id,
+        sessionCount: ids.length,
+      });
+      // Continue - the delete succeeded, storage recalculation can be retried later
+    }
 
     const archivedCount = archiveResults.filter(r => r.archived).length;
     const remoteCount = archiveResults.filter(r => r.remoteSessionId).length;
+
+    logger.info(`Bulk permanently deleted ${ids.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      sessionCount: ids.length,
+      remoteArchived: archivedCount,
+      remoteTotal: remoteCount,
+    });
 
     res.json({
       success: true,
@@ -2724,7 +2782,8 @@ router.get('/:id/stream', requireAuth, streamEventsHandler);
  * - stream: boolean (default: false) - Note: streaming should use /events/stream endpoint
  * - limit: number (default: 50) - Note: shared sync uses CLAUDE_SYNC_LIMIT from env
  */
-router.post('/sync', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent excessive sync requests to Claude Remote API (5/min per user)
+router.post('/sync', requireAuth, syncOperationRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.id;
 
@@ -2842,7 +2901,8 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
  * - Correct null/undefined normalization
  * - SessionPath generation
  */
-router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response) => {
+// Rate limited to prevent excessive sync requests to Claude Remote API (5/min per user)
+router.post('/:id/sync-events', requireAuth, syncOperationRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.id;
   const sessionId = req.params.id;
