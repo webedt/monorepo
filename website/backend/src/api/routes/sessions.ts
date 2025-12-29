@@ -32,21 +32,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
 /**
- * Helper to write SSE data safely using the shared SSE helper service.
- */
-function sseWrite(res: Response, data: string): boolean {
-  const sseHelper = ServiceProvider.get(ASseHelper);
-  return sseHelper.write(res, data);
-}
-
-/**
- * Synchronous SSE write helper - same as sseWrite but named for clarity.
- */
-function sseWriteSync(res: Response, data: string): boolean {
-  return sseWrite(res, data);
-}
-
-/**
  * Create an SSEWriter for a response with automatic heartbeat management.
  */
 function createSSEWriter(res: Response): SSEWriter {

@@ -95,6 +95,9 @@ export class SSEWriter {
       }
       this.writeHeartbeat();
     }, this.heartbeatIntervalMs);
+
+    // Prevent the timer from keeping Node.js event loop active
+    this.heartbeatTimer.unref();
   }
 
   /**
@@ -186,6 +189,8 @@ export class SSEWriter {
 
   /**
    * End the SSE stream and clean up resources.
+   * This method is idempotent - it is safe to call multiple times.
+   * Subsequent calls after the first will be no-ops.
    */
   end(): void {
     if (this.ended) {
