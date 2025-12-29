@@ -5,6 +5,11 @@
  * Acts as a proxy between WebServer and Anthropic API while maintaining
  * local database state for caching and replay functionality.
  *
+ * @openapi
+ * tags:
+ *   - name: Internal Sessions
+ *     description: Claude Remote Sessions management with SSE streaming
+ *
  * Endpoints:
  * - GET    /sessions                 - List sessions from Anthropic
  * - POST   /sessions                 - Create new session (SSE stream)
@@ -137,6 +142,33 @@ async function storeEvent(chatSessionId: string, eventData: Record<string, unkno
 // List sessions from Anthropic API
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions:
+ *   get:
+ *     tags: [Internal Sessions]
+ *     summary: List Claude sessions
+ *     description: Get sessions from Anthropic API with pagination
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: before
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Sessions retrieved successfully
+ *       401:
+ *         description: Claude authentication not configured
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -178,6 +210,45 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 // Create new session with prompt (SSE stream)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions:
+ *   post:
+ *     tags: [Internal Sessions]
+ *     summary: Create Claude session
+ *     description: Create new session and stream events via SSE
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prompt
+ *               - gitUrl
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *               gitUrl:
+ *                 type: string
+ *               model:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream of session events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         description: Claude authentication not configured
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -375,6 +446,29 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 // Get session status from DB
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}/status:
+ *   get:
+ *     tags: [Internal Sessions]
+ *     summary: Get session status
+ *     description: Retrieve session status from local database
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session status retrieved
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -423,6 +517,29 @@ router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
 // Get session events from DB
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}/events:
+ *   get:
+ *     tags: [Internal Sessions]
+ *     summary: Get session events
+ *     description: Retrieve all stored events for a session
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session events retrieved
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -472,6 +589,33 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
 // Reconnect to session stream (replay from DB + live if still running)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}:
+ *   get:
+ *     tags: [Internal Sessions]
+ *     summary: Stream session
+ *     description: Replay stored events and stream live events via SSE
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream of events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 const streamHandler = async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -603,6 +747,48 @@ router.get('/:id/stream', requireAuth, streamHandler);
 // Resume session with new prompt (SSE stream)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}:
+ *   post:
+ *     tags: [Internal Sessions]
+ *     summary: Resume session
+ *     description: Resume session with new prompt and stream events via SSE
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prompt
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream of session events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         description: Claude authentication not configured
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -766,6 +952,42 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
 // Rename session (call Anthropic + update DB)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}:
+ *   patch:
+ *     tags: [Internal Sessions]
+ *     summary: Rename session
+ *     description: Update session title in Anthropic and local DB
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *             properties:
+ *               title:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Session renamed successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -827,6 +1049,29 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 // Archive session (call Anthropic + update DB status)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}/archive:
+ *   post:
+ *     tags: [Internal Sessions]
+ *     summary: Archive session
+ *     description: Archive session in Anthropic and mark as completed in DB
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session archived successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -881,6 +1126,29 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
 // Delete session from DB (soft delete)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}:
+ *   delete:
+ *     tags: [Internal Sessions]
+ *     summary: Delete session
+ *     description: Soft delete session from local database
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session deleted successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -926,6 +1194,29 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 // Interrupt running session (call Anthropic + disconnect stream)
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/internal-sessions/{id}/interrupt:
+ *   post:
+ *     tags: [Internal Sessions]
+ *     summary: Interrupt session
+ *     description: Stop running session in Anthropic and abort local stream
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session interrupted successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;

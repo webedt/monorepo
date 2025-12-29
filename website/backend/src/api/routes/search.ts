@@ -11,6 +11,13 @@ import { searchRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Search
+ *     description: Universal search across all content types
+ */
+
 interface SearchResultItem {
   id: string;
   type: 'game' | 'user' | 'session' | 'post';
@@ -229,9 +236,57 @@ async function searchPosts(searchTerm: string): Promise<SearchResultItem[]> {
 }
 
 /**
- * Universal search endpoint
- * Searches across games, users, sessions, and community posts
- * Rate limited to prevent database-heavy search abuse (30/min per user)
+ * @openapi
+ * /search:
+ *   get:
+ *     tags:
+ *       - Search
+ *     summary: Universal search
+ *     description: Searches across games, users, sessions, and posts. Rate limited to 30/min.
+ *     security: []
+ *     parameters:
+ *       - name: q
+ *         in: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 2
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 50
+ *       - name: types
+ *         in: query
+ *         schema:
+ *           type: string
+ *           description: Comma-separated (game,user,session,post)
+ *     responses:
+ *       200:
+ *         description: Search results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     query:
+ *                       type: string
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/', searchRateLimiter, async (req: Request, res: Response) => {
   try {
@@ -312,8 +367,31 @@ router.get('/', searchRateLimiter, async (req: Request, res: Response) => {
 });
 
 /**
- * Get search suggestions based on game titles
- * Rate limited to prevent abuse (30/min per user)
+ * @openapi
+ * /search/suggestions:
+ *   get:
+ *     tags:
+ *       - Search
+ *     summary: Get search suggestions
+ *     security: []
+ *     parameters:
+ *       - name: q
+ *         in: query
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 5
+ *           maximum: 10
+ *     responses:
+ *       200:
+ *         description: Suggestions retrieved
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/suggestions', searchRateLimiter, async (req: Request, res: Response) => {
   try {
