@@ -23,10 +23,120 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Announcements
+ *     description: Platform announcements and notifications
+ */
+
 // Input validation constants
 const MAX_TITLE_LENGTH = 200;
 const MAX_CONTENT_LENGTH = 50000;
 
+/**
+ * @openapi
+ * /announcements:
+ *   get:
+ *     tags:
+ *       - Announcements
+ *     summary: Get published announcements
+ *     description: Returns a paginated list of published announcements. Public endpoint - no authentication required.
+ *     security: []
+ *     parameters:
+ *       - name: type
+ *         in: query
+ *         description: Filter by announcement type
+ *         schema:
+ *           type: string
+ *           enum: [maintenance, feature, alert, general]
+ *       - name: priority
+ *         in: query
+ *         description: Filter by priority level
+ *         schema:
+ *           type: string
+ *           enum: [low, normal, high, critical]
+ *       - name: pinned
+ *         in: query
+ *         description: Filter to only pinned announcements
+ *         schema:
+ *           type: string
+ *           enum: ['true']
+ *       - name: limit
+ *         in: query
+ *         description: Maximum number of results (default 20, max 100)
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         description: Number of results to skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Announcements retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     announcements:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             format: uuid
+ *                           title:
+ *                             type: string
+ *                           content:
+ *                             type: string
+ *                           type:
+ *                             type: string
+ *                             enum: [maintenance, feature, alert, general]
+ *                           priority:
+ *                             type: string
+ *                             enum: [low, normal, high, critical]
+ *                           status:
+ *                             type: string
+ *                             enum: [draft, published, archived]
+ *                           pinned:
+ *                             type: boolean
+ *                           publishedAt:
+ *                             type: string
+ *                             format: date-time
+ *                           expiresAt:
+ *                             type: string
+ *                             format: date-time
+ *                             nullable: true
+ *                           author:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                               displayName:
+ *                                 type: string
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get published announcements (public)
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -103,6 +213,74 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /announcements/admin/all:
+ *   get:
+ *     tags:
+ *       - Announcements
+ *     summary: List all announcements (admin)
+ *     description: Returns all announcements including drafts and archived. Admin access required.
+ *     parameters:
+ *       - name: type
+ *         in: query
+ *         schema:
+ *           type: string
+ *           enum: [maintenance, feature, alert, general]
+ *       - name: priority
+ *         in: query
+ *         schema:
+ *           type: string
+ *           enum: [low, normal, high, critical]
+ *       - name: status
+ *         in: query
+ *         schema:
+ *           type: string
+ *           enum: [draft, published, archived]
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: All announcements retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     announcements:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // IMPORTANT: Admin routes must be defined BEFORE /:id to avoid route conflicts
 // List all announcements for admin (including drafts and archived)
 router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
@@ -173,6 +351,59 @@ router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /announcements/{id}:
+ *   get:
+ *     tags:
+ *       - Announcements
+ *     summary: Get announcement by ID
+ *     description: Returns a single announcement. Public users can only see published announcements; admins can see all.
+ *     security: []
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Announcement ID
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Announcement retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       format: uuid
+ *                     title:
+ *                       type: string
+ *                     content:
+ *                       type: string
+ *                     type:
+ *                       type: string
+ *                     priority:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                     pinned:
+ *                       type: boolean
+ *                     author:
+ *                       type: object
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get single announcement (public for published, admin for all)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -221,6 +452,80 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /announcements:
+ *   post:
+ *     tags:
+ *       - Announcements
+ *     summary: Create announcement
+ *     description: Creates a new announcement. Admin access required.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - content
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 maxLength: 200
+ *                 description: Announcement title
+ *               content:
+ *                 type: string
+ *                 maxLength: 50000
+ *                 description: Announcement content (supports markdown)
+ *               type:
+ *                 type: string
+ *                 enum: [maintenance, feature, alert, general]
+ *                 default: general
+ *               priority:
+ *                 type: string
+ *                 enum: [low, normal, high, critical]
+ *                 default: normal
+ *               status:
+ *                 type: string
+ *                 enum: [draft, published, archived]
+ *                 default: draft
+ *               pinned:
+ *                 type: boolean
+ *                 default: false
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Announcement created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     announcement:
+ *                       type: object
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Create announcement (admin only)
 router.post('/', requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -310,6 +615,81 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /announcements/{id}:
+ *   patch:
+ *     tags:
+ *       - Announcements
+ *     summary: Update announcement
+ *     description: Updates an existing announcement. Admin access required.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Announcement ID
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 maxLength: 200
+ *               content:
+ *                 type: string
+ *                 maxLength: 50000
+ *               type:
+ *                 type: string
+ *                 enum: [maintenance, feature, alert, general]
+ *               priority:
+ *                 type: string
+ *                 enum: [low, normal, high, critical]
+ *               status:
+ *                 type: string
+ *                 enum: [draft, published, archived]
+ *               pinned:
+ *                 type: boolean
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Announcement updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     announcement:
+ *                       type: object
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Update announcement (admin only)
 router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -403,6 +783,48 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /announcements/{id}:
+ *   delete:
+ *     tags:
+ *       - Announcements
+ *     summary: Delete announcement
+ *     description: Permanently deletes an announcement. Admin access required.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Announcement ID
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Announcement deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Announcement deleted
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete announcement (admin only)
 router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
   try {

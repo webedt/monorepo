@@ -1,6 +1,11 @@
 /**
  * Snippets Routes
  * Handles user code snippets and templates for common code patterns
+ *
+ * @openapi
+ * tags:
+ *   - name: Snippets
+ *     description: Code snippets and collections management
  */
 
 import { Router, Request, Response } from 'express';
@@ -97,7 +102,63 @@ function validateVariables(variables: unknown): SnippetVariables | null {
 // SNIPPET ROUTES
 // ===========================================================================
 
-// List user's snippets with optional filtering and pagination
+/**
+ * @openapi
+ * /api/snippets:
+ *   get:
+ *     tags: [Snippets]
+ *     summary: List user snippets
+ *     description: Retrieve snippets with optional filtering, search, and pagination
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: language
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: favorite
+ *         schema:
+ *           type: string
+ *           enum: [true, false]
+ *       - in: query
+ *         name: collectionId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [title, usageCount, lastUsedAt, createdAt, updatedAt]
+ *       - in: query
+ *         name: order
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Snippets retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -207,7 +268,29 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Get a single snippet
+/**
+ * @openapi
+ * /api/snippets/{id}:
+ *   get:
+ *     tags: [Snippets]
+ *     summary: Get snippet by ID
+ *     description: Retrieve a single snippet with its collections
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Snippet retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -248,7 +331,59 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Create a new snippet
+/**
+ * @openapi
+ * /api/snippets:
+ *   post:
+ *     tags: [Snippets]
+ *     summary: Create new snippet
+ *     description: Create a code snippet with optional collection assignment
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - code
+ *             properties:
+ *               title:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               code:
+ *                 type: string
+ *               language:
+ *                 type: string
+ *               category:
+ *                 type: string
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               variables:
+ *                 type: object
+ *               isFavorite:
+ *                 type: boolean
+ *               isPublic:
+ *                 type: boolean
+ *               collectionIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       201:
+ *         description: Snippet created successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       409:
+ *         description: Snippet with this title already exists
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -355,7 +490,39 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Update a snippet
+/**
+ * @openapi
+ * /api/snippets/{id}:
+ *   put:
+ *     tags: [Snippets]
+ *     summary: Update snippet
+ *     description: Update snippet properties
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Snippet updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Snippet with this title already exists
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -464,7 +631,29 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Delete a snippet
+/**
+ * @openapi
+ * /api/snippets/{id}:
+ *   delete:
+ *     tags: [Snippets]
+ *     summary: Delete snippet
+ *     description: Delete a snippet and remove from all collections
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Snippet deleted successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -500,7 +689,29 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Record snippet usage (increment usage count)
+/**
+ * @openapi
+ * /api/snippets/{id}/use:
+ *   post:
+ *     tags: [Snippets]
+ *     summary: Record snippet usage
+ *     description: Increment usage count and update last used timestamp
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Usage recorded successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/use', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -536,7 +747,29 @@ router.post('/:id/use', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Toggle favorite status
+/**
+ * @openapi
+ * /api/snippets/{id}/favorite:
+ *   post:
+ *     tags: [Snippets]
+ *     summary: Toggle favorite status
+ *     description: Toggle snippet favorite status
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Favorite status toggled
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -572,7 +805,29 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// Duplicate a snippet
+/**
+ * @openapi
+ * /api/snippets/{id}/duplicate:
+ *   post:
+ *     tags: [Snippets]
+ *     summary: Duplicate snippet
+ *     description: Create a copy of an existing snippet
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       201:
+ *         description: Snippet duplicated successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/duplicate', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -636,7 +891,21 @@ router.post('/:id/duplicate', requireAuth, async (req: Request, res: Response) =
 // COLLECTION ROUTES
 // ===========================================================================
 
-// List user's snippet collections
+/**
+ * @openapi
+ * /api/snippets/collections/list:
+ *   get:
+ *     tags: [Snippets]
+ *     summary: List snippet collections
+ *     description: Retrieve user's snippet collections with counts
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Collections retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/collections/list', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -682,7 +951,44 @@ router.get('/collections/list', requireAuth, async (req: Request, res: Response)
   }
 });
 
-// Create a snippet collection
+/**
+ * @openapi
+ * /api/snippets/collections:
+ *   post:
+ *     tags: [Snippets]
+ *     summary: Create collection
+ *     description: Create a new snippet collection
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               color:
+ *                 type: string
+ *               icon:
+ *                 type: string
+ *               isDefault:
+ *                 type: boolean
+ *     responses:
+ *       201:
+ *         description: Collection created successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       409:
+ *         description: Collection with this name already exists
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/collections', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -738,7 +1044,39 @@ router.post('/collections', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
-// Update a snippet collection
+/**
+ * @openapi
+ * /api/snippets/collections/{id}:
+ *   put:
+ *     tags: [Snippets]
+ *     summary: Update collection
+ *     description: Update collection properties
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Collection updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: Collection with this name already exists
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.put('/collections/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -812,7 +1150,29 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-// Delete a snippet collection
+/**
+ * @openapi
+ * /api/snippets/collections/{id}:
+ *   delete:
+ *     tags: [Snippets]
+ *     summary: Delete collection
+ *     description: Delete collection but keep snippets
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Collection deleted successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/collections/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -848,7 +1208,34 @@ router.delete('/collections/:id', requireAuth, async (req: Request, res: Respons
   }
 });
 
-// Add snippet to collection
+/**
+ * @openapi
+ * /api/snippets/collections/{collectionId}/snippets/{snippetId}:
+ *   post:
+ *     tags: [Snippets]
+ *     summary: Add snippet to collection
+ *     description: Add a snippet to a collection
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: collectionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: snippetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Snippet added to collection
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/collections/:collectionId/snippets/:snippetId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -909,7 +1296,34 @@ router.post('/collections/:collectionId/snippets/:snippetId', requireAuth, async
   }
 });
 
-// Remove snippet from collection
+/**
+ * @openapi
+ * /api/snippets/collections/{collectionId}/snippets/{snippetId}:
+ *   delete:
+ *     tags: [Snippets]
+ *     summary: Remove snippet from collection
+ *     description: Remove a snippet from a collection
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: collectionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: snippetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Snippet removed from collection
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/collections/:collectionId/snippets/:snippetId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;

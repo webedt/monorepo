@@ -3,6 +3,59 @@
  * Handles game store browsing, searching, and details
  */
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     Game:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         title:
+ *           type: string
+ *         description:
+ *           type: string
+ *         price:
+ *           type: number
+ *         developer:
+ *           type: string
+ *         publisher:
+ *           type: string
+ *         releaseDate:
+ *           type: string
+ *           format: date-time
+ *         status:
+ *           type: string
+ *           enum: [draft, published, archived]
+ *         featured:
+ *           type: boolean
+ *         genres:
+ *           type: array
+ *           items:
+ *             type: string
+ *         tags:
+ *           type: array
+ *           items:
+ *             type: string
+ *         averageScore:
+ *           type: number
+ *         downloadCount:
+ *           type: number
+ *     WishlistItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         userId:
+ *           type: string
+ *         gameId:
+ *           type: string
+ *         addedAt:
+ *           type: string
+ *           format: date-time
+ */
+
 import { Router, Request, Response } from 'express';
 import { db, games, userLibrary, wishlists, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -12,7 +65,39 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
-// Get featured games for store front
+/**
+ * @openapi
+ * /api/store/featured:
+ *   get:
+ *     tags: [Store]
+ *     summary: Get featured games
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 50
+ *     responses:
+ *       200:
+ *         description: Featured games list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     games:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Game'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/featured', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
@@ -34,7 +119,32 @@ router.get('/featured', async (req: Request, res: Response) => {
   }
 });
 
-// Get newly released games (released within the last 30 days)
+/**
+ * @openapi
+ * /api/store/new:
+ *   get:
+ *     tags: [Store]
+ *     summary: Get newly released games
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 50
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *           maximum: 90
+ *         description: Days back to check for releases
+ *     responses:
+ *       200:
+ *         description: New releases list
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/new', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
@@ -73,7 +183,37 @@ router.get('/new', async (req: Request, res: Response) => {
   }
 });
 
-// Get store highlights (featured + new items combined)
+/**
+ * @openapi
+ * /api/store/highlights:
+ *   get:
+ *     tags: [Store]
+ *     summary: Get store highlights (featured + new releases)
+ *     parameters:
+ *       - in: query
+ *         name: featuredLimit
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *           maximum: 20
+ *       - in: query
+ *         name: newLimit
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *           maximum: 20
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *           maximum: 90
+ *     responses:
+ *       200:
+ *         description: Combined featured and new games
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/highlights', async (req: Request, res: Response) => {
   try {
     const featuredLimit = Math.min(parseInt(req.query.featuredLimit as string) || 6, 20);
@@ -131,7 +271,67 @@ router.get('/highlights', async (req: Request, res: Response) => {
   }
 });
 
-// Search/browse games in the store
+/**
+ * @openapi
+ * /api/store/browse:
+ *   get:
+ *     tags: [Store]
+ *     summary: Browse and search games
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *         description: Search query
+ *       - in: query
+ *         name: genre
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: tag
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [releaseDate, title, price, rating, downloads]
+ *           default: releaseDate
+ *       - in: query
+ *         name: order
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: free
+ *         schema:
+ *           type: boolean
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Paginated game list
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/browse', async (req: Request, res: Response) => {
   try {
     const {
@@ -237,7 +437,38 @@ router.get('/browse', async (req: Request, res: Response) => {
   }
 });
 
-// Get game details by ID
+/**
+ * @openapi
+ * /api/store/games/{id}:
+ *   get:
+ *     tags: [Store]
+ *     summary: Get game details
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Game details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     game:
+ *                       $ref: '#/components/schemas/Game'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/games/:id', async (req: Request, res: Response) => {
   try {
     const gameId = req.params.id;
@@ -269,7 +500,40 @@ router.get('/games/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Check if user owns a game
+/**
+ * @openapi
+ * /api/store/games/{id}/owned:
+ *   get:
+ *     tags: [Store]
+ *     summary: Check if user owns a game
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Ownership status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     owned:
+ *                       type: boolean
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -291,7 +555,32 @@ router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-// Get available genres
+/**
+ * @openapi
+ * /api/store/genres:
+ *   get:
+ *     tags: [Store]
+ *     summary: Get available game genres
+ *     responses:
+ *       200:
+ *         description: List of genres
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     genres:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/genres', async (req: Request, res: Response) => {
   try {
     const allGames = await db
@@ -321,7 +610,32 @@ router.get('/genres', async (req: Request, res: Response) => {
   }
 });
 
-// Get available tags
+/**
+ * @openapi
+ * /api/store/tags:
+ *   get:
+ *     tags: [Store]
+ *     summary: Get available game tags
+ *     responses:
+ *       200:
+ *         description: List of tags
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     tags:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/tags', async (req: Request, res: Response) => {
   try {
     const allGames = await db
@@ -351,7 +665,44 @@ router.get('/tags', async (req: Request, res: Response) => {
   }
 });
 
-// Add to wishlist
+/**
+ * @openapi
+ * /api/store/wishlist/{gameId}:
+ *   post:
+ *     tags: [Store, Wishlist]
+ *     summary: Add game to wishlist
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Game added to wishlist
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     wishlistItem:
+ *                       $ref: '#/components/schemas/WishlistItem'
+ *       400:
+ *         description: Already in wishlist or library
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -413,7 +764,28 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
   }
 });
 
-// Remove from wishlist
+/**
+ * @openapi
+ * /api/store/wishlist/{gameId}:
+ *   delete:
+ *     tags: [Store, Wishlist]
+ *     summary: Remove game from wishlist
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Game removed from wishlist
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -433,7 +805,43 @@ router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Respon
   }
 });
 
-// Get user's wishlist
+/**
+ * @openapi
+ * /api/store/wishlist:
+ *   get:
+ *     tags: [Store, Wishlist]
+ *     summary: Get user's wishlist
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: User's wishlist
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/WishlistItem'
+ *                           - type: object
+ *                             properties:
+ *                               game:
+ *                                 $ref: '#/components/schemas/Game'
+ *                     total:
+ *                       type: integer
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
 router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;

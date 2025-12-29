@@ -29,6 +29,172 @@ import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 const router = Router();
 
 /**
+ * @openapi
+ * tags:
+ *   - name: LiveChat
+ *     description: Real-time AI chat on code branches
+ */
+
+/**
+ * @openapi
+ * /live-chat/{owner}/{repo}/{branch}/messages:
+ *   get:
+ *     tags:
+ *       - LiveChat
+ *     summary: Get chat messages
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *     responses:
+ *       200:
+ *         description: Messages retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   post:
+ *     tags:
+ *       - LiveChat
+ *     summary: Add message
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - role
+ *               - content
+ *             properties:
+ *               role:
+ *                 type: string
+ *               content:
+ *                 type: string
+ *               images:
+ *                 type: array
+ *     responses:
+ *       200:
+ *         description: Message added
+ *       400:
+ *         description: Missing fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   delete:
+ *     tags:
+ *       - LiveChat
+ *     summary: Clear messages
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Messages cleared
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /live-chat/{owner}/{repo}/{branch}/execute:
+ *   post:
+ *     tags:
+ *       - LiveChat
+ *     summary: Execute AI chat
+ *     description: Executes AI with conversation context. Returns SSE stream.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - message
+ *             properties:
+ *               message:
+ *                 type: string
+ *               images:
+ *                 type: array
+ *     responses:
+ *       200:
+ *         description: SSE stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
  * Get and configure the Claude Web Client with the given credentials.
  */
 function getClaudeClient(config: ClaudeWebClientConfig): AClaudeWebClient {
