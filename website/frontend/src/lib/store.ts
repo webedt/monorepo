@@ -70,22 +70,19 @@ export class Store<T extends object> {
   /**
    * Enable HMR for this store
    * State will be preserved across module updates
+   * Note: Uses shallow merge - nested objects may not be fully restored
    */
   enableHmr(id: string): this {
     this.hmrId = id;
 
-    // Try to restore state from HMR
+    // Try to restore state from HMR (uses setState to notify subscribers)
     const savedState = getHmrState<T>(`store:${id}`);
     if (savedState !== undefined) {
-      this.state = { ...this.state, ...savedState };
+      this.setState(savedState);
     }
 
-    // Register for future HMR cycles
-    registerStore(
-      id,
-      () => this.state,
-      (state) => this.setState(state as Partial<T>)
-    );
+    // Register for future HMR cycles (without auto-restore since we handle it above)
+    registerStore(id, () => this.state);
 
     return this;
   }

@@ -988,24 +988,22 @@ init();
 
 // HMR setup for main module
 if (import.meta.hot) {
-  import.meta.hot.accept();
+  // Accept updates and refresh UI when this module is updated
+  import.meta.hot.accept(() => {
+    console.log('[HMR] Main module updated, refreshing UI...');
+    // Update header (in case theme or nav changed)
+    updateHeader();
+    // Re-render current page if possible
+    rerenderCurrentPage();
+  });
 
-  // Handle module updates
+  // Handle module disposal - save state before update
   import.meta.hot.dispose(() => {
     // Save all store states before disposal
     saveStoreStates();
     // Save current route
     router.saveForHmr();
     console.log('[HMR] Main module disposing, states saved');
-  });
-
-  // On accept, try to re-render the current page without full reload
-  import.meta.hot.on('vite:afterUpdate', () => {
-    console.log('[HMR] Vite update complete, refreshing UI...');
-    // Update header (in case theme or nav changed)
-    updateHeader();
-    // Re-render current page if possible
-    rerenderCurrentPage();
   });
 
   // Log HMR status

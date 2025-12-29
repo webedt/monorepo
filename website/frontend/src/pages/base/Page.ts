@@ -4,7 +4,7 @@
  */
 
 import { authStore } from '../../stores/authStore';
-import { registerPage, unregisterPage, saveHmrState, getHmrState } from '../../lib/hmr';
+import { registerPage, unregisterPage } from '../../lib/hmr';
 
 export interface PageOptions {
   params?: Record<string, string>;
@@ -16,7 +16,6 @@ export abstract class Page<T extends PageOptions = PageOptions> {
   protected options: T;
   private eventListeners: Array<{ el: Element; type: string; handler: EventListener }> = [];
   private hmrId: string;
-  protected hmrContainer: HTMLElement | null = null;
 
   /** Route pattern (e.g., '/chat/:id') */
   abstract readonly route: string;
@@ -66,7 +65,6 @@ export abstract class Page<T extends PageOptions = PageOptions> {
    */
   mount(container: HTMLElement): void {
     container.appendChild(this.element);
-    this.hmrContainer = container;
     this.onMount();
 
     // Register for HMR page tracking
@@ -88,7 +86,6 @@ export abstract class Page<T extends PageOptions = PageOptions> {
     unregisterPage(this.hmrId);
 
     this.element.remove();
-    this.hmrContainer = null;
   }
 
   /**
@@ -114,37 +111,6 @@ export abstract class Page<T extends PageOptions = PageOptions> {
     this.element.scrollLeft = scrollLeft;
 
     console.log(`[HMR] Page refreshed: ${this.constructor.name}`);
-  }
-
-  /**
-   * Save page state for HMR
-   */
-  saveStateForHmr(): void {
-    saveHmrState(this.hmrId, {
-      options: this.options,
-      scrollTop: this.element.scrollTop,
-      scrollLeft: this.element.scrollLeft,
-    });
-  }
-
-  /**
-   * Restore page state from HMR
-   */
-  protected restoreStateFromHmr(): void {
-    const saved = getHmrState<{
-      options: T;
-      scrollTop: number;
-      scrollLeft: number;
-    }>(this.hmrId);
-
-    if (saved) {
-      this.options = { ...this.options, ...saved.options };
-      // Scroll restoration happens after mount
-      requestAnimationFrame(() => {
-        this.element.scrollTop = saved.scrollTop;
-        this.element.scrollLeft = saved.scrollLeft;
-      });
-    }
   }
 
   /**

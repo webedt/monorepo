@@ -24,7 +24,6 @@ const pageRegistry = new Map<string, {
 // Store instances for state preservation
 const storeRegistry = new Map<string, {
   getState: () => unknown;
-  setState: (state: unknown) => void;
 }>();
 
 /**
@@ -57,19 +56,13 @@ export function clearHmrState(key: string): void {
 
 /**
  * Register a store for HMR state preservation
+ * Note: State restoration is handled by Store.enableHmr() to ensure subscribers are notified
  */
 export function registerStore(
   id: string,
-  getState: () => unknown,
-  setState: (state: unknown) => void
+  getState: () => unknown
 ): void {
-  storeRegistry.set(id, { getState, setState });
-
-  // Restore state if it was saved
-  const savedState = getHmrState(`store:${id}`);
-  if (savedState !== undefined) {
-    setState(savedState);
-  }
+  storeRegistry.set(id, { getState });
 }
 
 /**
@@ -151,106 +144,16 @@ export function rerenderCurrentPage(): boolean {
 }
 
 /**
- * Setup HMR for a module that exports a component class
- * Call this at the end of component files
- */
-export function setupComponentHmr(
-  hot: ImportMeta['hot'],
-  moduleId: string,
-  callback?: () => void
-): void {
-  if (!hot) return;
-
-  hot.accept((newModule: unknown) => {
-    if (newModule) {
-      console.log(`[HMR] Component updated: ${moduleId}`);
-      callback?.();
-    }
-  });
-
-  hot.dispose(() => {
-    console.log(`[HMR] Component disposing: ${moduleId}`);
-  });
-}
-
-/**
- * Setup HMR for a store module
- * Preserves state across module updates
- */
-export function setupStoreHmr(
-  hot: ImportMeta['hot'],
-  storeId: string,
-  getState: () => unknown,
-  setState: (state: unknown) => void
-): void {
-  if (!hot) return;
-
-  // Register the store for state preservation
-  registerStore(storeId, getState, setState);
-
-  hot.accept();
-
-  hot.dispose(() => {
-    // Save state before disposal
-    saveHmrState(`store:${storeId}`, getState());
-    console.log(`[HMR] Store state saved: ${storeId}`);
-  });
-}
-
-/**
- * Setup HMR for the main entry point
- */
-export function setupMainHmr(
-  hot: ImportMeta['hot'],
-  reinitialize: () => void
-): void {
-  if (!hot) return;
-
-  hot.accept(() => {
-    console.log('[HMR] Main module updated, reinitializing...');
-    reinitialize();
-  });
-
-  hot.dispose(() => {
-    // Save all store states before disposal
-    saveStoreStates();
-    console.log('[HMR] Main module disposing, states saved');
-  });
-}
-
-/**
- * Setup HMR for the router module
- */
-export function setupRouterHmr(
-  hot: ImportMeta['hot'],
-  getCurrentPath: () => string,
-  navigate: (path: string) => void
-): void {
-  if (!hot) return;
-
-  // Save current path before update
-  hot.dispose(() => {
-    saveHmrState('router:path', getCurrentPath());
-    console.log('[HMR] Router path saved');
-  });
-
-  hot.accept(() => {
-    // Restore navigation after update
-    const savedPath = getHmrState<string>('router:path');
-    if (savedPath) {
-      console.log(`[HMR] Router restored to: ${savedPath}`);
-      // Use setTimeout to ensure the new module is fully loaded
-      setTimeout(() => navigate(savedPath), 0);
-    }
-  });
-}
-
-/**
  * Create a unique component ID for HMR tracking
+ * Counter is persisted across HMR updates to prevent ID collisions
  */
-let componentCounter = 0;
+const HMR_COUNTER_KEY = 'hmr:componentCounter';
+let componentCounter = getHmrState<number>(HMR_COUNTER_KEY) ?? 0;
+
 export function createHmrId(prefix: string = 'component'): string {
-  return `${prefix}-${++componentCounter}`;
+  componentCounter++;
+  saveHmrState(HMR_COUNTER_KEY, componentCounter);
+  return `${prefix}-${componentCounter}`;
 }
 
 /**

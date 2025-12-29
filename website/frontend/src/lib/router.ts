@@ -3,7 +3,7 @@
  * Hash-based routing for simplicity
  */
 
-import { saveHmrState, getHmrState } from './hmr';
+import { saveHmrState } from './hmr';
 
 export interface Route {
   path: string;
@@ -226,23 +226,6 @@ class Router {
    */
   saveForHmr(): void {
     saveHmrState('router:path', this.getCurrentPath());
-  }
-
-  /**
-   * Restore state from HMR
-   */
-  restoreFromHmr(): void {
-    const savedPath = getHmrState<string>('router:path');
-    if (savedPath && savedPath !== this.getCurrentPath()) {
-      this.navigate(savedPath);
-    }
-  }
-
-  /**
-   * Refresh current route (re-render without navigation)
-   */
-  refresh(): void {
-    this.handleRouteChange();
   }
 
   /**
