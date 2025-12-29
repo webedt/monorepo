@@ -277,15 +277,17 @@ function writeLayerAndMaskInfo(
 
   for (const layer of layers) {
     // Validate layer canvas dimensions match document dimensions
+    // PSD layer data must match the declared layer bounds
     if (layer.canvas.width !== width || layer.canvas.height !== height) {
-      console.warn(
+      throw new Error(
         `Layer "${layer.name}" dimensions (${layer.canvas.width}x${layer.canvas.height}) ` +
-        `don't match document dimensions (${width}x${height}). Using document dimensions.`
+        `don't match document dimensions (${width}x${height}). ` +
+        `All layers must have the same dimensions as the document for PSD export.`
       );
     }
 
     const imageData = getCanvasImageData(layer.canvas);
-    const pixelCount = width * height;
+    const pixelCount = layer.canvas.width * layer.canvas.height;
 
     // Extract RGBA channels
     const redChannel = new Uint8Array(pixelCount);
