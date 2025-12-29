@@ -123,8 +123,11 @@ function sendSSE(res: Response, event: Record<string, unknown>): void {
  */
 async function storeEvent(chatSessionId: string, eventData: Record<string, unknown>): Promise<void> {
   try {
+    // Extract UUID from eventData for efficient deduplication queries
+    const eventUuid = eventData.uuid as string | undefined;
     await db.insert(events).values({
       chatSessionId,
+      uuid: eventUuid || null,
       eventData,
     });
   } catch (error) {

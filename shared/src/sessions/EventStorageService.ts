@@ -12,8 +12,11 @@ export class EventStorageService extends AEventStorageService {
     timestamp?: Date
   ): Promise<StoreEventResult> {
     try {
+      // Extract UUID from eventData for efficient deduplication queries
+      const uuid = eventData.uuid as string | undefined;
       await db.insert(events).values({
         chatSessionId,
+        uuid: uuid || null,
         eventData,
         timestamp: timestamp || new Date(),
       });
@@ -79,15 +82,15 @@ export class EventStorageService extends AEventStorageService {
   }
 
   async getExistingEventUuids(chatSessionId: string): Promise<Set<string>> {
+    // Query the indexed uuid column directly for efficient deduplication
     const existingEvents = await db
-      .select({ eventData: events.eventData })
+      .select({ uuid: events.uuid })
       .from(events)
       .where(eq(events.chatSessionId, chatSessionId));
 
     const uuids = new Set<string>();
     for (const e of existingEvents) {
-      const uuid = (e.eventData as Record<string, unknown>)?.uuid as string | undefined;
-      if (uuid) uuids.add(uuid);
+      if (e.uuid) uuids.add(e.uuid);
     }
     return uuids;
   }

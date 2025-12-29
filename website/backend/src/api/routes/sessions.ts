@@ -927,11 +927,13 @@ router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Create event
+    // Create event - extract uuid for efficient deduplication queries
+    const eventUuid = (eventData as Record<string, unknown>)?.uuid as string | undefined;
     const [newEvent] = await db
       .insert(events)
       .values({
         chatSessionId: sessionId,
+        uuid: eventUuid || null,
         eventData,
       })
       .returning();
@@ -1621,6 +1623,7 @@ router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
 
     await db.insert(events).values({
       chatSessionId: sessionId,
+      uuid: null, // Local input_preview events don't have UUIDs
       eventData: userMessageEvent,
     });
 
@@ -2545,6 +2548,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
           };
           await db.insert(events).values({
             chatSessionId: sessionId,
+            uuid: null, // Local input_preview events don't have UUIDs
             eventData: inputPreviewEvent,
           });
           logger.info('RESUME: Sending input_preview event', {
@@ -2666,6 +2670,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
 
                 await db.insert(events).values({
                   chatSessionId: sessionId,
+                  uuid: eventUuid || null,
                   eventData: eventWithTimestamp,
                 });
 

@@ -161,6 +161,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid || null,
           eventData: event,
         });
         if (eventUuid) {
@@ -337,6 +338,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId: sessionId,
+          uuid: eventUuid || null,
           eventData: event,
         });
         if (eventUuid) {
@@ -455,17 +457,14 @@ export class SessionService extends ASession {
       const eventsResponse = await client.getEvents(session.remoteSessionId);
       const remoteEvents = eventsResponse.data || [];
 
-      // Get existing event UUIDs for this session
-      // TODO(perf): Currently fetches all eventData to extract UUIDs. For sessions with
-      // many events, this can be slow. Consider adding a dedicated 'uuid' column to the
-      // events table with an index for more efficient deduplication queries.
+      // Get existing event UUIDs for this session using the indexed uuid column
       const existingEvents = await db
-        .select({ eventData: events.eventData })
+        .select({ uuid: events.uuid })
         .from(events)
         .where(eq(events.chatSessionId, sessionId));
 
       const existingUuids = new Set(
-        existingEvents.map(e => (e.eventData as { uuid?: string })?.uuid).filter(Boolean)
+        existingEvents.map(e => e.uuid).filter((uuid): uuid is string => uuid !== null)
       );
 
       // Filter to only new events
@@ -528,6 +527,7 @@ export class SessionService extends ASession {
             await tx.insert(events).values(
               eventsToInsert.map(event => ({
                 chatSessionId: sessionId,
+                uuid: event.uuid || null,
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               }))

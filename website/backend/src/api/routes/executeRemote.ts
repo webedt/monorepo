@@ -438,6 +438,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid || null,
           eventData: event,
         });
         // Mark as stored to prevent future duplicates
