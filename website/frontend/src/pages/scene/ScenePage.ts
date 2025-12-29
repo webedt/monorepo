@@ -6,7 +6,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, TransformEditor, SceneTabs } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, TransformEditor, SceneTabs, EditModeToolbar } from '../../components';
 import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
@@ -15,6 +15,7 @@ import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
 import { GameRuntime } from '../../lib/game';
 import { sceneStore } from '../../stores/sceneStore';
+import { editModeStore } from '../../stores/editModeStore';
 import { customComponentsStore } from '../../stores';
 import type {
   Session,
@@ -23,7 +24,9 @@ import type {
   CustomComponentPropertyValues,
 } from '../../types';
 import type { SceneObject, ShapeType, Scene } from '../../stores/sceneStore';
+import type { EditMode } from '../../stores/editModeStore';
 import './scene.css';
+import '../../components/edit-mode-toolbar/edit-mode-toolbar.css';
 
 interface ScenePageOptions extends PageOptions {
   params?: {
@@ -43,6 +46,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private isOfflineMode = false;
   private transformEditor: TransformEditor | null = null;
   private sceneTabs: SceneTabs | null = null;
+  private editModeToolbar: EditModeToolbar | null = null;
 
   // Scene state - now using sceneStore for multi-scene support
   private sceneCanvas: HTMLCanvasElement | null = null;
@@ -78,10 +82,12 @@ export class ScenePage extends Page<ScenePageOptions> {
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: (() => void) | null = null;
   private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
+  private boundKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
   // Store subscriptions
   private unsubscribeStore: (() => void) | null = null;
   private unsubscribeComponents: (() => void) | null = null;
+  private unsubscribeEditMode: (() => void) | null = null;
 
   // Helper methods to access active scene data
   private get activeScene(): Scene | null {
@@ -144,6 +150,11 @@ export class ScenePage extends Page<ScenePageOptions> {
         <div class="scene-tabs-container-wrapper"></div>
 
         <div class="scene-toolbar">
+          <!-- Edit Mode Toolbar -->
+          <div class="edit-mode-toolbar-container"></div>
+
+          <div class="toolbar-separator"></div>
+
           <div class="toolbar-group">
             <button class="toolbar-btn" data-action="add-sprite" title="Add Sprite">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -188,10 +199,18 @@ export class ScenePage extends Page<ScenePageOptions> {
 
           <div class="toolbar-separator"></div>
 
+          <div class="toolbar-group z-order-group">
+            <span class="toolbar-label">Z:</span>
+            <button class="toolbar-btn" data-action="bring-to-front" title="Bring to Front (Shift+Ctrl+])">⤒</button>
+            <button class="toolbar-btn" data-action="bring-forward" title="Bring Forward (Ctrl+])">↑</button>
+            <button class="toolbar-btn" data-action="send-backward" title="Send Backward (Ctrl+[)">↓</button>
+            <button class="toolbar-btn" data-action="send-to-back" title="Send to Back (Shift+Ctrl+[)">⤓</button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
           <div class="toolbar-group">
-            <button class="toolbar-btn" data-action="move-up" title="Move Up">↑</button>
-            <button class="toolbar-btn" data-action="move-down" title="Move Down">↓</button>
-            <button class="toolbar-btn" data-action="delete" title="Delete">🗑</button>
+            <button class="toolbar-btn" data-action="delete" title="Delete (Del)">🗑</button>
           </div>
 
           <div class="toolbar-separator"></div>
@@ -201,6 +220,16 @@ export class ScenePage extends Page<ScenePageOptions> {
             <button class="toolbar-btn" data-action="toggle-snap" title="Toggle Snap">⊟</button>
             <button class="toolbar-btn" data-action="toggle-origin" title="Toggle Origin Crosshair">✛</button>
             <button class="toolbar-btn" data-action="reset-view" title="Reset View (Center on Origin)">⌂</button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group mode-toggle-group">
+            <button class="toolbar-btn mode-toggle-btn" data-action="toggle-mode" title="Toggle Edit/Play Mode">
+              <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display: none;"><rect x="6" y="6" width="12" height="12"/></svg>
+              <span class="mode-label">Play</span>
+            </button>
           </div>
 
           <div class="toolbar-spacer"></div>
@@ -306,6 +335,22 @@ export class ScenePage extends Page<ScenePageOptions> {
                         <label>Y</label>
                         <input type="number" class="property-input pivot-y" value="0.5" min="0" max="1" step="0.1">
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="property-section">
+                  <div class="property-label">Z-Order (Depth)</div>
+                  <div class="z-order-section">
+                    <div class="z-order-display">
+                      <label>Layer</label>
+                      <input type="number" class="property-input z-index-input" min="-999" max="999" step="1" value="0">
+                    </div>
+                    <div class="z-order-buttons">
+                      <button class="z-order-btn" data-z-action="bring-to-front" title="Bring to Front">⤒ Front</button>
+                      <button class="z-order-btn" data-z-action="bring-forward" title="Bring Forward">↑</button>
+                      <button class="z-order-btn" data-z-action="send-backward" title="Send Backward">↓</button>
+                      <button class="z-order-btn" data-z-action="send-to-back" title="Send to Back">⤓ Back</button>
                     </div>
                   </div>
                 </div>
@@ -445,12 +490,35 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.sceneTabs.mount(sceneTabsContainer);
     }
 
+    // Setup edit mode toolbar
+    const editModeContainer = this.$('.edit-mode-toolbar-container') as HTMLElement;
+    if (editModeContainer) {
+      this.editModeToolbar = new EditModeToolbar({
+        initialMode: 'select',
+        showExtendedTools: true,
+        onModeChange: (mode: EditMode) => this.handleEditModeChange(mode),
+        onClearSelection: () => this.clearSelection(),
+        onDelete: () => this.deleteSelected(),
+        onCopy: () => this.copySelected(),
+        onPaste: () => this.pasteFromClipboard(),
+        onDuplicate: () => this.duplicateSelected(),
+        onSelectAll: () => this.selectAll(),
+      });
+      this.editModeToolbar.mount(editModeContainer);
+    }
+
     // Subscribe to store changes
     this.unsubscribeStore = sceneStore.subscribe(() => {
       this.updateHierarchy();
       this.updateStatusBar();
       this.updateToolbarState();
       this.renderScene();
+    });
+
+    // Subscribe to edit mode changes
+    this.unsubscribeEditMode = editModeStore.subscribe(() => {
+      this.updateCursor();
+      this.editModeToolbar?.update();
     });
 
     // Subscribe to offline status changes
@@ -505,13 +573,17 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (addUIProgressBtn) addUIProgressBtn.addEventListener('click', () => this.addUIProgressBar());
     if (addUICheckboxBtn) addUICheckboxBtn.addEventListener('click', () => this.addUICheckbox());
 
-    // Object manipulation buttons
-    const moveUpBtn = this.$('[data-action="move-up"]');
-    const moveDownBtn = this.$('[data-action="move-down"]');
+    // Z-order manipulation buttons
+    const bringToFrontBtn = this.$('[data-action="bring-to-front"]');
+    const bringForwardBtn = this.$('[data-action="bring-forward"]');
+    const sendBackwardBtn = this.$('[data-action="send-backward"]');
+    const sendToBackBtn = this.$('[data-action="send-to-back"]');
     const deleteBtn = this.$('[data-action="delete"]');
 
-    if (moveUpBtn) moveUpBtn.addEventListener('click', () => this.moveSelectedUp());
-    if (moveDownBtn) moveDownBtn.addEventListener('click', () => this.moveSelectedDown());
+    if (bringToFrontBtn) bringToFrontBtn.addEventListener('click', () => this.bringToFront());
+    if (bringForwardBtn) bringForwardBtn.addEventListener('click', () => this.bringForward());
+    if (sendBackwardBtn) sendBackwardBtn.addEventListener('click', () => this.sendBackward());
+    if (sendToBackBtn) sendToBackBtn.addEventListener('click', () => this.sendToBack());
     if (deleteBtn) deleteBtn.addEventListener('click', () => this.deleteSelected());
 
     // View toggles
@@ -557,6 +629,12 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.renderScene();
         }
       });
+    }
+
+    // Mode toggle (Edit/Play)
+    const toggleModeBtn = this.$('[data-action="toggle-mode"]');
+    if (toggleModeBtn) {
+      toggleModeBtn.addEventListener('click', () => this.toggleEditorMode());
     }
 
     // Custom components library
@@ -802,6 +880,70 @@ export class ScenePage extends Page<ScenePageOptions> {
         }
       });
     }
+
+    // Z-order input handler
+    const zIndexInput = this.$('.z-index-input') as HTMLInputElement;
+    if (zIndexInput) {
+      zIndexInput.addEventListener('change', () => {
+        const activeScene = this.activeScene;
+        if (!this.selectedObjectId || !activeScene) return;
+        const newZIndex = parseInt(zIndexInput.value) || 0;
+        const updatedObjects = this.objects.map(o =>
+          o.id === this.selectedObjectId ? { ...o, zIndex: newZIndex } : o
+        );
+        sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+        this.updateHierarchy();
+        this.renderScene();
+      });
+    }
+
+    // Z-order button handlers in properties panel
+    const zOrderButtons = this.$$('[data-z-action]');
+    zOrderButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = (btn as HTMLElement).dataset.zAction;
+        switch (action) {
+          case 'bring-to-front': this.bringToFront(); break;
+          case 'bring-forward': this.bringForward(); break;
+          case 'send-backward': this.sendBackward(); break;
+          case 'send-to-back': this.sendToBack(); break;
+        }
+      });
+    });
+
+    // Keyboard shortcuts for z-order
+    this.boundKeydownHandler = (e: KeyboardEvent) => {
+      // Only handle if not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Ctrl+] = Bring Forward, Shift+Ctrl+] = Bring to Front
+      // Ctrl+[ = Send Backward, Shift+Ctrl+[ = Send to Back
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === ']') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            this.bringToFront();
+          } else {
+            this.bringForward();
+          }
+        } else if (e.key === '[') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            this.sendToBack();
+          } else {
+            this.sendBackward();
+          }
+        }
+      }
+
+      // Delete key to delete selected object
+      if (e.key === 'Delete' && this.selectedObjectId) {
+        this.deleteSelected();
+      }
+    };
+    document.addEventListener('keydown', this.boundKeydownHandler);
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -814,39 +956,99 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Convert to world coordinates (center-origin, Y+ up)
     const worldPos = this.viewport.screenToWorld(screenX, screenY);
 
-    // Middle mouse button or shift+click for panning
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    // Get current edit mode
+    const currentMode = editModeStore.getMode();
+
+    // Middle mouse button or shift+click for panning, or pan mode
+    if (e.button === 1 || (e.button === 0 && e.shiftKey) || currentMode === 'pan') {
       this.isPanning = true;
       this.panStart = { x: screenX, y: screenY };
+      if (this.sceneCanvas) {
+        this.sceneCanvas.style.cursor = 'grabbing';
+      }
       e.preventDefault();
       return;
     }
 
-    // Find clicked object (reverse order for top-most first)
-    let clickedObject: SceneObject | null = null;
-    for (let i = this.objects.length - 1; i >= 0; i--) {
-      const obj = this.objects[i];
-      if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
-        clickedObject = obj;
-        break;
-      }
+    // Handle draw modes
+    if (currentMode.startsWith('draw-') && e.button === 0) {
+      this.handleDrawModeClick(worldPos, currentMode);
+      return;
     }
 
-    if (clickedObject && !clickedObject.locked) {
-      this.selectedObjectId = clickedObject.id;
-      this.isDragging = true;
-      this.dragStart = {
-        x: worldPos.x - clickedObject.transform.x,
-        y: worldPos.y - clickedObject.transform.y,
-      };
-    } else {
-      this.selectedObjectId = null;
+    // Select mode: find clicked object (highest zIndex first for proper depth picking)
+    if (currentMode === 'select') {
+      const sortedByZ = this.getObjectsSortedByZ(false);
+      let clickedObject: SceneObject | null = null;
+      for (const obj of sortedByZ) {
+        if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
+          clickedObject = obj;
+          break;
+        }
+      }
+
+      // Multi-select with Ctrl/Cmd
+      const isMultiSelect = e.ctrlKey || e.metaKey;
+
+      if (clickedObject && !clickedObject.locked) {
+        if (isMultiSelect) {
+          editModeStore.toggleObjectSelection(clickedObject.id);
+          // Keep first selected as the properties panel target
+          if (!this.selectedObjectId || editModeStore.isObjectSelected(clickedObject.id)) {
+            this.selectedObjectId = clickedObject.id;
+          }
+        } else {
+          this.selectedObjectId = clickedObject.id;
+          editModeStore.selectObject(clickedObject.id);
+        }
+        this.isDragging = true;
+        this.dragStart = {
+          x: worldPos.x - clickedObject.transform.x,
+          y: worldPos.y - clickedObject.transform.y,
+        };
+      } else {
+        if (!isMultiSelect) {
+          this.selectedObjectId = null;
+          editModeStore.clearSelection();
+        }
+      }
     }
 
     this.updatePropertiesPanel();
     this.updateHierarchy();
     this.updateStatusBar();
     this.renderScene();
+  }
+
+  private handleDrawModeClick(worldPos: { x: number; y: number }, mode: EditMode): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
+
+    // Snap position if enabled
+    let x = worldPos.x;
+    let y = worldPos.y;
+    if (this.snapToGrid) {
+      x = Math.round(x / this.gridSize) * this.gridSize;
+      y = Math.round(y / this.gridSize) * this.gridSize;
+    }
+
+    switch (mode) {
+      case 'draw-rectangle':
+        this.addShape('rectangle', { x, y });
+        break;
+      case 'draw-circle':
+        this.addShape('circle', { x, y });
+        break;
+      case 'draw-text':
+        this.addText({ x, y });
+        break;
+    }
+
+    // After drawing, switch back to select mode
+    editModeStore.setMode('select');
   }
 
   private handleMouseMove(e: MouseEvent): void {
@@ -904,6 +1106,8 @@ export class ScenePage extends Page<ScenePageOptions> {
   private handleMouseUp(): void {
     this.isDragging = false;
     this.isPanning = false;
+    // Reset cursor based on current mode
+    this.updateCursor();
   }
 
   private handleWheel(e: WheelEvent): void {
@@ -1222,7 +1426,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     urlInput.focus();
   }
 
-  private addShape(shapeType: ShapeType): void {
+  private addShape(shapeType: ShapeType, position?: { x: number; y: number }): void {
     const activeScene = this.activeScene;
     if (!activeScene) {
       toast.error('Please create or open a scene first');
@@ -1237,8 +1441,10 @@ export class ScenePage extends Page<ScenePageOptions> {
       line: '#f39c12',
     };
 
-    // Place new objects near origin (0, 0) in center-origin coordinates
+    // Place new objects at specified position or near origin
     const offset = this.objects.length * 20;
+    const x = position?.x ?? (-50 + offset);
+    const y = position?.y ?? (-40 + offset);
     const obj: SceneObject = {
       id: `shape-${Date.now()}`,
       name: `${shapeType.charAt(0).toUpperCase() + shapeType.slice(1)} ${this.objects.length + 1}`,
@@ -1246,35 +1452,38 @@ export class ScenePage extends Page<ScenePageOptions> {
       shapeType,
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: -40 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x, y, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       color: colors[shapeType],
     };
     sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
     this.selectedObjectId = obj.id;
+    editModeStore.selectObject(obj.id);
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
     this.renderScene();
   }
 
-  private addText(): void {
+  private addText(position?: { x: number; y: number }): void {
     const activeScene = this.activeScene;
     if (!activeScene) {
       toast.error('Please create or open a scene first');
       return;
     }
 
-    // Place new objects near origin (0, 0) in center-origin coordinates
+    // Place new objects at specified position or near origin
     const offset = this.objects.length * 20;
+    const x = position?.x ?? (-50 + offset);
+    const y = position?.y ?? offset;
     const obj: SceneObject = {
       id: `text-${Date.now()}`,
       name: `Text ${this.objects.length + 1}`,
       type: 'text',
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x, y, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       text: 'Sample Text',
@@ -1284,6 +1493,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
     this.selectedObjectId = obj.id;
+    editModeStore.selectObject(obj.id);
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1547,6 +1757,57 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.showComponentsLibrary) this.updateComponentsLibrary();
   }
 
+  private toggleEditorMode(): void {
+    sceneStore.toggleEditorMode();
+    this.updateModeToggleUI();
+    this.updateEditingState();
+    this.renderScene();
+  }
+
+  private updateModeToggleUI(): void {
+    const toggleBtn = this.$('[data-action="toggle-mode"]');
+    const playIcon = this.$('.mode-toggle-btn .play-icon') as HTMLElement;
+    const stopIcon = this.$('.mode-toggle-btn .stop-icon') as HTMLElement;
+    const modeLabel = this.$('.mode-toggle-btn .mode-label') as HTMLElement;
+    const scenePage = this.$('.scene-page');
+
+    const isPlayMode = sceneStore.isPlayMode();
+
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('active', isPlayMode);
+      toggleBtn.classList.toggle('playing', isPlayMode);
+    }
+    if (playIcon) playIcon.style.display = isPlayMode ? 'none' : 'inline';
+    if (stopIcon) stopIcon.style.display = isPlayMode ? 'inline' : 'none';
+    if (modeLabel) modeLabel.textContent = isPlayMode ? 'Stop' : 'Play';
+    if (scenePage) scenePage.classList.toggle('play-mode', isPlayMode);
+  }
+
+  private updateEditingState(): void {
+    const isPlayMode = sceneStore.isPlayMode();
+    const toolbar = this.$('.scene-toolbar') as HTMLElement;
+    const hierarchyPanel = this.$('.hierarchy-panel') as HTMLElement;
+    const propertiesPanel = this.$('.properties-panel') as HTMLElement;
+
+    // Disable editing controls in play mode
+    if (toolbar) {
+      const editingBtns = toolbar.querySelectorAll('.toolbar-btn:not(.mode-toggle-btn):not([data-action="toggle-mode"])');
+      editingBtns.forEach(btn => {
+        (btn as HTMLButtonElement).disabled = isPlayMode;
+      });
+    }
+
+    // Dim panels in play mode
+    if (hierarchyPanel) hierarchyPanel.classList.toggle('disabled', isPlayMode);
+    if (propertiesPanel) propertiesPanel.classList.toggle('disabled', isPlayMode);
+
+    // Deselect objects when entering play mode
+    if (isPlayMode && this.selectedObjectId) {
+      this.selectedObjectId = null;
+      this.updatePropertiesPanel();
+    }
+  }
+
   private escapeHtmlForComponent(str: string): string {
     const div = document.createElement('div');
     div.textContent = str;
@@ -1650,32 +1911,114 @@ export class ScenePage extends Page<ScenePageOptions> {
     return { width: Math.max(maxX - minX, 50), height: Math.max(maxY - minY, 50) };
   }
 
-  private moveSelectedUp(): void {
-    const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+  // Z-Order helper method to reduce code duplication
+  private getObjectsSortedByZ(ascending = true): SceneObject[] {
+    return [...this.objects].sort((a, b) =>
+      ascending ? a.zIndex - b.zIndex : b.zIndex - a.zIndex
+    );
+  }
 
-    const objects = [...this.objects];
-    const idx = objects.findIndex(o => o.id === this.selectedObjectId);
-    if (idx > 0) {
-      [objects[idx - 1], objects[idx]] = [objects[idx], objects[idx - 1]];
-      sceneStore.updateSceneObjects(activeScene.id, objects);
+  // Z-Order manipulation methods
+  private bringForward(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene || this.objects.length < 2) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the object with the next higher zIndex
+    const sortedByZ = this.getObjectsSortedByZ(true);
+    const currentIdx = sortedByZ.findIndex(o => o.id === obj.id);
+
+    if (currentIdx < sortedByZ.length - 1) {
+      const nextObj = sortedByZ[currentIdx + 1];
+      // If zIndex values are equal, increment current object's zIndex
+      // Otherwise swap the values
+      const updatedObjects = this.objects.map(o => {
+        if (o.id === obj.id) {
+          return { ...o, zIndex: obj.zIndex === nextObj.zIndex ? obj.zIndex + 1 : nextObj.zIndex };
+        }
+        if (o.id === nextObj.id && obj.zIndex !== nextObj.zIndex) {
+          return { ...o, zIndex: obj.zIndex };
+        }
+        return o;
+      });
+      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
       this.updateHierarchy();
+      this.updatePropertiesPanel();
       this.renderScene();
     }
   }
 
-  private moveSelectedDown(): void {
+  private sendBackward(): void {
     const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+    if (!this.selectedObjectId || !activeScene || this.objects.length < 2) return;
 
-    const objects = [...this.objects];
-    const idx = objects.findIndex(o => o.id === this.selectedObjectId);
-    if (idx < objects.length - 1) {
-      [objects[idx], objects[idx + 1]] = [objects[idx + 1], objects[idx]];
-      sceneStore.updateSceneObjects(activeScene.id, objects);
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the object with the next lower zIndex
+    const sortedByZ = this.getObjectsSortedByZ(true);
+    const currentIdx = sortedByZ.findIndex(o => o.id === obj.id);
+
+    if (currentIdx > 0) {
+      const prevObj = sortedByZ[currentIdx - 1];
+      // If zIndex values are equal, decrement current object's zIndex
+      // Otherwise swap the values
+      const updatedObjects = this.objects.map(o => {
+        if (o.id === obj.id) {
+          return { ...o, zIndex: obj.zIndex === prevObj.zIndex ? obj.zIndex - 1 : prevObj.zIndex };
+        }
+        if (o.id === prevObj.id && obj.zIndex !== prevObj.zIndex) {
+          return { ...o, zIndex: obj.zIndex };
+        }
+        return o;
+      });
+      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
       this.updateHierarchy();
+      this.updatePropertiesPanel();
       this.renderScene();
     }
+  }
+
+  private bringToFront(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene || this.objects.length === 0) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the maximum zIndex
+    const maxZ = Math.max(...this.objects.map(o => o.zIndex));
+
+    // Always bring to front (maxZ + 1), even if already at max
+    const updatedObjects = this.objects.map(o =>
+      o.id === obj.id ? { ...o, zIndex: maxZ + 1 } : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.renderScene();
+  }
+
+  private sendToBack(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene || this.objects.length === 0) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Find the minimum zIndex
+    const minZ = Math.min(...this.objects.map(o => o.zIndex));
+
+    // Always send to back (minZ - 1), even if already at min
+    const updatedObjects = this.objects.map(o =>
+      o.id === obj.id ? { ...o, zIndex: minZ - 1 } : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.renderScene();
   }
 
   private deleteSelected(): void {
@@ -1692,10 +2035,161 @@ export class ScenePage extends Page<ScenePageOptions> {
     const newObjects = this.objects.filter(o => o.id !== this.selectedObjectId);
     sceneStore.updateSceneObjects(activeScene.id, newObjects);
     this.selectedObjectId = null;
+    editModeStore.clearSelection();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
     this.renderScene();
+  }
+
+  private clearSelection(): void {
+    this.selectedObjectId = null;
+    editModeStore.clearSelection();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private copySelected(): void {
+    if (!this.selectedObjectId) return;
+    editModeStore.copyToClipboard([this.selectedObjectId]);
+    toast.success('Object copied to clipboard');
+  }
+
+  private pasteFromClipboard(): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) return;
+
+    const clipboard = editModeStore.getClipboard();
+    if (clipboard.length === 0) return;
+
+    // Find the objects to paste
+    const objectsToPaste = this.objects.filter(o => clipboard.includes(o.id));
+    if (objectsToPaste.length === 0) return;
+
+    // Create new copies with new IDs and offset positions
+    const newObjects = objectsToPaste.map(obj => {
+      const newId = `obj-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      return {
+        ...JSON.parse(JSON.stringify(obj)),
+        id: newId,
+        name: `${obj.name} (Copy)`,
+        transform: {
+          ...obj.transform,
+          x: obj.transform.x + 20,
+          y: obj.transform.y - 20,
+        },
+      };
+    });
+
+    const updatedObjects = [...this.objects, ...newObjects];
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+
+    // Select the newly pasted object(s)
+    if (newObjects.length === 1) {
+      this.selectedObjectId = newObjects[0].id;
+      editModeStore.selectObject(newObjects[0].id);
+    }
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.success(`Pasted ${newObjects.length} object(s)`);
+  }
+
+  private duplicateSelected(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Create a duplicate with new ID and offset position
+    const newId = `obj-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const duplicate: SceneObject = {
+      ...JSON.parse(JSON.stringify(obj)),
+      id: newId,
+      name: `${obj.name} (Copy)`,
+      transform: {
+        ...obj.transform,
+        x: obj.transform.x + 20,
+        y: obj.transform.y - 20,
+      },
+    };
+
+    const updatedObjects = [...this.objects, duplicate];
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+
+    // Select the duplicate
+    this.selectedObjectId = duplicate.id;
+    editModeStore.selectObject(duplicate.id);
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.success('Object duplicated');
+  }
+
+  private selectAll(): void {
+    const activeScene = this.activeScene;
+    if (!activeScene || this.objects.length === 0) return;
+
+    const allIds = this.objects.map(o => o.id);
+    editModeStore.selectObjects(allIds);
+
+    // For now, select the first object for the properties panel
+    if (allIds.length > 0) {
+      this.selectedObjectId = allIds[0];
+    }
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.info(`Selected ${allIds.length} object(s)`);
+  }
+
+  private handleEditModeChange(mode: EditMode): void {
+    // Update cursor based on mode
+    this.updateCursor();
+
+    // Clear any in-progress operations
+    this.isDragging = false;
+    this.isPanning = false;
+
+    // If switching to a draw mode, deselect current object
+    if (mode.startsWith('draw-')) {
+      this.selectedObjectId = null;
+      editModeStore.clearSelection();
+      this.updatePropertiesPanel();
+    }
+
+    this.renderScene();
+  }
+
+  private updateCursor(): void {
+    if (!this.sceneCanvas) return;
+
+    const mode = editModeStore.getMode();
+
+    switch (mode) {
+      case 'select':
+        this.sceneCanvas.style.cursor = 'default';
+        break;
+      case 'pan':
+        this.sceneCanvas.style.cursor = 'grab';
+        break;
+      case 'draw-rectangle':
+      case 'draw-circle':
+      case 'draw-text':
+        this.sceneCanvas.style.cursor = 'crosshair';
+        break;
+      default:
+        this.sceneCanvas.style.cursor = 'default';
+    }
   }
 
   private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
@@ -1767,7 +2261,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Apply Y-flip once for all objects (viewport has Y+ up, canvas draws Y+ down)
     this.ctx.scale(1, -1);
 
-    for (const obj of this.objects) {
+    // Sort objects by zIndex for proper depth ordering (lower zIndex renders first = behind)
+    const sortedObjects = this.getObjectsSortedByZ(true);
+
+    for (const obj of sortedObjects) {
       if (!obj.visible) continue;
 
       const dims = this.getObjectDimensions(obj);
@@ -2396,11 +2893,15 @@ export class ScenePage extends Page<ScenePageOptions> {
       return;
     }
 
-    const items = this.objects.map(obj => `
+    // Sort by zIndex in descending order (highest z-index at top of list = front of scene)
+    const sortedObjects = this.getObjectsSortedByZ(false);
+
+    const items = sortedObjects.map(obj => `
       <div class="hierarchy-item ${obj.id === this.selectedObjectId ? 'selected' : ''}" data-id="${obj.id}">
         <span class="hierarchy-visibility">${obj.visible ? '👁' : '👁‍🗨'}</span>
         <span class="hierarchy-icon">${this.getObjectIcon(obj)}</span>
         <span class="hierarchy-name">${obj.name}</span>
+        <span class="hierarchy-z-index" title="Z-Index: ${obj.zIndex}">[${obj.zIndex}]</span>
         ${obj.locked ? '<span class="hierarchy-locked">🔒</span>' : ''}
       </div>
     `).join('');
@@ -2465,12 +2966,14 @@ export class ScenePage extends Page<ScenePageOptions> {
     const sliderValue = this.$('.slider-value') as HTMLElement;
     const visibleCheckbox = this.$('.visible-checkbox') as HTMLInputElement;
     const lockedCheckbox = this.$('.locked-checkbox') as HTMLInputElement;
+    const zIndexInput = this.$('.z-index-input') as HTMLInputElement;
 
     if (nameInput) nameInput.value = obj.name;
     if (opacitySlider) opacitySlider.value = String(obj.opacity * 100);
     if (sliderValue) sliderValue.textContent = `${Math.round(obj.opacity * 100)}%`;
     if (visibleCheckbox) visibleCheckbox.checked = obj.visible;
     if (lockedCheckbox) lockedCheckbox.checked = obj.locked;
+    if (zIndexInput) zIndexInput.value = String(obj.zIndex);
 
     // Update pivot inputs
     const pivotXInput = this.$('.pivot-x') as HTMLInputElement;
@@ -3193,11 +3696,17 @@ export class ScenePage extends Page<ScenePageOptions> {
       }
     }
 
+    // Remove document-level keyboard listener
+    if (this.boundKeydownHandler) {
+      document.removeEventListener('keydown', this.boundKeydownHandler);
+    }
+
     // Clear bound handler references
     this.boundHandleMouseDown = null;
     this.boundHandleMouseMove = null;
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
+    this.boundKeydownHandler = null;
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
@@ -3212,6 +3721,16 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.unsubscribeComponents) {
       this.unsubscribeComponents();
       this.unsubscribeComponents = null;
+    }
+
+    if (this.unsubscribeEditMode) {
+      this.unsubscribeEditMode();
+      this.unsubscribeEditMode = null;
+    }
+
+    if (this.editModeToolbar) {
+      this.editModeToolbar.unmount();
+      this.editModeToolbar = null;
     }
 
     if (this.offlineIndicator) {
