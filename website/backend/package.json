@@ -8,6 +8,8 @@
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage tests/**/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -15,6 +17,8 @@
     "db:check": "tsx src/scripts/db-check.ts",
     "db:backup": "tsx src/scripts/db-backup.ts",
     "db:validate": "tsx src/scripts/db-validate.ts",
+    "db:seed-channels": "tsx src/scripts/seed-channels.ts",
+    "openapi:generate": "tsx src/scripts/generate-openapi.ts",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
@@ -23,10 +27,14 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.2.1",
     "express-session": "^1.18.1",
     "form-data": "^4.0.1",
+    "helmet": "^8.1.0",
     "multer": "^2.0.2",
     "node-fetch": "^2.7.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "tar": "^7.4.3"
   },
   "devDependencies": {
@@ -39,10 +47,14 @@
     "@types/node": "^22.10.2",
     "@types/node-fetch": "^2.6.11",
     "@types/pg": "^8.11.10",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
     "@types/uuid": "^10.0.0",
     "bcrypt": "^5.1.1",
     "drizzle-kit": "^0.31.8",
     "lucia": "^3.2.2",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "uuid": "^13.0.0"

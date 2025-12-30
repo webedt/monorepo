@@ -13,6 +13,7 @@ export { CodePage } from './code/CodePage';
 export { ImagePage } from './image/ImagePage';
 export { ScenePage } from './scene/ScenePage';
 export { SoundPage } from './sound/SoundPage';
+export { BoneAnimationPage } from './bone/BoneAnimationPage';
 export { TrashPage } from './trash/TrashPage';
 export { QuickAccessPage } from './quick-access/QuickAccessPage';
 export { WidgetsPage } from './widgets';
@@ -22,6 +23,14 @@ export { StorePage } from './store';
 export { GameDetailPage } from './game-detail';
 export { LibraryPage } from './library';
 export { CommunityPage } from './community';
+export { ChannelsPage } from './channels';
+export { AnnouncementsPage } from './announcements';
+
+// Billing/Pricing
+export { PricingPage } from './pricing';
 
 // Admin pages
 export { AdminPage } from './admin';
+
+// Snippets
+export { SnippetsPage } from './snippets/SnippetsPage';

@@ -5,6 +5,9 @@
 
 /// <reference types="vite/client" />
 
+import {
+  extractApiErrorMessage,
+} from '../types';
 import type {
   User,
   Session,
@@ -25,10 +28,45 @@ import type {
   GeminiAuth,
   ApiResponse,
   AdminStats,
+  Collection,
+  SessionCollection,
+  Snippet,
+  SnippetCollection,
+  SnippetLanguage,
+  SnippetCategory,
+  CreateSnippetRequest,
+  UpdateSnippetRequest,
+  SnippetListFilters,
 } from '../types';
 
 // Cached API base URL - computed once on first access
 let cachedApiBaseUrl: string | null = null;
+
+// CSRF token constants (must match backend)
+const CSRF_COOKIE_NAME = 'csrf_token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+// HTTP methods that require CSRF protection
+const CSRF_PROTECTED_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+/**
+ * Get CSRF token from cookie
+ * The backend sets this cookie automatically on first request
+ */
+function getCsrfTokenFromCookie(): string | null {
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME) {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Detect API base URL for path-based routing
@@ -108,14 +146,30 @@ interface FetchApiOptions extends Omit<RequestInit, 'body'> {
 // Core fetch wrapper
 async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions = {}): Promise<T> {
   const { body, ...restOptions } = options;
+  const method = (restOptions.method || 'GET').toUpperCase();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(restOptions.headers as Record<string, string>),
+  };
+
+  // Add CSRF token for state-changing requests
+  if (CSRF_PROTECTED_METHODS.has(method)) {
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      // Log warning - token should be set by server on first response
+      // If missing, the request may fail with 403 unless it's an exempt endpoint
+      console.warn(`[API] CSRF token missing for ${method} request to ${endpoint}. Request may fail.`);
+    }
+  }
 
   const config: RequestInit = {
     ...restOptions,
+    method,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...restOptions.headers,
-    },
+    headers,
   };
 
   if (body) {
@@ -123,14 +177,14 @@ async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions 
   }
 
   const fullUrl = `${getApiBaseUrl()}${endpoint}`;
-  console.log(`[API] ${config.method || 'GET'} ${fullUrl}`);
+  console.log(`[API] ${method} ${fullUrl}`);
 
   const response = await fetch(fullUrl, config);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    console.error(`[API] Error:`, error);
-    throw new Error(error.error || error.message || 'Request failed');
+    const errorBody = await response.json().catch(() => ({ error: 'Request failed' }));
+    console.error(`[API] Error:`, errorBody);
+    throw new Error(extractApiErrorMessage(errorBody));
   }
 
   return response.json();
@@ -157,6 +211,15 @@ export const authApi = {
 
   getSession: () =>
     fetchApi<ApiResponse<{ user: User | null }>>('/api/auth/session').then(r => r.data),
+
+  /**
+   * Fetch CSRF token from server
+   * This is called automatically on first API request, but can be called
+   * manually to ensure a token is available before making requests
+   */
+  getCsrfToken: () =>
+    fetchApi<ApiResponse<{ csrfToken: string; headerName: string }>>('/api/auth/csrf-token')
+      .then(r => r.data),
 };
 
 // ============================================================================
@@ -356,6 +419,36 @@ export const userApi = {
       method: 'POST',
       body: settings,
     }),
+
+  getSpendingLimits: () =>
+    fetchApi<ApiResponse<{
+      enabled: boolean;
+      monthlyBudgetCents: string;
+      perTransactionLimitCents: string;
+      resetDay: number;
+      currentMonthSpentCents: string;
+      remainingBudgetCents: string;
+      usagePercent: number;
+      limitAction: string;
+      lastResetAt: string | null;
+    }>>('/api/user/spending-limits').then(r => r.data),
+
+  updateSpendingLimits: (config: {
+    enabled?: boolean;
+    monthlyBudgetCents?: number;
+    perTransactionLimitCents?: number;
+    resetDay?: number;
+    limitAction?: 'warn' | 'block';
+  }) =>
+    fetchApi('/api/user/spending-limits', {
+      method: 'POST',
+      body: config,
+    }),
+
+  resetMonthlySpending: () =>
+    fetchApi('/api/user/spending-limits/reset', {
+      method: 'POST',
+    }),
 };
 
 // ============================================================================
@@ -365,6 +458,30 @@ export const sessionsApi = {
   list: () =>
     fetchApi<ApiResponse<{ sessions: Session[] }>>('/api/sessions')
       .then(r => r.data!),
+
+  search: (params: {
+    q: string;
+    limit?: number;
+    offset?: number;
+    status?: string;
+    favorite?: boolean;
+  }) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('q', params.q);
+    if (params.limit) queryParams.append('limit', String(params.limit));
+    if (params.offset) queryParams.append('offset', String(params.offset));
+    if (params.status) queryParams.append('status', params.status);
+    if (params.favorite !== undefined) queryParams.append('favorite', String(params.favorite));
+    return fetchApi<ApiResponse<{
+      sessions: Session[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+      query: string;
+    }>>(`/api/sessions/search?${queryParams.toString()}`)
+      .then(r => r.data!);
+  },
 
   listDeleted: (params?: { limit?: number; offset?: number }) => {
     const queryParams = new URLSearchParams();
@@ -482,6 +599,65 @@ export const sessionsApi = {
 
   syncEvents: (id: string) =>
     fetchApi(`/api/sessions/${id}/sync-events`, { method: 'POST' }),
+
+  toggleFavorite: (id: string) =>
+    fetchApi<{ success: boolean; session: Session }>(`/api/sessions/${id}/favorite`, { method: 'POST' }),
+};
+
+// ============================================================================
+// Collections API
+// ============================================================================
+export const collectionsApi = {
+  list: () =>
+    fetchApi<ApiResponse<{ collections: Collection[]; total: number }>>('/api/collections')
+      .then(r => r.data!),
+
+  get: (id: string) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>(`/api/collections/${id}`)
+      .then(r => r.data!),
+
+  create: (data: { name: string; description?: string; color?: string; icon?: string; isDefault?: boolean }) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>('/api/collections', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  update: (id: string, data: { name?: string; description?: string; color?: string; icon?: string; sortOrder?: number; isDefault?: boolean }) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>(`/api/collections/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  delete: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/collections/${id}`, { method: 'DELETE' }),
+
+  getSessions: (id: string) =>
+    fetchApi<ApiResponse<{ collection: Collection; sessions: Session[]; total: number }>>(`/api/collections/${id}/sessions`)
+      .then(r => r.data!),
+
+  addSession: (collectionId: string, sessionId: string) =>
+    fetchApi<ApiResponse<{ membership: SessionCollection }>>(`/api/collections/${collectionId}/sessions/${sessionId}`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  removeSession: (collectionId: string, sessionId: string) =>
+    fetchApi<{ success: boolean }>(`/api/collections/${collectionId}/sessions/${sessionId}`, { method: 'DELETE' }),
+
+  getSessionCollections: (sessionId: string) =>
+    fetchApi<ApiResponse<{ collections: Collection[]; total: number }>>(`/api/collections/session/${sessionId}`)
+      .then(r => r.data!),
+
+  bulkAddSession: (sessionId: string, collectionIds: string[]) =>
+    fetchApi<ApiResponse<{ added: number }>>(`/api/collections/session/${sessionId}/bulk`, {
+      method: 'POST',
+      body: { collectionIds },
+    }).then(r => r.data!),
+
+  reorder: (orderedIds: string[]) =>
+    fetchApi<{ success: boolean }>('/api/collections/reorder', {
+      method: 'POST',
+      body: { orderedIds },
+    }),
 };
 
 // ============================================================================
@@ -725,12 +901,20 @@ export const storageWorkerApi = {
   },
 
   writeFile: async (sessionPath: string, filePath: string, content: string): Promise<void> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/plain',
+    };
+    // Add CSRF token for state-changing request
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      console.warn('[API] CSRF token missing for PUT request to storage. Request may fail.');
+    }
     const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
       method: 'PUT',
       credentials: 'include',
-      headers: {
-        'Content-Type': 'text/plain',
-      },
+      headers,
       body: content,
     });
     if (!response.ok) {
@@ -739,9 +923,18 @@ export const storageWorkerApi = {
   },
 
   deleteFile: async (sessionPath: string, filePath: string): Promise<void> => {
+    const headers: Record<string, string> = {};
+    // Add CSRF token for state-changing request
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      console.warn('[API] CSRF token missing for DELETE request to storage. Request may fail.');
+    }
     const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
       method: 'DELETE',
       credentials: 'include',
+      headers,
     });
     if (!response.ok) {
       throw new Error(`Failed to delete file: ${response.status}`);
@@ -1172,9 +1365,75 @@ export const channelsApi = {
 };
 
 // ============================================================================
+// Billing API
+// ============================================================================
+export interface BillingInfo {
+  tier: string;
+  tierLabel: string;
+  price: number;
+  priceLabel: string;
+  usedBytes: string;
+  quotaBytes: string;
+  availableBytes: string;
+  usagePercent: number;
+  usedFormatted: string;
+  quotaFormatted: string;
+  availableFormatted: string;
+}
+
+export interface PricingTier {
+  id: string;
+  name: string;
+  bytes: string;
+  formatted: string;
+  price: number;
+  priceLabel: string;
+  features: string[];
+}
+
+export const billingApi = {
+  getCurrentPlan: () =>
+    fetchApi<ApiResponse<BillingInfo>>('/api/billing/current').then(r => r.data),
+
+  getTiers: () =>
+    fetchApi<ApiResponse<{ tiers: PricingTier[] }>>('/api/billing/tiers').then(r => r.data),
+
+  changePlan: (tier: string) =>
+    fetchApi<ApiResponse<{
+      message: string;
+      tier: string;
+      tierLabel: string;
+      price: number;
+      priceLabel: string;
+      newQuotaBytes: string;
+      newQuotaFormatted: string;
+    }>>('/api/billing/change-plan', {
+      method: 'POST',
+      body: { tier },
+    }).then(r => r.data),
+};
+
+// ============================================================================
 // Taxonomy API (Admin-configurable categories, tags, genres)
 // ============================================================================
-import type { Taxonomy, TaxonomyTerm, ItemTaxonomy, TaxonomyWithTerms } from '../types';
+import type {
+  Taxonomy,
+  TaxonomyTerm,
+  ItemTaxonomy,
+  TaxonomyWithTerms,
+  Announcement,
+  AnnouncementType,
+  AnnouncementPriority,
+  AnnouncementStatus,
+  CloudSave,
+  CloudSaveVersion,
+  CloudSaveSyncLog,
+  CloudSaveStats,
+  CloudSaveSyncConflict,
+  CloudSavePlatformData,
+  CloudSaveGameProgress,
+  LocalSaveInfo,
+} from '../types';
 
 export const taxonomyApi = {
   // Taxonomy CRUD
@@ -1288,4 +1547,545 @@ export const taxonomyApi = {
       `/api/taxonomies/items/by-term/${termId}${queryString ? `?${queryString}` : ''}`
     ).then(r => r.data || []);
   },
+};
+
+// ============================================================================
+// Announcements API (Official platform updates)
+// ============================================================================
+export const announcementsApi = {
+  // Get published announcements (public)
+  list: (options?: {
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    pinned?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.priority) params.append('priority', options.priority);
+    if (options?.pinned !== undefined) params.append('pinned', String(options.pinned));
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      announcements: Announcement[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/announcements${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Get single announcement
+  get: (id: string) =>
+    fetchApi<ApiResponse<Announcement>>(`/api/announcements/${id}`).then(r => r.data!),
+
+  // Admin: List all announcements (including drafts and archived)
+  adminList: (options?: {
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.priority) params.append('priority', options.priority);
+    if (options?.status) params.append('status', options.status);
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      announcements: Announcement[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/announcements/admin/all${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Admin: Create announcement
+  create: (data: {
+    title: string;
+    content: string;
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    pinned?: boolean;
+    expiresAt?: string;
+  }) =>
+    fetchApi<ApiResponse<{ announcement: Announcement }>>('/api/announcements', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Admin: Update announcement
+  update: (id: string, data: {
+    title?: string;
+    content?: string;
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    pinned?: boolean;
+    expiresAt?: string | null;
+  }) =>
+    fetchApi<ApiResponse<{ announcement: Announcement }>>(`/api/announcements/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  // Admin: Delete announcement
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/announcements/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+// ============================================================================
+// Diffs API (Branch comparison and visualization)
+// ============================================================================
+export interface DiffLine {
+  type: 'addition' | 'deletion' | 'context' | 'header';
+  content: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface DiffHunk {
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+}
+
+export interface FileDiff {
+  oldPath: string;
+  newPath: string;
+  status: 'added' | 'deleted' | 'modified' | 'renamed';
+  hunks: DiffHunk[];
+  isBinary: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface ParsedDiff {
+  files: FileDiff[];
+  totalAdditions: number;
+  totalDeletions: number;
+  totalFilesChanged: number;
+}
+
+export interface CompareResult {
+  diff: ParsedDiff;
+  rawDiff: string;
+  baseBranch: string;
+  headBranch: string;
+  aheadBy: number;
+  behindBy: number;
+  mergeBaseCommit: string;
+}
+
+export interface FileChange {
+  filename: string;
+  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+  additions: number;
+  deletions: number;
+  changes: number;
+  previousFilename?: string;
+}
+
+export interface DiffStats {
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  totalChanges: number;
+  commits: number;
+  aheadBy: number;
+  behindBy: number;
+  status: string;
+}
+
+export const diffsApi = {
+  compare: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<CompareResult>>(`/api/diffs/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+
+  getChangedFiles: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<{
+      files: FileChange[];
+      totalFiles: number;
+      totalAdditions: number;
+      totalDeletions: number;
+      aheadBy: number;
+      behindBy: number;
+    }>>(`/api/diffs/repos/${owner}/${repo}/changed-files/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+
+  getFileDiff: (owner: string, repo: string, base: string, head: string, filePath: string) =>
+    fetchApi<ApiResponse<{
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      changes: number;
+      patch?: string;
+      rawDiff: string;
+      parsedDiff: FileDiff | null;
+      previousFilename?: string;
+    }>>(`/api/diffs/repos/${owner}/${repo}/file-diff/${encodeURIComponent(base)}/${encodeURIComponent(head)}/${filePath}`)
+      .then(r => r.data!),
+
+  getStats: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<DiffStats>>(`/api/diffs/repos/${owner}/${repo}/stats/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+};
+
+// ============================================================================
+// Cloud Saves API (Game save synchronization across devices)
+// ============================================================================
+export const cloudSavesApi = {
+  // Get cloud save statistics
+  getStats: () =>
+    fetchApi<ApiResponse<CloudSaveStats>>('/api/cloud-saves/stats').then(r => r.data!),
+
+  // Get sync history
+  getSyncHistory: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{ history: CloudSaveSyncLog[] }>>(
+      `/api/cloud-saves/sync-history${queryString ? `?${queryString}` : ''}`
+    ).then(r => r.data!);
+  },
+
+  // List all saves for the current user
+  listAll: () =>
+    fetchApi<ApiResponse<{ saves: CloudSave[]; total: number }>>('/api/cloud-saves/all')
+      .then(r => r.data!),
+
+  // Check for sync conflicts
+  checkConflicts: (localSaves: LocalSaveInfo[]) =>
+    fetchApi<ApiResponse<{ conflicts: CloudSaveSyncConflict[]; hasConflicts: boolean }>>('/api/cloud-saves/check-conflicts', {
+      method: 'POST',
+      body: { localSaves },
+    }).then(r => r.data!),
+
+  // List saves for a specific game
+  listByGame: (gameId: string) =>
+    fetchApi<ApiResponse<{ saves: CloudSave[]; total: number }>>(`/api/cloud-saves/games/${gameId}`)
+      .then(r => r.data!),
+
+  // Get a specific save slot (includes save data)
+  getSave: (gameId: string, slotNumber: number) =>
+    fetchApi<ApiResponse<{ save: CloudSave; game: { id: string; title: string } | null }>>(
+      `/api/cloud-saves/games/${gameId}/slots/${slotNumber}`
+    ).then(r => r.data!),
+
+  // Upload/update a save
+  uploadSave: (gameId: string, slotNumber: number, data: {
+    slotName?: string;
+    saveData: string;
+    platformData?: CloudSavePlatformData;
+    screenshotUrl?: string;
+    playTimeSeconds?: number;
+    gameProgress?: CloudSaveGameProgress;
+  }) =>
+    fetchApi<ApiResponse<{ save: CloudSave }>>(`/api/cloud-saves/games/${gameId}/slots/${slotNumber}`, {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Delete a save
+  deleteSave: (gameId: string, slotNumber: number, platformData?: CloudSavePlatformData) =>
+    fetchApi<ApiResponse<void>>(`/api/cloud-saves/games/${gameId}/slots/${slotNumber}`, {
+      method: 'DELETE',
+      body: platformData ? { platformData } : undefined,
+    }),
+
+  // Get save versions for recovery
+  getVersions: (saveId: string) =>
+    fetchApi<ApiResponse<{ versions: CloudSaveVersion[]; total: number }>>(
+      `/api/cloud-saves/saves/${saveId}/versions`
+    ).then(r => r.data!),
+
+  // Get a specific version (includes save data)
+  getVersion: (saveId: string, versionId: string) =>
+    fetchApi<ApiResponse<{ version: CloudSaveVersion }>>(
+      `/api/cloud-saves/saves/${saveId}/versions/${versionId}`
+    ).then(r => r.data!),
+
+  // Restore a save from a previous version
+  restoreVersion: (saveId: string, versionId: string, platformData?: CloudSavePlatformData) =>
+    fetchApi<ApiResponse<{ save: CloudSave }>>(`/api/cloud-saves/saves/${saveId}/versions/${versionId}/restore`, {
+      method: 'POST',
+      body: platformData ? { platformData } : undefined,
+    }).then(r => r.data!),
+};
+
+// ============================================================================
+// Autocomplete API (AI-powered code completion)
+// ============================================================================
+export interface AutocompleteRequest {
+  prefix: string;
+  suffix: string;
+  language: string;
+  filePath?: string;
+  maxSuggestions?: number;
+  additionalContext?: Array<{
+    filePath: string;
+    content: string;
+    language: string;
+  }>;
+}
+
+export interface AutocompleteSuggestion {
+  text: string;
+  label: string;
+  kind: 'function' | 'method' | 'variable' | 'class' | 'interface' | 'property' | 'keyword' | 'snippet' | 'text';
+  detail?: string;
+  confidence?: number;
+}
+
+export interface AutocompleteResponse {
+  suggestions: AutocompleteSuggestion[];
+  latencyMs: number;
+  cached?: boolean;
+}
+
+export const autocompleteApi = {
+  complete: (request: AutocompleteRequest) =>
+    fetchApi<ApiResponse<AutocompleteResponse>>('/api/autocomplete', {
+      method: 'POST',
+      body: request as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  getLanguages: () =>
+    fetchApi<ApiResponse<{
+      languages: Array<{
+        id: string;
+        name: string;
+        extensions: string[];
+      }>;
+    }>>('/api/autocomplete/languages').then(r => r.data!),
+};
+
+// ============================================================================
+// Snippets API (User code snippets and templates)
+// ============================================================================
+export const snippetsApi = {
+  // List user's snippets with optional filtering
+  list: (filters?: SnippetListFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.language) params.append('language', filters.language);
+    if (filters?.category) params.append('category', filters.category);
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.favorite) params.append('favorite', 'true');
+    if (filters?.collectionId) params.append('collectionId', filters.collectionId);
+    if (filters?.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters?.order) params.append('order', filters.order);
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      snippets: Snippet[];
+      total: number;
+      languages: readonly SnippetLanguage[];
+      categories: readonly SnippetCategory[];
+    }>>(`/api/snippets${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Get a single snippet
+  get: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}`).then(r => r.data!),
+
+  // Create a new snippet
+  create: (data: CreateSnippetRequest) =>
+    fetchApi<ApiResponse<Snippet>>('/api/snippets', {
+      method: 'POST',
+      body: data as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  // Update a snippet
+  update: (id: string, data: UpdateSnippetRequest) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}`, {
+      method: 'PUT',
+      body: data as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  // Delete a snippet
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Record snippet usage
+  use: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/use`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // Toggle favorite status
+  toggleFavorite: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/favorite`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // Duplicate a snippet
+  duplicate: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/duplicate`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // List snippet collections
+  listCollections: () =>
+    fetchApi<ApiResponse<{
+      collections: SnippetCollection[];
+      total: number;
+    }>>('/api/snippets/collections/list').then(r => r.data!),
+
+  // Create a snippet collection
+  createCollection: (data: {
+    name: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    isDefault?: boolean;
+  }) =>
+    fetchApi<ApiResponse<SnippetCollection>>('/api/snippets/collections', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Update a snippet collection
+  updateCollection: (id: string, data: {
+    name?: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    sortOrder?: number;
+    isDefault?: boolean;
+  }) =>
+    fetchApi<ApiResponse<SnippetCollection>>(`/api/snippets/collections/${id}`, {
+      method: 'PUT',
+      body: data,
+    }).then(r => r.data!),
+
+  // Delete a snippet collection
+  deleteCollection: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Add snippet to collection
+  addToCollection: (collectionId: string, snippetId: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${collectionId}/snippets/${snippetId}`, {
+      method: 'POST',
+    }),
+
+  // Remove snippet from collection
+  removeFromCollection: (collectionId: string, snippetId: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${collectionId}/snippets/${snippetId}`, {
+      method: 'DELETE',
+    }),
+};
+
+// ============================================================================
+// Workspace Presence API (Collaborative cursors and real-time presence)
+// ============================================================================
+export interface PresenceUser {
+  userId: string;
+  displayName: string;
+  page: string | null;
+  cursorX: number | null;
+  cursorY: number | null;
+  selection: {
+    filePath?: string;
+    startLine?: number;
+    endLine?: number;
+    startCol?: number;
+    endCol?: number;
+  } | null;
+  isCurrentUser: boolean;
+}
+
+export interface PresenceUpdate {
+  users: PresenceUser[];
+}
+
+export const workspacePresenceApi = {
+  // Update presence (heartbeat with cursor position)
+  updatePresence: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    page?: string;
+    cursorX?: number;
+    cursorY?: number;
+    selection?: {
+      filePath?: string;
+      startLine?: number;
+      endLine?: number;
+      startCol?: number;
+      endCol?: number;
+    };
+  }) =>
+    fetchApi<{ success: boolean }>('/api/workspace/presence', {
+      method: 'PUT',
+      body: data,
+    }),
+
+  // Get active users on a branch
+  getPresence: (owner: string, repo: string, branch: string) =>
+    fetchApi<{
+      success: boolean;
+      data: {
+        users: PresenceUser[];
+        branch: string;
+        owner: string;
+        repo: string;
+      };
+    }>(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`),
+
+  // Remove presence (leaving workspace)
+  removePresence: (owner: string, repo: string, branch: string) =>
+    fetchApi<{ success: boolean }>(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`, {
+      method: 'DELETE',
+    }),
+
+  // Get SSE stream URL for presence updates
+  getStreamUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
+};
+
+// ============================================================================
+// Import API (Import files from external URLs)
+// ============================================================================
+export interface UrlValidationResult {
+  valid: boolean;
+  suggestedFilename?: string;
+  contentType?: string;
+  contentLength?: number;
+  error?: string;
+}
+
+export interface UrlImportResult {
+  filePath: string;
+  contentType: string;
+  size: number;
+  isBinary: boolean;
+}
+
+export const importApi = {
+  validate: (url: string) =>
+    fetchApi<{ success: boolean; data: UrlValidationResult }>('/api/import/validate', {
+      method: 'POST',
+      body: { url },
+    }),
+
+  fromUrl: (url: string, sessionPath: string, targetPath?: string) =>
+    fetchApi<{ success: boolean; data: UrlImportResult }>('/api/import/url', {
+      method: 'POST',
+      body: { url, sessionPath, targetPath },
+    }),
 };

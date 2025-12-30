@@ -61,6 +61,43 @@ export type {
   TitleGenerationCallback,
 } from './claudeWeb/index.js';
 
+// Gemini AI API
+export { GeminiClient, AGeminiClient, GeminiError } from './gemini/index.js';
+export type {
+  GeminiClientConfig,
+  GenerateContentParams,
+  GeminiSessionEvent,
+  GeminiSessionResult,
+  Content as GeminiContent,
+  Part as GeminiPart,
+  TextPart as GeminiTextPart,
+  InlineDataPart as GeminiInlineDataPart,
+  StreamOptions as GeminiStreamOptions,
+  GeminiEventCallback,
+} from './gemini/index.js';
+
+// Codex/OpenAI API
+// Provides integration with OpenAI's Responses API for code generation
+export { CodexClient, ACodexClient, CodexError } from './codex/index.js';
+export type {
+  CodexClientConfig,
+  CreateCodexSessionParams,
+  CreateCodexSessionResult,
+  CodexSession,
+  CodexSessionStatus,
+  CodexSessionResult,
+  CodexEvent,
+  CodexEventType,
+  CodexEventCallback,
+  CodexPollOptions,
+  CodexContentBlock,
+  CodexTextContent,
+  CodexImageContent,
+  CodexMessage,
+  CodexToolCall,
+  CodexToolResult,
+} from './codex/index.js';
+
 // Session management
 // Note: Exports BroadcastEvent (renamed from SessionEvent) to avoid conflict with ClaudeSessionEvent
 export * from './sessions/index.js';
@@ -80,7 +117,34 @@ export * from './codeAnalysis/index.js';
 // Storage - User storage quota management
 export * from './storage/index.js';
 
+// Payment - Stripe and PayPal payment providers
+export * from './payment/index.js';
+
+// Games - Shared platform libraries for games
+export * from './games/index.js';
+
+// Cloud Saves - Game save synchronization across devices
+export * from './cloudSaves/index.js';
+
+// CRDT - Conflict-free Replicated Data Types for collaborative editing
+// Implements undo as forward operations (applying inverse changes)
+export * from './crdt/index.js';
+
+// Import - Import content from external sources (URLs)
+export * from './import/index.js';
+
+// Autocomplete - AI-powered code completion
+export * from './autocomplete/index.js';
+
+// Geometry - 3D geometry with right-handed coordinate system
+export * from './geometry/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
 export * from './services/index.js';
+
+// =============================================================================
+// LIFECYCLE - Startup and shutdown management
+// =============================================================================
+export * from './lifecycle/index.js';

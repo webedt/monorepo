@@ -5,10 +5,12 @@
 
 import './styles/index.css';
 import { router } from './lib/router';
+import { saveStoreStates, rerenderCurrentPage, isHmrEnabled } from './lib/hmr';
 import { theme, THEMES, THEME_META } from './lib/theme';
 import type { Theme } from './lib/theme';
-import { IconButton, Button } from './components';
+import { IconButton, Button, DebugOutputPanel } from './components';
 import { authStore } from './stores/authStore';
+import { debugStore } from './stores/debugStore';
 import { TAGLINES } from './constants/taglines';
 import { getVersion, getVersionSHA, getVersionTimestamp, GITHUB_REPO_URL } from './version';
 import {
@@ -26,7 +28,13 @@ import {
   GameDetailPage,
   LibraryPage,
   CommunityPage,
+  ChannelsPage,
+  AnnouncementsPage,
+  PricingPage,
   AdminPage,
+  BoneAnimationPage,
+  SnippetsPage,
+  ScenePage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -43,6 +51,8 @@ function getNavIcon(name: string): string {
     'store': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     'library': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
     'community': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    'channels': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+    'code': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
   };
   return icons[name] || '';
 }
@@ -266,6 +276,57 @@ function createThemeDropdown(): HTMLElement {
   return container;
 }
 
+// Cached debug toggle element (created once, reused across header updates)
+let cachedDebugToggle: HTMLElement | null = null;
+
+/**
+ * Get or create the debug console toggle button.
+ * The toggle is created once and cached to avoid memory leaks from repeated subscriptions.
+ */
+function getDebugToggle(): HTMLElement {
+  if (cachedDebugToggle) {
+    return cachedDebugToggle;
+  }
+
+  const container = document.createElement('div');
+  container.className = 'debug-toggle-btn';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'theme-dropdown-trigger';
+  button.setAttribute('aria-label', 'Toggle debug console');
+  button.title = 'Debug Console';
+  button.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+  `;
+
+  // Error badge
+  const badge = document.createElement('span');
+  badge.className = 'debug-error-badge';
+  container.appendChild(button);
+  container.appendChild(badge);
+
+  // Update badge on store changes (subscription created only once)
+  const updateBadge = () => {
+    const counts = debugStore.getCounts();
+    const errorCount = counts.error + counts.warn;
+    badge.textContent = errorCount > 0 ? String(errorCount > 99 ? '99+' : errorCount) : '';
+  };
+
+  debugStore.subscribe(updateBadge);
+  updateBadge();
+
+  button.addEventListener('click', () => {
+    debugStore.toggle();
+  });
+
+  cachedDebugToggle = container;
+  return container;
+}
+
 /**
  * Update the header based on auth state
  */
@@ -284,6 +345,7 @@ function updateHeader(): void {
   // Nav links for all users (store is public)
   const publicNavLinks = [
     { path: '/store', text: 'Store', icon: 'store' },
+    { path: '/channels', text: 'Channels', icon: 'channels' },
     { path: '/community', text: 'Community', icon: 'community' },
   ];
 
@@ -308,6 +370,7 @@ function updateHeader(): void {
       { path: '/library', text: 'Library', icon: 'library' },
       { path: '/quick-access', text: 'Quick', icon: 'zap' },
       { path: '/agents', text: 'Agents', icon: 'cpu' },
+      { path: '/snippets', text: 'Snippets', icon: 'code' },
       { path: '/widgets', text: 'Widgets', icon: 'widgets' },
       { path: '/dashboard', text: 'Dashboard', icon: 'layout-dashboard' },
     ];
@@ -329,6 +392,13 @@ function updateHeader(): void {
       nav.appendChild(a);
     }
 
+    // Trash icon
+    const trashBtn = new IconButton('trash', {
+      label: 'Trash',
+      onClick: () => router.navigate('/trash'),
+    });
+    actions.appendChild(trashBtn.getElement());
+
     // Settings icon
     const settingsBtn = new IconButton('settings', {
       label: 'Settings',
@@ -336,6 +406,10 @@ function updateHeader(): void {
     });
     actions.appendChild(settingsBtn.getElement());
   }
+
+  // Debug console toggle (cached to avoid memory leaks)
+  const debugToggle = getDebugToggle();
+  actions.appendChild(debugToggle);
 
   // Theme dropdown
   const themeDropdown = createThemeDropdown();
@@ -730,6 +804,13 @@ async function init(): Promise<void> {
   const layout = createLayout();
   appElement.appendChild(layout);
 
+  // Initialize debug console capture
+  debugStore.initialize();
+
+  // Create and mount debug panel
+  const debugPanel = new DebugOutputPanel({ position: 'bottom' });
+  debugPanel.mount(document.body);
+
   // Initialize auth
   await authStore.initialize();
 
@@ -841,6 +922,24 @@ async function init(): Promise<void> {
         title: 'Code | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
+      {
+        path: '/session/:sessionId/bone-animation',
+        component: (params) => {
+          mountPage(BoneAnimationPage, params);
+          return document.createElement('div');
+        },
+        title: 'Bone Animation | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/session/:sessionId/scene',
+        component: (params) => {
+          mountPage(ScenePage, params);
+          return document.createElement('div');
+        },
+        title: 'Scene Editor | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
       // Players feature routes
       {
         path: '/store',
@@ -875,6 +974,46 @@ async function init(): Promise<void> {
         },
         title: 'Community | WebEDT',
       },
+      {
+        path: '/channels',
+        component: () => {
+          mountPage(ChannelsPage);
+          return document.createElement('div');
+        },
+        title: 'Channels | WebEDT',
+      },
+      {
+        path: '/channels/:slug',
+        component: (params) => {
+          mountPage(ChannelsPage, params);
+          return document.createElement('div');
+        },
+        title: 'Channels | WebEDT',
+      },
+      {
+        path: '/announcements',
+        component: () => {
+          mountPage(AnnouncementsPage);
+          return document.createElement('div');
+        },
+        title: 'Announcements | WebEDT',
+      },
+      {
+        path: '/announcements/:id',
+        component: (params) => {
+          mountPage(AnnouncementsPage, params);
+          return document.createElement('div');
+        },
+        title: 'Announcement | WebEDT',
+      },
+      {
+        path: '/pricing',
+        component: () => {
+          mountPage(PricingPage);
+          return document.createElement('div');
+        },
+        title: 'Pricing | WebEDT',
+      },
       // Admin routes
       {
         path: '/admin',
@@ -888,6 +1027,16 @@ async function init(): Promise<void> {
           return authStore.isAuthenticated() && !!user?.isAdmin;
         },
       },
+      // Snippets route
+      {
+        path: '/snippets',
+        component: () => {
+          mountPage(SnippetsPage);
+          return document.createElement('div');
+        },
+        title: 'Snippets | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
     ])
     .start();
 
@@ -899,3 +1048,29 @@ async function init(): Promise<void> {
 
 // Start the app
 init();
+
+// HMR setup for main module
+if (import.meta.hot) {
+  // Accept updates and refresh UI when this module is updated
+  import.meta.hot.accept(() => {
+    console.log('[HMR] Main module updated, refreshing UI...');
+    // Update header (in case theme or nav changed)
+    updateHeader();
+    // Re-render current page if possible
+    rerenderCurrentPage();
+  });
+
+  // Handle module disposal - save state before update
+  import.meta.hot.dispose(() => {
+    // Save all store states before disposal
+    saveStoreStates();
+    // Save current route
+    router.saveForHmr();
+    console.log('[HMR] Main module disposing, states saved');
+  });
+
+  // Log HMR status
+  if (isHmrEnabled()) {
+    console.log('[HMR] Hot reload enabled');
+  }
+}

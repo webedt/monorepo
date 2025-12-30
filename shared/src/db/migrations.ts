@@ -486,7 +486,16 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       preferred_model TEXT,
       chat_verbosity_level TEXT NOT NULL DEFAULT 'verbose',
       is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      storage_quota_bytes TEXT NOT NULL DEFAULT '5368709120',
+      storage_used_bytes TEXT NOT NULL DEFAULT '0',
+      spending_limit_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      monthly_budget_cents TEXT NOT NULL DEFAULT '0',
+      per_transaction_limit_cents TEXT NOT NULL DEFAULT '0',
+      spending_reset_day INTEGER NOT NULL DEFAULT 1,
+      current_month_spent_cents TEXT NOT NULL DEFAULT '0',
+      spending_limit_action TEXT NOT NULL DEFAULT 'warn',
+      spending_reset_at TIMESTAMP
     );
 
     -- Sessions table (for Lucia auth)
@@ -500,6 +509,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      organization_id TEXT,
       session_path TEXT UNIQUE,
       repository_owner TEXT,
       repository_name TEXT,
@@ -519,7 +529,10 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMP,
       deleted_at TIMESTAMP,
-      worker_last_activity TIMESTAMP
+      worker_last_activity TIMESTAMP,
+      favorite BOOLEAN NOT NULL DEFAULT FALSE,
+      share_token TEXT UNIQUE,
+      share_expires_at TIMESTAMP
     );
 
     -- Messages table
@@ -536,6 +549,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS events (
       id SERIAL PRIMARY KEY,
       chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      uuid TEXT,
       event_data JSONB NOT NULL,
       timestamp TIMESTAMP NOT NULL DEFAULT NOW()
     );
@@ -546,9 +560,13 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_number ON chat_sessions(issue_number);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_repo ON chat_sessions(issue_number, repository_owner, repository_name);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_at ON chat_sessions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_remote_session_id ON chat_sessions(remote_session_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_status ON chat_sessions(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_messages_chat_session_id ON messages(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>'uuid')::text)) WHERE event_data->>'uuid' IS NOT NULL;
 
     -- Live Chat messages table (branch-based chat)
     CREATE TABLE IF NOT EXISTS live_chat_messages (
@@ -691,7 +709,13 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'chat_sessions.provider_session_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS provider_session_id TEXT',
   'chat_sessions.deleted_at': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP',
   'chat_sessions.worker_last_activity': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS worker_last_activity TIMESTAMP',
-  // users columns (for future additions)
+  'chat_sessions.organization_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS organization_id TEXT',
+  'chat_sessions.favorite': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS favorite BOOLEAN NOT NULL DEFAULT FALSE',
+  'chat_sessions.share_token': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE',
+  'chat_sessions.share_expires_at': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_expires_at TIMESTAMP',
+  // events columns
+  'events.uuid': 'ALTER TABLE events ADD COLUMN IF NOT EXISTS uuid TEXT',
+  // users columns
   'users.openrouter_api_key': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS openrouter_api_key TEXT',
   'users.autocomplete_enabled': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS autocomplete_enabled BOOLEAN NOT NULL DEFAULT TRUE',
   'users.autocomplete_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS autocomplete_model TEXT DEFAULT \'openai/gpt-oss-120b:cerebras\'',
@@ -699,6 +723,15 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'users.image_ai_provider': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_provider TEXT DEFAULT \'openrouter\'',
   'users.image_ai_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_model TEXT DEFAULT \'google/gemini-2.5-flash-image\'',
   'users.is_admin': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE',
+  'users.storage_quota_bytes': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_quota_bytes TEXT NOT NULL DEFAULT \'5368709120\'',
+  'users.storage_used_bytes': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_bytes TEXT NOT NULL DEFAULT \'0\'',
+  'users.spending_limit_enabled': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_limit_enabled BOOLEAN NOT NULL DEFAULT FALSE',
+  'users.monthly_budget_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_budget_cents TEXT NOT NULL DEFAULT \'0\'',
+  'users.per_transaction_limit_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS per_transaction_limit_cents TEXT NOT NULL DEFAULT \'0\'',
+  'users.spending_reset_day': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_reset_day INTEGER NOT NULL DEFAULT 1',
+  'users.current_month_spent_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS current_month_spent_cents TEXT NOT NULL DEFAULT \'0\'',
+  'users.spending_limit_action': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_limit_action TEXT NOT NULL DEFAULT \'warn\'',
+  'users.spending_reset_at': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_reset_at TIMESTAMP',
 };
 
 /**
@@ -707,17 +740,51 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
 const INDEX_DEFINITIONS: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_number ON chat_sessions(issue_number)',
   'CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_repo ON chat_sessions(issue_number, repository_owner, repository_name)',
+  // Session sync performance indexes
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_at ON chat_sessions(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_remote_session_id ON chat_sessions(remote_session_id)',
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_status ON chat_sessions(user_id, status)',
+  // Unique index for event deduplication by UUID (extracted from JSONB)
+  // Partial index excludes NULL UUIDs; enables ON CONFLICT DO NOTHING for race condition handling
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>\'uuid\')::text)) WHERE event_data->>\'uuid\' IS NOT NULL',
+  // Unique index for event deduplication by UUID column (for newer schema)
+  'CREATE UNIQUE INDEX IF NOT EXISTS events_session_uuid_idx ON events(chat_session_id, uuid)',
 ];
+
+/**
+ * Remove duplicate events that would prevent unique index creation.
+ * Keeps the first event (by id) for each (chat_session_id, uuid) combination.
+ */
+async function deduplicateEventsByUuid(pool: pg.Pool): Promise<number> {
+  // Delete duplicate events, keeping the one with the smallest id
+  const result = await pool.query(`
+    DELETE FROM events
+    WHERE id IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY chat_session_id, event_data->>'uuid'
+            ORDER BY id
+          ) as row_num
+        FROM events
+        WHERE event_data->>'uuid' IS NOT NULL
+      ) duplicates
+      WHERE row_num > 1
+    )
+  `);
+  return result.rowCount || 0;
+}
 
 /**
  * Ensure the database schema is up to date by adding any missing columns
  * This runs after initial schema creation or migrations to handle schema drift
  */
-export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[] }> {
+export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[]; duplicatesRemoved: number }> {
   const columnsAdded: string[] = [];
   const columnsRemoved: string[] = [];
   const indexesCreated: string[] = [];
   const errors: string[] = [];
+  let duplicatesRemoved = 0;
 
   // Drop deprecated columns
   const COLUMNS_TO_DROP: { table: string; column: string }[] = [
@@ -775,9 +842,23 @@ export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdde
   // Create any missing indexes
   for (const indexSql of INDEX_DEFINITIONS) {
     try {
+      // For unique indexes on events table, deduplicate first to avoid constraint violations
+      if (indexSql.includes('idx_events_session_uuid') || indexSql.includes('events_session_uuid_idx')) {
+        // Check if index already exists
+        const indexExists = await pool.query(`
+          SELECT 1 FROM pg_indexes
+          WHERE indexname IN ('idx_events_session_uuid', 'events_session_uuid_idx')
+        `);
+
+        if (indexExists.rowCount === 0) {
+          // Index doesn't exist yet - deduplicate events before creating it
+          duplicatesRemoved = await deduplicateEventsByUuid(pool);
+        }
+      }
+
       await pool.query(indexSql);
       // Extract index name from SQL for logging
-      const match = indexSql.match(/CREATE INDEX IF NOT EXISTS (\w+)/);
+      const match = indexSql.match(/CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)/);
       if (match) {
         indexesCreated.push(match[1]);
       }
@@ -787,7 +868,7 @@ export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdde
     }
   }
 
-  return { columnsAdded, columnsRemoved, indexesCreated, errors };
+  return { columnsAdded, columnsRemoved, indexesCreated, errors, duplicatesRemoved };
 }
 
 /**

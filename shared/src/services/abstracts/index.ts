@@ -91,10 +91,19 @@ export {
   type ValidationResult,
   type CleanupConditions,
 } from '../../sessions/ASessionAuthorizationService.js';
+export {
+  ATrashCleanupService,
+  type TrashCleanupResult,
+  type TrashCleanupSession,
+} from '../../sessions/ATrashCleanupService.js';
 
 // Claude Web Client (from claudeWeb/)
 export { AClaudeWebClient } from '../../claudeWeb/AClaudeWebClient.js';
 export type { ClaudeWebClientConfig } from '../../claudeWeb/types.js';
+
+// Codex Client (from codex/)
+export { ACodexClient } from '../../codex/ACodexClient.js';
+export type { CodexClientConfig } from '../../codex/types.js';
 
 // Git services (from github/)
 export { AGitHelper } from '../../github/AGitHelper.js';

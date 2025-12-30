@@ -14,7 +14,7 @@ interface AuthState {
   error: string | null;
 }
 
-class AuthStore extends Store<AuthState> {
+export class AuthStore extends Store<AuthState> {
   constructor() {
     super({
       user: null,
@@ -160,5 +160,13 @@ class AuthStore extends Store<AuthState> {
   }
 }
 
-// Singleton instance
-export const authStore = new AuthStore();
+// Singleton instance with HMR support
+export const authStore = new AuthStore().enableHmr('auth');
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    authStore.saveForHmr();
+  });
+}

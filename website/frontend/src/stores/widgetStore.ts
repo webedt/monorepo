@@ -3,7 +3,11 @@
  * Manages widget layout and configuration
  */
 
+import { z } from 'zod';
+
 import { Store } from '../lib/store';
+import { STORE_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
 
 import type { WidgetConfig, WidgetLayout, WidgetSize, WidgetType } from '../components/widget/types';
 
@@ -13,7 +17,20 @@ interface WidgetState {
   draggedWidgetId: string | null;
 }
 
-const STORAGE_KEY = 'widgetStore';
+const WidgetConfigSchema = z.object({
+  id: z.string(),
+  type: z.enum(['stats', 'activity', 'quick-actions', 'chart', 'favorites', 'session-activity', 'custom']),
+  title: z.string(),
+  size: z.enum(['sm', 'md', 'lg', 'xl']),
+  order: z.number(),
+  visible: z.boolean(),
+  settings: z.record(z.string(), z.unknown()).optional(),
+});
+
+const WidgetLayoutSchema = z.object({
+  widgets: z.array(WidgetConfigSchema),
+  columns: z.number().min(1).max(6).default(4),
+});
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   {
@@ -88,13 +105,22 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
 ];
 
+const DEFAULT_LAYOUT: WidgetLayout = {
+  widgets: [...DEFAULT_WIDGETS],
+  columns: 4,
+};
+
+const widgetStorage = new TypedStorage({
+  key: STORE_KEYS.WIDGET,
+  schema: WidgetLayoutSchema,
+  defaultValue: DEFAULT_LAYOUT,
+  version: 1,
+});
+
 class WidgetStore extends Store<WidgetState> {
   constructor() {
     super({
-      layout: {
-        widgets: [...DEFAULT_WIDGETS],
-        columns: 4,
-      },
+      layout: DEFAULT_LAYOUT,
       isCustomizing: false,
       draggedWidgetId: null,
     });
@@ -103,31 +129,13 @@ class WidgetStore extends Store<WidgetState> {
   }
 
   private loadFromStorage(): void {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.layout?.widgets) {
-          this.setState({
-            layout: {
-              widgets: parsed.layout.widgets,
-              columns: parsed.layout.columns || 4,
-            },
-          });
-        }
-      }
-    } catch {
-      // Ignore parse errors
+    const storedLayout = widgetStorage.get();
+    if (storedLayout.widgets.length > 0) {
+      this.setState({ layout: storedLayout });
     }
 
     this.subscribe((state) => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          layout: state.layout,
-        }));
-      } catch {
-        // Ignore storage errors
-      }
+      widgetStorage.set(state.layout);
     });
   }
 
@@ -302,4 +310,13 @@ class WidgetStore extends Store<WidgetState> {
   }
 }
 
-export const widgetStore = new WidgetStore();
+// Singleton instance with HMR support
+export const widgetStore = new WidgetStore().enableHmr('widget');
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    widgetStore.saveForHmr();
+  });
+}

@@ -1,0 +1,222 @@
+/**
+ * Collaborative Cursors Styles
+ * Visual styling for other users' cursors in the code editor
+ */
+
+.collaborative-cursors {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.collab-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transition: transform 0.1s ease-out, opacity 0.2s ease;
+  will-change: transform;
+}
+
+.collab-cursor-line {
+  width: 2px;
+  height: 20px;
+  border-radius: 1px;
+  animation: cursor-blink 1s ease-in-out infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.collab-cursor-label {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: white;
+  border-radius: 3px 3px 3px 0;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 1;
+}
+
+.collab-cursor:hover .collab-cursor-label,
+.collab-cursor-label.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Show label briefly when cursor moves */
+.collab-cursor.moved .collab-cursor-label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.collab-cursor-selection {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0.2;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Presence indicator in the file tree */
+.file-presence-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.file-presence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.file-presence-count {
+  font-size: 10px;
+  color: var(--color-text-secondary, #888);
+  margin-left: 2px;
+}
+
+/* Active users badge in header */
+.active-users-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--color-bg-secondary, #2a2a2a);
+  border-radius: 16px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #aaa);
+}
+
+.active-users-avatars {
+  display: flex;
+  align-items: center;
+}
+
+.active-user-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  margin-left: -6px;
+  border: 2px solid var(--color-bg-primary, #1a1a1a);
+}
+
+.active-user-avatar:first-child {
+  margin-left: 0;
+}
+
+.active-users-count {
+  color: var(--color-text-tertiary, #666);
+  font-size: 11px;
+}
+
+/* Tooltip showing who's viewing */
+.presence-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--color-bg-elevated, #333);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  white-space: nowrap;
+  font-size: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.active-users-badge:hover .presence-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.presence-tooltip-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.presence-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.presence-tooltip-name {
+  color: var(--color-text-primary, #fff);
+}
+
+.presence-tooltip-file {
+  color: var(--color-text-tertiary, #888);
+  font-size: 11px;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+/* Animation for cursor appearing */
+.collab-cursor.entering {
+  animation: cursor-enter 0.3s ease-out;
+}
+
+@keyframes cursor-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Animation for cursor leaving */
+.collab-cursor.leaving {
+  animation: cursor-leave 0.3s ease-out forwards;
+}
+
+@keyframes cursor-leave {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}

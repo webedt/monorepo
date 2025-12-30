@@ -12,7 +12,7 @@ interface WorkerState {
   lastHeartbeat: number | null;
 }
 
-class WorkerStore extends Store<WorkerState> {
+export class WorkerStore extends Store<WorkerState> {
   private heartbeatTimeout: number | null = null;
 
   constructor() {
@@ -144,5 +144,13 @@ class WorkerStore extends Store<WorkerState> {
   }
 }
 
-// Singleton instance
-export const workerStore = new WorkerStore();
+// Singleton instance with HMR support
+export const workerStore = new WorkerStore().enableHmr('worker');
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    workerStore.saveForHmr();
+  });
+}

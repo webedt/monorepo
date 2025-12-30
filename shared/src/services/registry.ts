@@ -224,6 +224,7 @@ export {
   ASessionCleanupService,
   AEventStorageService,
   AClaudeWebClient,
+  ACodexClient,
   AGitHelper,
   AGitHubClient,
   ATokenRefreshService,
@@ -249,6 +250,7 @@ export {
   type SessionUpdateType,
   type SessionListEvent,
   type ClaudeWebClientConfig,
+  type CodexClientConfig,
   type GitHubPullOptions,
   type GitHubPullResult,
   type AnalysisType,
@@ -265,3 +267,9 @@ export {
 // =============================================================================
 
 export type { ClaudeRemoteClientConfig } from '../claudeWeb/types.js';
+
+// =============================================================================
+// Re-export types from Codex (for convenience)
+// =============================================================================
+
+export type { CodexClientConfig as CodexRemoteClientConfig } from '../codex/types.js';

@@ -5,12 +5,17 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
-import { sessionsApi, storageWorkerApi } from '../../lib/api';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, UrlImportDialog, AIInputBox, AutocompleteDropdown, SaveAsSnippetDialog } from '../../components';
+import type { ChangedFile, AutocompleteSuggestion } from '../../components';
+import { sessionsApi, storageWorkerApi, autocompleteApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { formatByFilename, canFormat } from '../../lib/codeFormatter';
+import { LintingService } from '../../lib/linting';
+import { editorSettingsStore, presenceStore } from '../../stores';
 import type { Session } from '../../types';
 import './code.css';
+import '../../components/multi-cursor-editor/multi-cursor-editor.css';
 
 interface FileNode {
   name: string;
@@ -48,6 +53,23 @@ export class CodePage extends Page<CodePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
+  private multiCursorEditor: MultiCursorEditor | null = null;
+  private pendingCommitFiles: Map<string, ChangedFile> = new Map();
+  private commitDialog: CommitDialog | null = null;
+  private commitBtn: Button | null = null;
+  private urlImportDialog: UrlImportDialog | null = null;
+  private saveAsSnippetDialog: SaveAsSnippetDialog | null = null;
+  private aiInputBox: AIInputBox | null = null;
+  private diffModal: Modal | null = null;
+  private diffViewer: DiffViewer | null = null;
+  private lintingService = new LintingService(300);
+  private lintingPanel: LintingPanel | null = null;
+  private collaborativeCursors: CollaborativeCursors | null = null;
+  private unsubscribePresence: (() => void) | null = null;
+
+  // Autocomplete
+  private autocompleteDropdown: AutocompleteDropdown | null = null;
+  private isAutocompleteLoading = false;
 
   protected render(): string {
     return `
@@ -63,9 +85,25 @@ export class CodePage extends Page<CodePageOptions> {
             </div>
           </div>
           <div class="code-header-right">
+            <div class="active-users-badge" style="display: none;">
+              <div class="active-users-avatars"></div>
+              <span class="active-users-count"></span>
+            </div>
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
             </div>
+            <div class="undo-redo-controls">
+              <button class="undo-btn" data-action="undo" title="Undo (Ctrl+Z)" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M3 10h10a5 5 0 0 1 5 5v2"></path><polyline points="3 10 7 6"></polyline><polyline points="3 10 7 14"></polyline></svg>
+              </button>
+              <button class="redo-btn" data-action="redo" title="Redo (Ctrl+Shift+Z)" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
+              </button>
+            </div>
+            <div class="snippet-btn-container"></div>
+            <div class="compare-btn-container"></div>
+            <div class="format-btn-container"></div>
+            <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
           </div>
         </header>
@@ -75,9 +113,14 @@ export class CodePage extends Page<CodePageOptions> {
           <aside class="file-explorer">
             <div class="explorer-header">
               <span class="explorer-title">Files</span>
-              <button class="explorer-btn" data-action="refresh" title="Refresh">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-              </button>
+              <div class="explorer-actions">
+                <button class="explorer-btn" data-action="import-url" title="Import from URL">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                </button>
+                <button class="explorer-btn" data-action="refresh" title="Refresh">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                </button>
+              </div>
             </div>
             <div class="file-tree-container">
               <div class="file-tree-loading">
@@ -92,18 +135,25 @@ export class CodePage extends Page<CodePageOptions> {
 
           <main class="editor-panel">
             <div class="tabs-bar"></div>
-            <div class="editor-content">
-              <div class="editor-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                <p>Select a file to view or edit</p>
+            <div class="editor-area">
+              <div class="editor-content">
+                <div class="editor-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  <p>Select a file to view or edit</p>
+                  <p class="editor-hint">Multi-cursor: Alt+Click, Ctrl/Cmd+D (next), Ctrl/Cmd+Shift+L (all)</p>
+                </div>
+                <div class="editor-wrapper" style="display: none;">
+                  <div class="collaborative-cursors-container"></div>
+                  <div class="multi-cursor-editor-container"></div>
+                  <div class="autocomplete-container"></div>
+                </div>
+                <div class="preview-wrapper" style="display: none;">
+                  <img class="image-preview" alt="Preview">
+                </div>
               </div>
-              <div class="editor-wrapper" style="display: none;">
-                <textarea class="code-editor" spellcheck="false"></textarea>
-              </div>
-              <div class="preview-wrapper" style="display: none;">
-                <img class="image-preview" alt="Preview">
-              </div>
+              <div class="linting-panel-container"></div>
             </div>
+            <div class="ai-input-box-container"></div>
           </main>
         </div>
       </div>
@@ -125,6 +175,57 @@ export class CodePage extends Page<CodePageOptions> {
       refreshBtn.addEventListener('click', () => this.loadFiles());
     }
 
+    // Setup import from URL button
+    const importBtn = this.$('[data-action="import-url"]') as HTMLButtonElement;
+    if (importBtn) {
+      importBtn.addEventListener('click', () => this.openUrlImportDialog());
+    }
+
+    // Setup compare button
+    const compareBtnContainer = this.$('.compare-btn-container') as HTMLElement;
+    if (compareBtnContainer) {
+      const compareBtn = new Button('Compare', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.showDiffViewer(),
+      });
+      compareBtn.mount(compareBtnContainer);
+    }
+
+    // Setup save as snippet button
+    const snippetBtnContainer = this.$('.snippet-btn-container') as HTMLElement;
+    if (snippetBtnContainer) {
+      const snippetBtn = new Button('Save as Snippet', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.openSaveAsSnippetDialog(),
+      });
+      snippetBtn.mount(snippetBtnContainer);
+    }
+
+    // Setup format button
+    const formatBtnContainer = this.$('.format-btn-container') as HTMLElement;
+    if (formatBtnContainer) {
+      const formatBtn = new Button('Format', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.formatCurrentFile(),
+      });
+      formatBtn.mount(formatBtnContainer);
+    }
+
+    // Setup commit button
+    const commitBtnContainer = this.$('.commit-btn-container') as HTMLElement;
+    if (commitBtnContainer) {
+      this.commitBtn = new Button('Commit Changes', {
+        variant: 'secondary',
+        size: 'sm',
+        disabled: true,
+        onClick: () => this.openCommitDialog(),
+      });
+      this.commitBtn.mount(commitBtnContainer);
+    }
+
     // Setup save button
     const saveBtnContainer = this.$('.save-btn-container') as HTMLElement;
     if (saveBtnContainer) {
@@ -136,12 +237,42 @@ export class CodePage extends Page<CodePageOptions> {
       saveBtn.mount(saveBtnContainer);
     }
 
-    // Setup editor
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (editor) {
-      editor.addEventListener('input', () => this.handleEditorChange());
-      editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
+    // Setup undo/redo buttons (CodeMirror handles undo/redo internally)
+    const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
+    const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
+    if (undoBtn) {
+      undoBtn.addEventListener('click', () => this.handleUndo());
     }
+    if (redoBtn) {
+      redoBtn.addEventListener('click', () => this.handleRedo());
+    }
+
+    // Initialize MultiCursorEditor
+    this.initializeMultiCursorEditor();
+
+    // Setup autocomplete dropdown
+    const autocompleteContainer = this.$('.autocomplete-container') as HTMLElement;
+    if (autocompleteContainer) {
+      this.autocompleteDropdown = new AutocompleteDropdown({
+        onSelect: (suggestion) => this.acceptAutocompleteSuggestion(suggestion),
+        onDismiss: () => this.hideAutocomplete(),
+      });
+      this.autocompleteDropdown.mount(autocompleteContainer);
+    }
+
+    // Setup collaborative cursors container
+    // Note: CollaborativeCursors is designed for textarea. For CodeMirror integration,
+    // we just mount the container but skip setting the editor element for now.
+    const cursorsContainer = this.$('.collaborative-cursors-container') as HTMLElement;
+    if (cursorsContainer) {
+      this.collaborativeCursors = new CollaborativeCursors();
+      this.collaborativeCursors.mount(cursorsContainer);
+    }
+
+    // Subscribe to presence updates for the active users badge
+    this.unsubscribePresence = presenceStore.subscribe(() => {
+      this.updateActiveUsersBadge();
+    });
 
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
@@ -157,6 +288,18 @@ export class CodePage extends Page<CodePageOptions> {
       this.offlineIndicator.mount(offlineContainer);
     }
 
+    // Setup linting panel
+    const lintingContainer = this.$('.linting-panel-container') as HTMLElement;
+    if (lintingContainer) {
+      this.lintingPanel = new LintingPanel({
+        collapsible: true,
+        defaultCollapsed: false,
+        maxHeight: 150,
+        onDiagnosticClick: (diagnostic) => this.navigateToLine(diagnostic.line, diagnostic.column),
+      });
+      this.lintingPanel.mount(lintingContainer);
+    }
+
     // Subscribe to offline status changes
     this.unsubscribeOffline = offlineManager.subscribe((status, wasOffline) => {
       this.isOfflineMode = status === 'offline';
@@ -167,6 +310,20 @@ export class CodePage extends Page<CodePageOptions> {
         this.syncPendingChanges();
       }
     });
+
+    // Setup AI Input Box
+    const aiInputContainer = this.$('.ai-input-box-container') as HTMLElement;
+    const sessionId = this.options.params?.sessionId;
+    if (aiInputContainer && sessionId) {
+      this.aiInputBox = new AIInputBox({
+        sessionId,
+        placeholder: 'Ask AI about this code...',
+        onNavigateToChat: () => {
+          this.navigate(`/session/${sessionId}/chat`);
+        },
+      });
+      this.aiInputBox.mount(aiInputContainer);
+    }
 
     // Load session data
     this.loadSession();
@@ -206,6 +363,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.updateHeader();
       await this.loadFiles();
+
+      // Connect to presence for collaborative cursors
+      this.connectToPresence();
     } catch (error) {
       // Try offline cache if network fails
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
@@ -554,6 +714,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.renderTabs();
       this.showEditor();
+
+      // Run initial linting
+      this.lintCurrentFile();
     } catch (error) {
       console.error('Failed to open file:', error);
       toast.error('Failed to open file');
@@ -582,6 +745,10 @@ export class CodePage extends Page<CodePageOptions> {
     this.activeTabIndex = index;
     this.renderTabs();
     this.updateEditorContent();
+    this.updateUndoRedoButtons();
+
+    // Update linting for the new active tab
+    this.lintCurrentFile();
   }
 
   private renderTabs(): void {
@@ -648,17 +815,24 @@ export class CodePage extends Page<CodePageOptions> {
 
     this.renderTabs();
     this.updateEditorContent();
+    this.updateUndoRedoButtons();
   }
 
   private updateEditorContent(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor) return;
+    if (!this.multiCursorEditor) return;
 
     if (this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex]) {
-      editor.value = this.tabs[this.activeTabIndex].content;
+      const tab = this.tabs[this.activeTabIndex];
+
+      // Use loadContent to reset history when switching tabs
+      // This prevents undo history from being shared across tabs
+      const ext = tab.path.split('.').pop()?.toLowerCase() || 'text';
+      this.multiCursorEditor.loadContent(tab.content, ext);
+
       this.showEditor();
+      this.multiCursorEditor.focus();
     } else {
-      editor.value = '';
+      this.multiCursorEditor.loadContent('', 'text');
       this.showEmpty();
     }
   }
@@ -667,6 +841,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'flex');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
+    // Clear linting panel when no file is open
+    this.lintingPanel?.clear();
   }
 
   private showEditor(): void {
@@ -679,41 +855,264 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'flex');
+    // Clear linting panel for non-text files
+    this.lintingPanel?.clear();
   }
 
-  private handleEditorChange(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor || this.activeTabIndex < 0) return;
+  /**
+   * Initialize the MultiCursorEditor component
+   */
+  private initializeMultiCursorEditor(): void {
+    const container = this.$('.multi-cursor-editor-container') as HTMLElement;
+    if (!container) return;
+
+    this.multiCursorEditor = new MultiCursorEditor({
+      content: '',
+      language: 'text',
+      readOnly: false,
+      lineNumbers: true,
+      onChange: (content: string) => {
+        this.handleEditorChange(content);
+      },
+      onSave: () => {
+        this.saveCurrentFile();
+      },
+    });
+
+    this.multiCursorEditor.mount(container);
+
+    // Add keyboard listener for autocomplete (Ctrl/Cmd+Space and dropdown navigation)
+    container.addEventListener('keydown', (e) => this.handleAutocompleteKeydown(e), true);
+  }
+
+  /**
+   * Handle editor content changes from the MultiCursorEditor
+   */
+  private handleEditorChange(content: string): void {
+    if (this.activeTabIndex < 0) return;
 
     const tab = this.tabs[this.activeTabIndex];
-    if (tab) {
-      const newContent = editor.value;
-      if (newContent !== tab.content) {
-        tab.content = newContent;
-        tab.isDirty = true;
-        tab.isPreview = false;
-        this.renderTabs();
-      }
+    if (tab && content !== tab.content) {
+      tab.content = content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+      this.renderTabs();
+      this.updateUndoRedoButtons();
+
+      // Trigger linting
+      this.lintCurrentFile();
     }
   }
 
-  private handleEditorKeydown(e: KeyboardEvent): void {
-    // Cmd/Ctrl+S to save
-    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-      e.preventDefault();
-      this.saveCurrentFile();
+  private lintCurrentFile(): void {
+    if (this.activeTabIndex < 0) {
+      this.lintingPanel?.clear();
+      return;
     }
 
-    // Tab key inserts spaces
-    if (e.key === 'Tab') {
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    this.lintingService.lint(tab.content, tab.name, (result) => {
+      this.lintingPanel?.update(result, tab.name);
+    });
+  }
+
+  private navigateToLine(line: number, column: number): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Use MultiCursorEditor's scrollToLine method
+    this.multiCursorEditor.scrollToLine(line);
+
+    // Set cursor position at the line/column
+    const position = this.multiCursorEditor.getPositionFromLineColumn(line, column);
+    this.multiCursorEditor.setCursorPosition(position);
+    this.multiCursorEditor.focus();
+  }
+
+  /**
+   * Trigger undo in the editor
+   */
+  private handleUndo(): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+    this.multiCursorEditor.undoChange();
+    this.updateUndoRedoButtons();
+  }
+
+  /**
+   * Trigger redo in the editor
+   */
+  private handleRedo(): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+    this.multiCursorEditor.redoChange();
+    this.updateUndoRedoButtons();
+  }
+
+  /**
+   * Update the undo/redo button states based on editor history
+   */
+  private updateUndoRedoButtons(): void {
+    const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
+    const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
+
+    const hasActiveFile = this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex];
+
+    if (undoBtn) {
+      undoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canUndo();
+    }
+    if (redoBtn) {
+      redoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canRedo();
+    }
+  }
+
+  /**
+   * Handle keyboard events for autocomplete navigation
+   * Called from the editor container to handle autocomplete when visible
+   */
+  private handleAutocompleteKeydown(e: KeyboardEvent): void {
+    // Handle autocomplete navigation when dropdown is visible
+    if (this.autocompleteDropdown?.getIsVisible()) {
+      switch (e.key) {
+        case 'Escape':
+          e.preventDefault();
+          e.stopPropagation();
+          this.hideAutocomplete();
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          e.stopPropagation();
+          this.autocompleteDropdown.selectPrevious();
+          return;
+        case 'ArrowDown':
+          e.preventDefault();
+          e.stopPropagation();
+          this.autocompleteDropdown.selectNext();
+          return;
+        case 'Tab':
+        case 'Enter':
+          e.preventDefault();
+          e.stopPropagation();
+          this.autocompleteDropdown.acceptSelected();
+          return;
+      }
+    }
+
+    // Cmd/Ctrl+Space to trigger autocomplete
+    if ((e.metaKey || e.ctrlKey) && e.key === ' ') {
       e.preventDefault();
-      const editor = e.target as HTMLTextAreaElement;
-      const start = editor.selectionStart;
-      const end = editor.selectionEnd;
-      const spaces = '  ';
-      editor.value = editor.value.substring(0, start) + spaces + editor.value.substring(end);
-      editor.selectionStart = editor.selectionEnd = start + spaces.length;
-      this.handleEditorChange();
+      e.stopPropagation();
+      this.triggerAutocomplete();
+      return;
+    }
+  }
+
+  private showDiffViewer(): void {
+    if (!this.session) {
+      toast.error('No session loaded');
+      return;
+    }
+
+    const { repositoryOwner, repositoryName, branch, baseBranch } = this.session;
+
+    if (!repositoryOwner || !repositoryName) {
+      toast.error('Repository information not available');
+      return;
+    }
+
+    if (!branch) {
+      toast.error('Current branch not available');
+      return;
+    }
+
+    // Use main or master as default base branch if not specified
+    const base = baseBranch || 'main';
+
+    // Check if comparing the same branch
+    if (branch === base) {
+      toast.info('Current branch is the same as base branch');
+      return;
+    }
+
+    // Create and show the modal
+    this.diffModal = new Modal({
+      title: 'Branch Comparison',
+      size: 'xl',
+      onClose: () => {
+        // Clean up DiffViewer component when modal closes
+        if (this.diffViewer) {
+          this.diffViewer.unmount();
+          this.diffViewer = null;
+        }
+        this.diffModal = null;
+      },
+    });
+
+    this.diffViewer = new DiffViewer({
+      owner: repositoryOwner,
+      repo: repositoryName,
+      baseBranch: base,
+      headBranch: branch,
+    });
+
+    // Mount the modal first so body element exists
+    this.diffModal.mount(document.body);
+    // Get the modal body element and mount DiffViewer to it
+    const bodyElement = this.diffModal.getElement().querySelector('.modal-body');
+    if (bodyElement) {
+      this.diffViewer.mount(bodyElement as HTMLElement);
+    }
+    this.diffModal.open();
+  }
+
+  private formatCurrentFile(): void {
+    if (this.activeTabIndex < 0 || !this.multiCursorEditor) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Check if this file type can be formatted
+    if (!canFormat(tab.name)) {
+      toast.info('Formatting not supported for this file type');
+      return;
+    }
+
+    const settings = editorSettingsStore.getSettings();
+    const result = formatByFilename(tab.content, tab.name, {
+      tabSize: settings.tabSize,
+      useTabs: settings.useTabs,
+    });
+
+    if (!result.success) {
+      toast.error(result.error || 'Failed to format file');
+      return;
+    }
+
+    // Only update if content actually changed
+    if (result.content !== tab.content) {
+      const cursorPosition = this.multiCursorEditor.getCursorPosition();
+
+      tab.content = result.content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+
+      // Update editor content using setContent (adds to undo history)
+      this.multiCursorEditor.setContent(result.content);
+
+      // Try to restore cursor position, clamped to new content length
+      const newPosition = Math.min(cursorPosition, result.content.length);
+      this.multiCursorEditor.setCursorPosition(newPosition);
+
+      this.renderTabs();
+      this.updateUndoRedoButtons();
+      toast.success('File formatted');
+    } else {
+      toast.info('File already formatted');
     }
   }
 
@@ -724,6 +1123,24 @@ export class CodePage extends Page<CodePageOptions> {
     if (!tab || !tab.isDirty) {
       toast.info('No changes to save');
       return;
+    }
+
+    // Format on save if enabled
+    if (editorSettingsStore.getFormatOnSave() && canFormat(tab.name) && this.multiCursorEditor) {
+      const settings = editorSettingsStore.getSettings();
+      const result = formatByFilename(tab.content, tab.name, {
+        tabSize: settings.tabSize,
+        useTabs: settings.useTabs,
+      });
+
+      if (result.success && result.content !== tab.content) {
+        tab.content = result.content;
+        this.multiCursorEditor.setContent(result.content);
+        this.updateUndoRedoButtons();
+      } else if (!result.success) {
+        // Warn user that formatting failed but continue with save
+        toast.warning(`Could not format: ${result.error || 'Unknown error'}`);
+      }
     }
 
     this.isSaving = true;
@@ -737,6 +1154,8 @@ export class CodePage extends Page<CodePageOptions> {
         await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
         tab.isDirty = false;
         this.renderTabs();
+        // Track for commit
+        this.trackFileForCommit(tab.path, tab.content, 'modified');
         toast.success('File saved locally (will sync when online)');
       } else {
         try {
@@ -745,12 +1164,16 @@ export class CodePage extends Page<CodePageOptions> {
           await offlineStorage.cacheFile(sessionPath, filePath, tab.content, 'text');
           tab.isDirty = false;
           this.renderTabs();
+          // Track for commit
+          this.trackFileForCommit(tab.path, tab.content, 'modified');
           toast.success('File saved');
         } catch {
           // If save fails, save locally
           await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
           tab.isDirty = false;
           this.renderTabs();
+          // Track for commit
+          this.trackFileForCommit(tab.path, tab.content, 'modified');
           toast.info('Saved locally (will sync when online)');
         }
       }
@@ -762,11 +1185,364 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  /**
+   * Connect to presence service for collaborative cursors
+   */
+  private connectToPresence(): void {
+    if (!this.session) return;
+
+    const owner = this.session.repositoryOwner;
+    const repo = this.session.repositoryName;
+    const branch = this.session.branch;
+
+    if (owner && repo && branch) {
+      presenceStore.connect(owner, repo, branch).catch(error => {
+        console.error('Failed to connect to presence:', error);
+      });
+    }
+  }
+
+  /**
+   * Update the active users badge in the header
+   */
+  private updateActiveUsersBadge(): void {
+    const badge = this.$('.active-users-badge') as HTMLElement;
+    const avatarsContainer = this.$('.active-users-avatars') as HTMLElement;
+    const countEl = this.$('.active-users-count') as HTMLElement;
+
+    if (!badge || !avatarsContainer || !countEl) return;
+
+    const users = presenceStore.getOtherUsersWithColors();
+
+    if (users.length === 0) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    badge.style.display = 'flex';
+
+    // Show up to 3 user avatars
+    const displayUsers = users.slice(0, 3);
+    const remainingCount = users.length - displayUsers.length;
+
+    avatarsContainer.innerHTML = displayUsers.map(user => {
+      const initial = (user.displayName || 'U').charAt(0).toUpperCase();
+      return `<div class="active-user-avatar" style="background-color: ${user.color}" title="${this.escapeHtml(user.displayName)}">${initial}</div>`;
+    }).join('');
+
+    if (remainingCount > 0) {
+      countEl.textContent = `+${remainingCount} more`;
+      countEl.style.display = 'inline';
+    } else {
+      countEl.style.display = 'none';
+    }
+  }
+
+  private trackFileForCommit(path: string, content: string, status: 'modified' | 'added' | 'deleted'): void {
+    this.pendingCommitFiles.set(path, { path, content, status });
+    this.updateCommitButton();
+  }
+
+  private updateCommitButton(): void {
+    if (!this.commitBtn) return;
+
+    const pendingCount = this.pendingCommitFiles.size;
+    const hasGitHub = !!(this.session?.repositoryOwner && this.session?.repositoryName);
+
+    if (pendingCount > 0 && hasGitHub) {
+      this.commitBtn.setDisabled(false);
+      this.commitBtn.setLabel(`Commit Changes (${pendingCount})`);
+    } else {
+      this.commitBtn.setDisabled(true);
+      this.commitBtn.setLabel('Commit Changes');
+    }
+  }
+
+  private openCommitDialog(): void {
+    if (!this.session?.repositoryOwner || !this.session?.repositoryName) {
+      toast.error('GitHub repository not connected');
+      return;
+    }
+
+    if (this.pendingCommitFiles.size === 0) {
+      toast.info('No changes to commit');
+      return;
+    }
+
+    this.commitDialog = new CommitDialog({
+      owner: this.session.repositoryOwner,
+      repo: this.session.repositoryName,
+      branch: this.session.branch || 'main',
+      onCommitSuccess: () => {
+        // Clear pending files after successful commit
+        // (CommitDialog already shows success toast)
+        this.pendingCommitFiles.clear();
+        this.updateCommitButton();
+      },
+      onClose: () => {
+        this.commitDialog = null;
+      },
+    });
+
+    this.commitDialog.setChangedFiles(Array.from(this.pendingCommitFiles.values()));
+    this.commitDialog.open();
+  }
+
+  private openUrlImportDialog(): void {
+    const sessionPath = this.getSessionPath();
+    if (!sessionPath) {
+      toast.error('No active session');
+      return;
+    }
+
+    this.urlImportDialog = new UrlImportDialog({
+      sessionPath,
+      onImportSuccess: (result) => {
+        // Refresh file tree after successful import
+        this.loadFiles();
+        // Optionally open the imported file (skip binary/image files)
+        if (result.filePath && result.contentType && !result.contentType.startsWith('image/')) {
+          this.openFile(result.filePath);
+        }
+      },
+      onClose: () => {
+        this.urlImportDialog = null;
+      },
+    });
+
+    this.urlImportDialog.open();
+  }
+
+  private openSaveAsSnippetDialog(): void {
+    if (this.activeTabIndex < 0 || !this.multiCursorEditor) {
+      toast.error('No file is open');
+      return;
+    }
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) {
+      toast.error('No file is open');
+      return;
+    }
+
+    // Get selected text, or use entire file content if nothing is selected
+    const selectedText = this.multiCursorEditor.getSelectedText();
+    const code = selectedText || tab.content;
+
+    if (!code.trim()) {
+      toast.error('No code to save');
+      return;
+    }
+
+    // Detect language from file extension
+    const ext = tab.path.split('.').pop()?.toLowerCase() || '';
+
+    this.saveAsSnippetDialog = new SaveAsSnippetDialog({
+      code,
+      language: ext,
+      filename: tab.name,
+      onSuccess: () => {
+        // Show a toast about where to find snippets
+        toast.success('Snippet saved! View your snippets at /snippets');
+      },
+      onClose: () => {
+        this.saveAsSnippetDialog = null;
+      },
+    });
+
+    this.saveAsSnippetDialog.open();
+  }
+
+  // =========================================================================
+  // Autocomplete Methods
+  // =========================================================================
+
+  private triggerAutocomplete(): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const cursorPos = this.multiCursorEditor.getCursorPosition();
+    const content = this.multiCursorEditor.getContent();
+    const prefix = content.slice(0, cursorPos);
+    const suffix = content.slice(cursorPos);
+
+    // Get language from file extension
+    const language = this.getLanguageFromPath(tab.path);
+
+    this.fetchAutocomplete(prefix, suffix, language, tab.path);
+  }
+
+  private async fetchAutocomplete(
+    prefix: string,
+    suffix: string,
+    language: string,
+    filePath: string
+  ): Promise<void> {
+    if (this.isAutocompleteLoading || isOffline()) return;
+
+    this.isAutocompleteLoading = true;
+
+    try {
+      const response = await autocompleteApi.complete({
+        prefix,
+        suffix,
+        language,
+        filePath,
+        maxSuggestions: 5,
+      });
+
+      if (response.suggestions.length > 0) {
+        // Calculate position for dropdown based on editor cursor
+        const position = this.getCaretPositionFromEditor();
+        this.showAutocomplete(position.x, position.y, response.suggestions);
+      } else {
+        this.hideAutocomplete();
+      }
+    } catch (error) {
+      console.error('Autocomplete failed:', error);
+      this.hideAutocomplete();
+    } finally {
+      this.isAutocompleteLoading = false;
+    }
+  }
+
+  private showAutocomplete(x: number, y: number, suggestions: AutocompleteSuggestion[]): void {
+    if (!this.autocompleteDropdown) return;
+    this.autocompleteDropdown.showAt(x, y, suggestions);
+  }
+
+  private hideAutocomplete(): void {
+    this.autocompleteDropdown?.hideDropdown();
+  }
+
+  private acceptAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Insert the suggestion at cursor position using MultiCursorEditor
+    this.multiCursorEditor.insertText(suggestion.text);
+
+    // Update tab content (the onChange callback will handle this, but update manually for safety)
+    tab.content = this.multiCursorEditor.getContent();
+    tab.isDirty = true;
+    tab.isPreview = false;
+    this.renderTabs();
+
+    // Hide autocomplete
+    this.hideAutocomplete();
+
+    // Focus editor
+    this.multiCursorEditor.focus();
+  }
+
+  /**
+   * Get caret position from the CodeMirror-based MultiCursorEditor
+   */
+  private getCaretPositionFromEditor(): { x: number; y: number } {
+    const editorContainer = this.$('.multi-cursor-editor-container') as HTMLElement;
+    if (!editorContainer || !this.multiCursorEditor) {
+      return { x: 0, y: 0 };
+    }
+
+    // Find the CodeMirror cursor element
+    const cursor = editorContainer.querySelector('.cm-cursor-primary, .cm-cursor') as HTMLElement;
+    if (cursor) {
+      const cursorRect = cursor.getBoundingClientRect();
+      return {
+        x: cursorRect.left,
+        y: cursorRect.bottom + 4, // Position below the cursor with a small offset
+      };
+    }
+
+    // Fallback: use editor container position
+    const containerRect = editorContainer.getBoundingClientRect();
+    return {
+      x: containerRect.left + 20,
+      y: containerRect.top + 40,
+    };
+  }
+
+  private getLanguageFromPath(filePath: string): string {
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    const languageMap: Record<string, string> = {
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'mjs': 'javascript',
+      'cjs': 'javascript',
+      'py': 'python',
+      'pyw': 'python',
+      'rs': 'rust',
+      'go': 'go',
+      'java': 'java',
+      'c': 'c',
+      'h': 'c',
+      'cpp': 'cpp',
+      'cc': 'cpp',
+      'cxx': 'cpp',
+      'hpp': 'cpp',
+      'hxx': 'cpp',
+      'cs': 'csharp',
+      'rb': 'ruby',
+      'php': 'php',
+      'html': 'html',
+      'htm': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'sass': 'scss',
+      'sql': 'sql',
+      'sh': 'shell',
+      'bash': 'shell',
+      'zsh': 'shell',
+      'yml': 'yaml',
+      'yaml': 'yaml',
+      'json': 'json',
+      'md': 'markdown',
+      'markdown': 'markdown',
+      'xml': 'xml',
+    };
+    return languageMap[ext] || 'text';
+  }
+
   protected onUnmount(): void {
     // Check for unsaved changes
     const hasUnsaved = this.tabs.some(t => t.isDirty);
     if (hasUnsaved) {
       console.warn('Leaving with unsaved changes');
+    }
+
+    // Check for uncommitted changes
+    if (this.pendingCommitFiles.size > 0) {
+      console.warn('Leaving with uncommitted changes');
+    }
+
+    // Cleanup commit dialog
+    if (this.commitDialog) {
+      this.commitDialog.close();
+      this.commitDialog = null;
+    }
+
+    // Cleanup URL import dialog
+    if (this.urlImportDialog) {
+      this.urlImportDialog.close();
+      this.urlImportDialog = null;
+    }
+
+    // Cleanup save as snippet dialog
+    if (this.saveAsSnippetDialog) {
+      this.saveAsSnippetDialog.close();
+      this.saveAsSnippetDialog = null;
+    }
+
+    // Cleanup MultiCursorEditor
+    if (this.multiCursorEditor) {
+      this.multiCursorEditor.unmount();
+      this.multiCursorEditor = null;
     }
 
     // Cleanup offline subscription
@@ -779,6 +1555,52 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup autocomplete
+    this.hideAutocomplete();
+    if (this.autocompleteDropdown) {
+      this.autocompleteDropdown.unmount();
+      this.autocompleteDropdown = null;
+    }
+
+    // Cleanup diff viewer and modal
+    if (this.diffViewer) {
+      this.diffViewer.unmount();
+      this.diffViewer = null;
+    }
+    if (this.diffModal) {
+      this.diffModal.close();
+      this.diffModal.unmount();
+      this.diffModal = null;
+    }
+
+    // Cleanup AI Input Box
+    if (this.aiInputBox) {
+      this.aiInputBox.unmount();
+      this.aiInputBox = null;
+    }
+
+    // Cleanup linting panel
+    if (this.lintingPanel) {
+      this.lintingPanel.unmount();
+      this.lintingPanel = null;
+    }
+    this.lintingService.clear();
+
+    // Cleanup presence subscription
+    if (this.unsubscribePresence) {
+      this.unsubscribePresence();
+      this.unsubscribePresence = null;
+    }
+
+    // Disconnect from presence
+    presenceStore.disconnect();
+
+    // Cleanup collaborative cursors
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.unmount();
+      this.collaborativeCursors = null;
     }
   }
 }

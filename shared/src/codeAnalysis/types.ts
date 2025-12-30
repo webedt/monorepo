@@ -193,9 +193,9 @@ export interface CodeAnalyzerConfig {
 }
 
 /**
- * Issue severity for code review findings.
+ * Severity level for review issues.
  */
-export type ReviewIssueSeverity = 'error' | 'warning' | 'info';
+export type ReviewIssueSeverity = 'critical' | 'error' | 'warning' | 'info';
 
 /**
  * A single issue found during code review.
@@ -212,16 +212,53 @@ export interface ReviewIssue {
  * Options for code review.
  */
 export interface ReviewOptions {
+  /**
+   * Focus areas for the review (e.g., 'security', 'performance').
+   */
   focusAreas?: string[];
+
+  /**
+   * Enable strict mode - any issue means not approved.
+   */
   strict?: boolean;
+
+  /**
+   * Auto-approve if no issues are found.
+   */
   autoApprove?: boolean;
+
+  /**
+   * Skip files matching these patterns.
+   */
+  skipPatterns?: string[];
 }
 
 /**
  * Result of a code review.
  */
 export interface ReviewResult {
+  /**
+   * Whether the PR is approved.
+   */
   approved: boolean;
+
+  /**
+   * List of issues found during review.
+   */
   issues: ReviewIssue[];
+
+  /**
+   * Overall assessment of the PR.
+   */
   summary: string;
+
+  /**
+   * Session ID from the Claude Web session.
+   */
+  sessionId?: string;
+
+  /**
+   * Error message if the review failed.
+   */
+  error?: string;
 }

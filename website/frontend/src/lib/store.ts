@@ -3,11 +3,14 @@
  * Reactive state management with subscriptions
  */
 
+import { registerStore, getHmrState, saveHmrState } from './hmr';
+
 type Subscriber<T> = (state: T, prevState: T) => void;
 type Selector<T, R> = (state: T) => R;
 type Updater<T> = (state: T) => Partial<T>;
 
 export class Store<T extends object> {
+  private hmrId: string | null = null;
   private state: T;
   private subscribers: Set<Subscriber<T>> = new Set();
   private selectorSubscribers: Map<Selector<T, unknown>, Set<(value: unknown) => void>> = new Map();
@@ -65,6 +68,35 @@ export class Store<T extends object> {
   }
 
   /**
+   * Enable HMR for this store
+   * State will be preserved across module updates
+   * Note: Uses shallow merge - nested objects may not be fully restored
+   */
+  enableHmr(id: string): this {
+    this.hmrId = id;
+
+    // Try to restore state from HMR (uses setState to notify subscribers)
+    const savedState = getHmrState<T>(`store:${id}`);
+    if (savedState !== undefined) {
+      this.setState(savedState);
+    }
+
+    // Register for future HMR cycles (without auto-restore since we handle it above)
+    registerStore(id, () => this.state);
+
+    return this;
+  }
+
+  /**
+   * Save state for HMR before module disposal
+   */
+  saveForHmr(): void {
+    if (this.hmrId) {
+      saveHmrState(`store:${this.hmrId}`, this.state);
+    }
+  }
+
+  /**
    * Subscribe to all state changes
    */
   subscribe(subscriber: Subscriber<T>): () => void {
@@ -112,26 +144,55 @@ export function createStore<T extends object, A extends object>(
   return Object.assign(store, boundActions);
 }
 
+export interface PersistOptions<T> {
+  include?: (keyof T)[];
+  exclude?: (keyof T)[];
+  version?: number;
+  migrate?: (data: unknown, oldVersion: number) => Partial<T>;
+}
+
 /**
- * Persist store state to localStorage
+ * Persist store state to localStorage with versioning and migration support
  */
 export function persist<T extends object>(
   store: Store<T>,
   key: string,
-  options?: {
-    include?: (keyof T)[];
-    exclude?: (keyof T)[];
-  }
+  options?: PersistOptions<T>
 ): void {
+  const version = options?.version ?? 1;
+
   // Load persisted state
   try {
     const persisted = localStorage.getItem(key);
     if (persisted) {
       const parsed = JSON.parse(persisted);
-      store.setState(parsed);
+
+      // Handle versioned format
+      if (parsed && typeof parsed === 'object' && 'version' in parsed && 'data' in parsed) {
+        const storedVersion = parsed.version as number;
+        let data = parsed.data;
+
+        // Run migration if needed
+        if (storedVersion < version && options?.migrate) {
+          data = options.migrate(data, storedVersion);
+        }
+
+        if (data && typeof data === 'object') {
+          store.setState(data as Partial<T>);
+        }
+      } else {
+        // Legacy unversioned data - run migration from version 0
+        let data = parsed;
+        if (options?.migrate) {
+          data = options.migrate(parsed, 0);
+        }
+        if (data && typeof data === 'object') {
+          store.setState(data as Partial<T>);
+        }
+      }
     }
-  } catch {
-    // Ignore parse errors
+  } catch (error) {
+    console.warn(`persist: Failed to load state for ${key}:`, error);
   }
 
   // Save state on changes
@@ -151,9 +212,13 @@ export function persist<T extends object>(
     }
 
     try {
-      localStorage.setItem(key, JSON.stringify(toSave));
-    } catch {
-      // Ignore storage errors
+      // Save with version wrapper
+      localStorage.setItem(key, JSON.stringify({
+        version,
+        data: toSave,
+      }));
+    } catch (error) {
+      console.warn(`persist: Failed to save state for ${key}:`, error);
     }
   });
 }

@@ -9,14 +9,17 @@
 
 import { randomUUID } from 'crypto';
 import { ASession } from './ASession.js';
-import { db, chatSessions, events, messages } from '../db/index.js';
+import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
 import { ClaudeRemoteProvider } from '../execution/providers/claudeRemoteProvider.js';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
+import { extractEventUuid } from '../utils/helpers/eventHelper.js';
 import { normalizeRepoUrl, generateSessionPath } from '../utils/helpers/sessionPathHelper.js';
 import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { CLAUDE_API_BASE_URL } from '../config/env.js';
 import { eq, desc } from 'drizzle-orm';
+
+import type { TransactionContext } from '../db/index.js';
 import type {
   SessionExecuteParams,
   SessionResumeParams,
@@ -115,23 +118,29 @@ export class SessionService extends ASession {
       gitUrl: repoUrl,
     });
 
-    await db.insert(chatSessions).values({
-      id: chatSessionId,
-      userId,
-      userRequest: textPrompt.slice(0, 200),
-      status: 'running',
-      provider: 'claude',
-      repositoryUrl: repoUrl,
-      repositoryOwner,
-      repositoryName,
-      baseBranch: 'main',
-    });
+    // Use transaction to ensure session and initial message are created atomically
+    // This prevents orphaned sessions if message insertion fails
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      await tx.insert(chatSessions).values({
+        id: chatSessionId,
+        userId,
+        userRequest: textPrompt.slice(0, 200),
+        status: 'running',
+        provider: 'claude',
+        repositoryUrl: repoUrl,
+        repositoryOwner,
+        repositoryName,
+        baseBranch: 'main',
+      });
 
-    // Store user message
-    await db.insert(messages).values({
-      chatSessionId,
-      type: 'user',
-      content: textPrompt,
+      // Store user message
+      await tx.insert(messages).values({
+        chatSessionId,
+        type: 'user',
+        content: textPrompt,
+      });
+    }, {
+      context: { operation: 'createSession', chatSessionId, userId },
     });
 
     // Track stored event UUIDs to prevent duplicates
@@ -145,7 +154,7 @@ export class SessionService extends ASession {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -153,6 +162,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -293,17 +303,23 @@ export class SessionService extends ASession {
       remoteSessionId: session.remoteSessionId,
     });
 
-    // Update session status
-    await db.update(chatSessions)
-      .set({ status: 'running' })
-      .where(eq(chatSessions.id, sessionId));
-
-    // Store user message
+    // Use transaction to ensure status update and message insertion are atomic
+    // This prevents inconsistent state if message insertion fails
     const textPrompt = extractTextFromPrompt(prompt);
-    await db.insert(messages).values({
-      chatSessionId: sessionId,
-      type: 'user',
-      content: textPrompt,
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      // Update session status
+      await tx.update(chatSessions)
+        .set({ status: 'running' })
+        .where(eq(chatSessions.id, sessionId));
+
+      // Store user message
+      await tx.insert(messages).values({
+        chatSessionId: sessionId,
+        type: 'user',
+        content: textPrompt,
+      });
+    }, {
+      context: { operation: 'resumeSession', sessionId },
     });
 
     // Track stored event UUIDs
@@ -315,7 +331,7 @@ export class SessionService extends ASession {
         await onEvent(event);
       }
 
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -323,6 +339,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId: sessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -441,17 +458,14 @@ export class SessionService extends ASession {
       const eventsResponse = await client.getEvents(session.remoteSessionId);
       const remoteEvents = eventsResponse.data || [];
 
-      // Get existing event UUIDs for this session
-      // TODO(perf): Currently fetches all eventData to extract UUIDs. For sessions with
-      // many events, this can be slow. Consider adding a dedicated 'uuid' column to the
-      // events table with an index for more efficient deduplication queries.
+      // Get existing event UUIDs for this session using the indexed uuid column
       const existingEvents = await db
-        .select({ eventData: events.eventData })
+        .select({ uuid: events.uuid })
         .from(events)
         .where(eq(events.chatSessionId, sessionId));
 
       const existingUuids = new Set(
-        existingEvents.map(e => (e.eventData as { uuid?: string })?.uuid).filter(Boolean)
+        existingEvents.map(e => e.uuid).filter((uuid): uuid is string => uuid !== null)
       );
 
       // Filter to only new events
@@ -514,6 +528,7 @@ export class SessionService extends ASession {
             await tx.insert(events).values(
               eventsToInsert.map(event => ({
                 chatSessionId: sessionId,
+                uuid: extractEventUuid(event as Record<string, unknown>),
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               }))
@@ -596,20 +611,7 @@ export class SessionService extends ASession {
       return null;
     }
 
-    return {
-      id: session.id,
-      userId: session.userId,
-      status: session.status as 'pending' | 'running' | 'completed' | 'error',
-      userRequest: session.userRequest || undefined,
-      repositoryOwner: session.repositoryOwner || undefined,
-      repositoryName: session.repositoryName || undefined,
-      branch: session.branch || undefined,
-      remoteSessionId: session.remoteSessionId || undefined,
-      remoteWebUrl: session.remoteWebUrl || undefined,
-      totalCost: session.totalCost || undefined,
-      createdAt: session.createdAt || undefined,
-      completedAt: session.completedAt || undefined,
-    };
+    return this.mapSessionToInfo(session);
   }
 
   async list(userId: string, limit: number = 20): Promise<SessionInfo[]> {
@@ -620,31 +622,26 @@ export class SessionService extends ASession {
       .orderBy(desc(chatSessions.createdAt))
       .limit(limit);
 
-    return sessions.map(session => ({
-      id: session.id,
-      userId: session.userId,
-      status: session.status as 'pending' | 'running' | 'completed' | 'error',
-      userRequest: session.userRequest || undefined,
-      repositoryOwner: session.repositoryOwner || undefined,
-      repositoryName: session.repositoryName || undefined,
-      branch: session.branch || undefined,
-      remoteSessionId: session.remoteSessionId || undefined,
-      remoteWebUrl: session.remoteWebUrl || undefined,
-      totalCost: session.totalCost || undefined,
-      createdAt: session.createdAt || undefined,
-      completedAt: session.completedAt || undefined,
-    }));
+    return sessions.map(session => this.mapSessionToInfo(session));
   }
 
   async delete(sessionId: string): Promise<void> {
-    // Delete events first
-    await db.delete(events).where(eq(events.chatSessionId, sessionId));
+    // Use transaction to ensure all related records are deleted atomically
+    // This prevents orphaned events/messages if session deletion fails,
+    // or orphaned session if events/messages deletion fails
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      // Delete events first (foreign key dependency)
+      await tx.delete(events).where(eq(events.chatSessionId, sessionId));
 
-    // Delete messages
-    await db.delete(messages).where(eq(messages.chatSessionId, sessionId));
+      // Delete messages (foreign key dependency)
+      await tx.delete(messages).where(eq(messages.chatSessionId, sessionId));
 
-    // Delete session
-    await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+      // Delete session
+      await tx.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+    }, {
+      maxRetries: 1,
+      context: { operation: 'deleteSession', sessionId },
+    });
 
     logger.info('Session deleted', {
       component: 'Session',

@@ -113,6 +113,47 @@
   50% { opacity: 0.5; }
 }
 
+/* Undo/Redo Controls */
+.undo-redo-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.undo-btn,
+.redo-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.undo-btn:hover:not(:disabled),
+.redo-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.undo-btn:disabled,
+.redo-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.undo-btn svg,
+.redo-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Offline Indicator Container */
 .offline-indicator-container {
   position: relative;
@@ -142,6 +183,12 @@
   justify-content: space-between;
   padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid var(--color-border);
+}
+
+.explorer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
 }
 
 .explorer-title {
@@ -245,6 +292,19 @@
   background: var(--color-bg-primary);
 }
 
+/* Editor Area (contains editor content + linting panel) */
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* AI Input Box Container */
+.ai-input-box-container {
+  flex-shrink: 0;
+}
+
 /* Tabs */
 .tabs-bar {
   display: flex;
@@ -316,6 +376,12 @@
   flex: 1;
   overflow: hidden;
   position: relative;
+  min-height: 0; /* Allow flex shrinking */
+}
+
+/* Linting Panel Container */
+.linting-panel-container {
+  flex-shrink: 0;
 }
 
 .editor-empty {
@@ -336,28 +402,37 @@
   font-size: var(--font-size-sm);
 }
 
+.editor-empty .editor-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-sm);
+}
+
 .editor-wrapper {
+  position: relative;
   height: 100%;
   overflow: hidden;
+}
+
+/* Multi-cursor editor container */
+.multi-cursor-editor-container {
+  width: 100%;
+  height: 100%;
+}
+
+.collaborative-cursors-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
 }
 
 .code-editor {
   width: 100%;
   height: 100%;
-  border: none;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  padding: var(--spacing-md);
-  resize: none;
-  outline: none;
-  tab-size: 2;
-}
-
-.code-editor::placeholder {
-  color: var(--color-text-muted);
 }
 
 /* Preview */

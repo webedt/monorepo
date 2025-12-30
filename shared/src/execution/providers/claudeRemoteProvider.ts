@@ -12,32 +12,17 @@ import {
   generateTitle,
 } from '../../claudeWeb/index.js';
 import { ServiceProvider, AClaudeWebClient } from '../../services/registry.js';
-import { logger } from '../../utils/logging/logger.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID, CLAUDE_COOKIES, OPENROUTER_API_KEY } from '../../config/env.js';
-import type {
-  ExecutionProvider,
-  ExecuteParams,
-  ResumeParams,
-  ExecutionResult,
-  ExecutionEventCallback,
-  ExecutionEvent,
-  ContentBlock,
+import {
+  AExecutionProvider,
+  type ExecuteParams,
+  type ResumeParams,
+  type ExecutionResult,
+  type ExecutionEventCallback,
+  type ExecutionEvent,
+  type ProviderCapabilities,
 } from './types.js';
-
-/**
- * Extract text from prompt (handles both string and content blocks)
- */
-function extractTextFromPrompt(prompt: string | ContentBlock[]): string {
-  if (typeof prompt === 'string') {
-    return prompt;
-  }
-  // Extract text from content blocks
-  return prompt
-    .filter((block): block is { type: 'text'; text: string } => block.type === 'text' && 'text' in block)
-    .map(block => block.text)
-    .join('\n');
-}
 
 /**
  * Pass through raw Anthropic session events directly
@@ -57,8 +42,16 @@ function passRawEvent(event: SessionEvent, source: string): ExecutionEvent {
 /**
  * Claude Remote Provider
  */
-export class ClaudeRemoteProvider implements ExecutionProvider {
+export class ClaudeRemoteProvider extends AExecutionProvider {
   readonly name = 'claude';
+
+  readonly capabilities: ProviderCapabilities = {
+    supportsResume: true,
+    supportsImages: true,
+    supportsInterrupt: true,
+    generatesTitle: true,
+    hasPersistentSessions: true,
+  };
 
   /**
    * Get and configure a ClaudeWebClient with the given auth
@@ -84,8 +77,11 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     const { chatSessionId, prompt, gitUrl, model, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
-    logger.info('Starting Claude Remote execution', {
-      component: 'ClaudeRemoteProvider',
+    if (!claudeAuth) {
+      throw new Error('Claude authentication required for ClaudeRemoteProvider');
+    }
+
+    this.logExecution('info', 'Starting Claude Remote execution', {
       chatSessionId,
       gitUrl,
       model: model || CLAUDE_DEFAULT_MODEL,
@@ -95,7 +91,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     const client = this.getClient(claudeAuth, environmentId);
 
     // Extract text from prompt for title generation (images can't be used for title)
-    const textPrompt = extractTextFromPrompt(prompt);
+    const textPrompt = this.extractTextFromPrompt(prompt);
 
     // Generate title with 4-method fallback:
     // 1. claude.ai dust endpoint (fastest, requires cookies)
@@ -115,7 +111,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       async (event: TitleGenerationEvent) => {
         await onEvent({
           type: 'title_generation',
-          timestamp: new Date().toISOString(),
+          timestamp: this.createTimestamp(),
           source,
           method: event.method,
           status: event.status,
@@ -125,8 +121,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       }
     );
 
-    logger.info('Generated session title and branch', {
-      component: 'ClaudeRemoteProvider',
+    this.logExecution('info', 'Generated session title and branch', {
       title: generatedTitle.title,
       branch_name: generatedTitle.branch_name,
       source: generatedTitle.source,
@@ -143,10 +138,9 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
 
     try {
       // Create session
-      const { sessionId, webUrl, title } = await client.createSession(createParams);
+      const { sessionId, webUrl } = await client.createSession(createParams);
 
-      logger.info('Claude Remote session created', {
-        component: 'ClaudeRemoteProvider',
+      this.logExecution('info', 'Claude Remote session created', {
         chatSessionId,
         remoteSessionId: sessionId,
         webUrl,
@@ -154,13 +148,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
 
       // Emit session_created event so executeRemote.ts can save remoteSessionId immediately
       // This is critical for archive functionality - the remoteSessionId must be persisted
-      await onEvent({
-        type: 'session_created',
-        timestamp: new Date().toISOString(),
-        source,
-        remoteSessionId: sessionId,
-        remoteWebUrl: webUrl,
-      });
+      await this.emitSessionCreatedEvent(onEvent, sessionId, webUrl);
 
       // Poll for events - pass raw events directly
       const result = await client.pollSession(
@@ -172,8 +160,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         { abortSignal }
       );
 
-      logger.info('Claude Remote execution completed', {
-        component: 'ClaudeRemoteProvider',
+      this.logExecution('info', 'Claude Remote execution completed', {
         chatSessionId,
         remoteSessionId: sessionId,
         status: result.status,
@@ -193,19 +180,12 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Claude Remote execution failed', error, {
-        component: 'ClaudeRemoteProvider',
+      this.logExecution('error', 'Claude Remote execution failed', {
+        error,
         chatSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -220,8 +200,11 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     const { chatSessionId, remoteSessionId, prompt, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
-    logger.info('Resuming Claude Remote session', {
-      component: 'ClaudeRemoteProvider',
+    if (!claudeAuth) {
+      throw new Error('Claude authentication required for ClaudeRemoteProvider');
+    }
+
+    this.logExecution('info', 'Resuming Claude Remote session', {
       chatSessionId,
       remoteSessionId,
     });
@@ -246,8 +229,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         { abortSignal }
       );
 
-      logger.info('Claude Remote resume completed', {
-        component: 'ClaudeRemoteProvider',
+      this.logExecution('info', 'Claude Remote resume completed', {
         chatSessionId,
         remoteSessionId,
         status: result.status,
@@ -264,20 +246,13 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Claude Remote resume failed', error, {
-        component: 'ClaudeRemoteProvider',
+      this.logExecution('error', 'Claude Remote resume failed', {
+        error,
         chatSessionId,
         remoteSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -285,17 +260,19 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
   /**
    * Interrupt a running session
    */
-  async interrupt(remoteSessionId: string, claudeAuth: ClaudeAuth): Promise<void> {
-    logger.info('Interrupting Claude Remote session', {
-      component: 'ClaudeRemoteProvider',
+  async interrupt(remoteSessionId: string, auth?: ClaudeAuth): Promise<void> {
+    if (!auth) {
+      throw new Error('Claude authentication required for ClaudeRemoteProvider interrupt');
+    }
+
+    this.logExecution('info', 'Interrupting Claude Remote session', {
       remoteSessionId,
     });
 
-    const client = this.getClient(claudeAuth);
+    const client = this.getClient(auth);
     await client.interruptSession(remoteSessionId);
 
-    logger.info('Claude Remote session interrupted', {
-      component: 'ClaudeRemoteProvider',
+    this.logExecution('info', 'Claude Remote session interrupted', {
       remoteSessionId,
     });
   }

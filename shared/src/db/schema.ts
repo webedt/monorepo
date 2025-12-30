@@ -1,44 +1,35 @@
 import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex } from 'drizzle-orm/pg-core';
 
+import {
+  encryptedText,
+  encryptedJsonColumn,
+} from './encryptedColumns.js';
+
+import type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from './encryptedColumns.js';
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
   passwordHash: text('password_hash').notNull(),
   githubId: text('github_id').unique(),
-  githubAccessToken: text('github_access_token'),
-  claudeAuth: json('claude_auth').$type<{
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    scopes?: string[];
-    subscriptionType?: string;
-    rateLimitTier?: string;
-  }>(),
-  codexAuth: json('codex_auth').$type<{
-    apiKey?: string;
-    accessToken?: string;
-    refreshToken?: string;
-    expiresAt?: number;
-  }>(),
-  geminiAuth: json('gemini_auth').$type<{
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    tokenType?: string;
-    scope?: string;
-  }>(),
-  // OpenRouter API key for code completions (autocomplete)
-  openrouterApiKey: text('openrouter_api_key'),
+  // Encrypted credentials - automatically encrypted on write, decrypted on read
+  githubAccessToken: encryptedText('github_access_token'),
+  claudeAuth: encryptedJsonColumn<ClaudeAuthData>('claude_auth'),
+  codexAuth: encryptedJsonColumn<CodexAuthData>('codex_auth'),
+  geminiAuth: encryptedJsonColumn<GeminiAuthData>('gemini_auth'),
+  // OpenRouter API key for code completions (autocomplete) - encrypted
+  openrouterApiKey: encryptedText('openrouter_api_key'),
   // Autocomplete settings
   autocompleteEnabled: boolean('autocomplete_enabled').default(true).notNull(),
   autocompleteModel: text('autocomplete_model').default('openai/gpt-oss-120b:cerebras'),
-  // Image editing AI provider API keys
-  imageAiKeys: json('image_ai_keys').$type<{
-    openrouter?: string;
-    cometapi?: string;
-    google?: string;
-  }>(),
+  // Image editing AI provider API keys - encrypted
+  imageAiKeys: encryptedJsonColumn<ImageAiKeysData>('image_ai_keys'),
   // Image editing AI preferences
   imageAiProvider: text('image_ai_provider').default('openrouter'), // 'openrouter' | 'cometapi' | 'google'
   imageAiModel: text('image_ai_model').default('google/gemini-2.5-flash-image'), // model identifier
@@ -48,12 +39,20 @@ export const users = pgTable('users', {
   stopListeningAfterSubmit: boolean('stop_listening_after_submit').default(false).notNull(),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),
   preferredModel: text('preferred_model'),
-  chatVerbosityLevel: text('chat_verbosity_level').default('verbose').notNull(), // 'minimal' | 'normal' | 'verbose'
+  chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
   storageUsedBytes: text('storage_used_bytes').default('0').notNull(), // Current usage (stored as string for bigint precision)
+  // Spending limits configuration
+  spendingLimitEnabled: boolean('spending_limit_enabled').default(false).notNull(),
+  monthlyBudgetCents: text('monthly_budget_cents').default('0').notNull(), // Budget in cents (stored as string for precision)
+  perTransactionLimitCents: text('per_transaction_limit_cents').default('0').notNull(), // Per-transaction limit in cents
+  spendingResetDay: integer('spending_reset_day').default(1).notNull(), // Day of month to reset (1-31)
+  currentMonthSpentCents: text('current_month_spent_cents').default('0').notNull(), // Current month spending in cents
+  spendingLimitAction: text('spending_limit_action').default('warn').notNull(), // 'warn' | 'block' - action when limit reached
+  spendingResetAt: timestamp('spending_reset_at'), // When the current month spending was last reset
 });
 
 export const sessions = pgTable('sessions', {
@@ -92,6 +91,10 @@ export const chatSessions = pgTable('chat_sessions', {
   completedAt: timestamp('completed_at'),
   deletedAt: timestamp('deleted_at'), // Soft delete timestamp
   workerLastActivity: timestamp('worker_last_activity'), // Last time worker sent an event (for orphan detection)
+  favorite: boolean('favorite').default(false).notNull(), // User favorite/starred status
+  // Sharing fields - "public but unlisted" (shareable if you know the link)
+  shareToken: text('share_token').unique(), // UUID-based token for sharing
+  shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
 });
 
 export const messages = pgTable('messages', {
@@ -116,9 +119,13 @@ export const events = pgTable('events', {
   chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
-});
+}, (table) => [
+  // Index for efficient UUID-based deduplication queries
+  uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),
+]);
 
 // Live Chat messages - branch-based chat messages for workspace collaboration
 export const liveChatMessages = pgTable('live_chat_messages', {
@@ -202,6 +209,14 @@ export const organizations = pgTable('organizations', {
 
 // Organization membership roles
 export type OrganizationRole = 'owner' | 'admin' | 'member';
+
+/** Valid organization role values */
+export const ORGANIZATION_ROLES: readonly OrganizationRole[] = ['owner', 'admin', 'member'] as const;
+
+/** Type guard to check if a string is a valid OrganizationRole */
+export function isOrganizationRole(value: unknown): value is OrganizationRole {
+  return typeof value === 'string' && ORGANIZATION_ROLES.includes(value as OrganizationRole);
+}
 
 // Organization members - junction table for users and organizations
 export const organizationMembers = pgTable('organization_members', {
@@ -606,6 +621,101 @@ export type ChannelMessage = typeof channelMessages.$inferSelect;
 export type NewChannelMessage = typeof channelMessages.$inferInsert;
 
 // ============================================================================
+// COLLECTIONS - User-created organizational folders for sessions
+// ============================================================================
+
+// Collections - User-created organizational folders
+export const collections = pgTable('collections', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  color: text('color'), // Optional color for visual distinction (e.g., '#FF5733')
+  icon: text('icon'), // Optional icon identifier (e.g., 'folder', 'star', 'code')
+  sortOrder: integer('sort_order').default(0).notNull(), // For custom ordering
+  isDefault: boolean('is_default').default(false).notNull(), // Default collection for new sessions
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('collection_user_name_idx').on(table.userId, table.name),
+]);
+
+// Session Collections - Junction table for sessions in collections (many-to-many)
+export const sessionCollections = pgTable('session_collections', {
+  id: text('id').primaryKey(), // UUID
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  collectionId: text('collection_id')
+    .notNull()
+    .references(() => collections.id, { onDelete: 'cascade' }),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('session_collection_unique_idx').on(table.sessionId, table.collectionId),
+]);
+
+// Type exports for Collections
+export type Collection = typeof collections.$inferSelect;
+export type NewCollection = typeof collections.$inferInsert;
+export type SessionCollection = typeof sessionCollections.$inferSelect;
+export type NewSessionCollection = typeof sessionCollections.$inferInsert;
+
+// ============================================================================
+// PAYMENT TRANSACTIONS - Stripe and PayPal payment tracking
+// ============================================================================
+
+// Payment Transactions - Tracks payment provider transactions
+export const paymentTransactions = pgTable('payment_transactions', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  purchaseId: text('purchase_id')
+    .references(() => purchases.id, { onDelete: 'set null' }),
+  provider: text('provider').notNull(), // 'stripe' | 'paypal'
+  providerTransactionId: text('provider_transaction_id').notNull(), // Stripe PaymentIntent ID or PayPal Order ID
+  providerSessionId: text('provider_session_id'), // Stripe Checkout Session ID
+  type: text('type').notNull(), // 'checkout' | 'payment_intent' | 'refund'
+  status: text('status').notNull().default('pending'), // 'pending' | 'requires_action' | 'processing' | 'succeeded' | 'failed' | 'cancelled' | 'refunded'
+  amount: integer('amount').notNull(), // Amount in cents
+  currency: text('currency').default('USD').notNull(),
+  metadata: json('metadata').$type<{
+    gameId?: string;
+    gameName?: string;
+    customerEmail?: string;
+    [key: string]: string | undefined;
+  }>(),
+  providerResponse: json('provider_response').$type<Record<string, unknown>>(), // Raw provider response for debugging
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// Payment Webhooks - Logs all webhook events for auditing
+export const paymentWebhooks = pgTable('payment_webhooks', {
+  id: text('id').primaryKey(), // UUID
+  provider: text('provider').notNull(), // 'stripe' | 'paypal'
+  eventId: text('event_id').notNull(), // Provider's event ID
+  eventType: text('event_type').notNull(), // e.g., 'checkout.session.completed'
+  transactionId: text('transaction_id')
+    .references(() => paymentTransactions.id, { onDelete: 'set null' }),
+  payload: json('payload').notNull(), // Raw webhook payload
+  processed: boolean('processed').default(false).notNull(),
+  processedAt: timestamp('processed_at'),
+  error: text('error'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Type exports for Payment
+export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
+export type NewPaymentTransaction = typeof paymentTransactions.$inferInsert;
+export type PaymentWebhook = typeof paymentWebhooks.$inferSelect;
+export type NewPaymentWebhook = typeof paymentWebhooks.$inferInsert;
+
+// ============================================================================
 // TAXONOMY SYSTEM - Admin-configurable categories, tags, and genres
 // ============================================================================
 
@@ -669,3 +779,422 @@ export type TaxonomyTerm = typeof taxonomyTerms.$inferSelect;
 export type NewTaxonomyTerm = typeof taxonomyTerms.$inferInsert;
 export type ItemTaxonomy = typeof itemTaxonomies.$inferSelect;
 export type NewItemTaxonomy = typeof itemTaxonomies.$inferInsert;
+
+// ============================================================================
+// GAME PLATFORM LIBRARIES - Platforms, installations, achievements, cloud saves
+// ============================================================================
+
+// Game Platforms - Supported platforms (Windows, Mac, Linux, etc.)
+export const gamePlatforms = pgTable('game_platforms', {
+  id: text('id').primaryKey(), // UUID
+  os: text('os').notNull(), // 'windows' | 'macos' | 'linux'
+  architecture: text('architecture').notNull(), // 'x64' | 'x86' | 'arm64'
+  displayName: text('display_name').notNull(),
+  iconUrl: text('icon_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_platform_os_arch_idx').on(table.os, table.architecture),
+]);
+
+// Game System Requirements - Minimum/recommended specs per platform
+export const gameSystemRequirements = pgTable('game_system_requirements', {
+  id: text('id').primaryKey(), // UUID
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  platformId: text('platform_id')
+    .notNull()
+    .references(() => gamePlatforms.id, { onDelete: 'cascade' }),
+  level: text('level').notNull(), // 'minimum' | 'recommended'
+  osVersion: text('os_version'),
+  processor: text('processor'),
+  memory: integer('memory'), // RAM in MB
+  graphics: text('graphics'),
+  graphicsMemory: integer('graphics_memory'), // VRAM in MB
+  graphicsApi: text('graphics_api'), // 'directx11' | 'directx12' | 'vulkan' | 'metal' | 'opengl'
+  storage: integer('storage'), // Required disk space in MB
+  additionalNotes: text('additional_notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_system_req_unique_idx').on(table.gameId, table.platformId, table.level),
+]);
+
+// Game Builds - Version/build information per platform
+export const gameBuilds = pgTable('game_builds', {
+  id: text('id').primaryKey(), // UUID
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  platformId: text('platform_id')
+    .notNull()
+    .references(() => gamePlatforms.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  buildNumber: integer('build_number'),
+  sizeBytes: text('size_bytes').notNull(), // Stored as string for bigint precision
+  checksum: text('checksum'),
+  checksumType: text('checksum_type'), // 'md5' | 'sha256'
+  releaseNotes: text('release_notes'),
+  isMandatory: boolean('is_mandatory').default(false).notNull(),
+  isPrerelease: boolean('is_prerelease').default(false).notNull(),
+  downloadUrl: text('download_url'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_build_version_idx').on(table.gameId, table.platformId, table.version),
+]);
+
+// Game Installations - User installation records
+export const gameInstallations = pgTable('game_installations', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  platformId: text('platform_id')
+    .notNull()
+    .references(() => gamePlatforms.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('not_installed'), // 'not_installed' | 'queued' | 'downloading' | 'installing' | 'installed' | 'updating' | 'paused' | 'error'
+  installPath: text('install_path'),
+  version: text('version'),
+  installedSizeBytes: text('installed_size_bytes'), // Stored as string for bigint precision
+  downloadProgress: json('download_progress').$type<{
+    totalBytes: number;
+    downloadedBytes: number;
+    bytesPerSecond: number;
+    estimatedSecondsRemaining: number;
+    currentFile?: string;
+    filesTotal?: number;
+    filesCompleted?: number;
+  }>(),
+  lastPlayedAt: timestamp('last_played_at'),
+  playtimeMinutes: integer('playtime_minutes').default(0).notNull(),
+  autoUpdate: boolean('auto_update').default(true).notNull(),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_installation_user_game_idx').on(table.userId, table.gameId),
+]);
+
+// Game Achievements - Achievement definitions
+export const gameAchievements = pgTable('game_achievements', {
+  id: text('id').primaryKey(), // UUID
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  hiddenDescription: text('hidden_description'), // Shown after unlock for hidden achievements
+  iconUrl: text('icon_url'),
+  iconLockedUrl: text('icon_locked_url'),
+  points: integer('points').default(10).notNull(),
+  rarity: text('rarity').default('common').notNull(), // 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+  type: text('type').default('standard').notNull(), // 'standard' | 'hidden' | 'progressive'
+  maxProgress: integer('max_progress'), // For progressive achievements
+  sortOrder: integer('sort_order').default(0).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ============================================================================
+// ANNOUNCEMENTS - Official platform updates
+// ============================================================================
+
+// Announcements - Official platform announcements from admins
+export const announcements = pgTable('announcements', {
+  id: text('id').primaryKey(), // UUID
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  type: text('type').notNull().default('general'), // 'maintenance' | 'feature' | 'alert' | 'general'
+  priority: text('priority').notNull().default('normal'), // 'low' | 'normal' | 'high' | 'critical'
+  status: text('status').notNull().default('draft'), // 'draft' | 'published' | 'archived'
+  authorId: text('author_id')
+    .references(() => users.id, { onDelete: 'set null' }), // Nullable to allow onDelete: set null
+  publishedAt: timestamp('published_at'),
+  expiresAt: timestamp('expires_at'), // Optional expiration date
+  pinned: boolean('pinned').default(false).notNull(), // Pinned announcements appear at top
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Type exports for Announcements
+export type Announcement = typeof announcements.$inferSelect;
+export type NewAnnouncement = typeof announcements.$inferInsert;
+
+// User Achievements - User progress on achievements
+export const userAchievements = pgTable('user_achievements', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  achievementId: text('achievement_id')
+    .notNull()
+    .references(() => gameAchievements.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  unlocked: boolean('unlocked').default(false).notNull(),
+  unlockedAt: timestamp('unlocked_at'),
+  progress: integer('progress'), // For progressive achievements
+  notified: boolean('notified').default(false).notNull(), // User has been notified of unlock
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('user_achievement_unique_idx').on(table.userId, table.achievementId),
+]);
+
+// Game Cloud Saves - Cloud save synchronization
+export const gameCloudSaves = pgTable('game_cloud_saves', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  slotNumber: integer('slot_number').notNull(),
+  slotType: text('slot_type').notNull(), // 'auto' | 'manual' | 'quicksave' | 'checkpoint'
+  name: text('name'),
+  description: text('description'),
+  thumbnailUrl: text('thumbnail_url'),
+  sizeBytes: text('size_bytes').notNull(), // Stored as string for bigint precision
+  checksum: text('checksum').notNull(),
+  checksumType: text('checksum_type').notNull(), // 'md5' | 'sha256'
+  gameVersion: text('game_version'),
+  playtimeMinutes: integer('playtime_minutes'),
+  gameProgress: json('game_progress').$type<Record<string, unknown>>(), // Game-specific metadata
+  syncStatus: text('sync_status').default('synced').notNull(), // 'synced' | 'uploading' | 'downloading' | 'conflict' | 'error'
+  cloudUrl: text('cloud_url'),
+  localPath: text('local_path'),
+  conflictData: json('conflict_data').$type<{
+    localChecksum: string;
+    cloudChecksum: string;
+    localModifiedAt: string;
+    cloudModifiedAt: string;
+    localSizeBytes: number;
+    cloudSizeBytes: number;
+  }>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  syncedAt: timestamp('synced_at'),
+}, (table) => [
+  uniqueIndex('game_cloud_save_slot_idx').on(table.userId, table.gameId, table.slotNumber),
+]);
+
+// Type exports for Game Platform Libraries
+export type GamePlatform = typeof gamePlatforms.$inferSelect;
+export type NewGamePlatform = typeof gamePlatforms.$inferInsert;
+export type GameSystemRequirement = typeof gameSystemRequirements.$inferSelect;
+export type NewGameSystemRequirement = typeof gameSystemRequirements.$inferInsert;
+export type GameBuild = typeof gameBuilds.$inferSelect;
+export type NewGameBuild = typeof gameBuilds.$inferInsert;
+export type GameInstallation = typeof gameInstallations.$inferSelect;
+export type NewGameInstallation = typeof gameInstallations.$inferInsert;
+export type GameAchievement = typeof gameAchievements.$inferSelect;
+export type NewGameAchievement = typeof gameAchievements.$inferInsert;
+export type UserAchievement = typeof userAchievements.$inferSelect;
+export type NewUserAchievement = typeof userAchievements.$inferInsert;
+export type GameCloudSave = typeof gameCloudSaves.$inferSelect;
+export type NewGameCloudSave = typeof gameCloudSaves.$inferInsert;
+
+// ============================================================================
+// CLOUD SAVES - Synced game saves across devices
+// ============================================================================
+
+// Cloud Saves - User game saves synced across devices
+export const cloudSaves = pgTable('cloud_saves', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  slotNumber: integer('slot_number').notNull(), // Save slot 1-N
+  slotName: text('slot_name'), // User-given save name (e.g., "Before Boss Fight")
+  saveData: text('save_data').notNull(), // Base64 or JSON encoded save content
+  fileSize: integer('file_size').notNull(), // Size in bytes
+  checksum: text('checksum'), // SHA-256 hash for integrity verification
+  platformData: json('platform_data').$type<{
+    deviceName?: string;
+    platform?: string; // 'web' | 'desktop' | 'mobile'
+    gameVersion?: string;
+    browserInfo?: string;
+  }>(),
+  screenshotUrl: text('screenshot_url'), // Optional save screenshot
+  playTimeSeconds: integer('play_time_seconds').default(0), // Playtime at save
+  gameProgress: json('game_progress').$type<{
+    level?: number;
+    chapter?: string;
+    percentage?: number;
+    customData?: Record<string, unknown>;
+  }>(), // Game-specific progress metadata
+  lastPlayedAt: timestamp('last_played_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: a user can only have one save per slot per game
+  uniqueIndex('cloud_saves_user_game_slot_unique_idx').on(table.userId, table.gameId, table.slotNumber),
+]);
+
+// Cloud Save Versions - Historical versions of saves for recovery
+export const cloudSaveVersions = pgTable('cloud_save_versions', {
+  id: text('id').primaryKey(), // UUID
+  cloudSaveId: text('cloud_save_id')
+    .notNull()
+    .references(() => cloudSaves.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  saveData: text('save_data').notNull(),
+  fileSize: integer('file_size').notNull(),
+  checksum: text('checksum'),
+  platformData: json('platform_data').$type<{
+    deviceName?: string;
+    platform?: string;
+    gameVersion?: string;
+    browserInfo?: string;
+  }>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: version number must be unique per save
+  uniqueIndex('cloud_save_versions_save_version_unique_idx').on(table.cloudSaveId, table.version),
+]);
+
+// Cloud Save Sync Log - Tracks sync operations for debugging
+export const cloudSaveSyncLog = pgTable('cloud_save_sync_log', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  cloudSaveId: text('cloud_save_id')
+    .references(() => cloudSaves.id, { onDelete: 'set null' }),
+  operation: text('operation').notNull(), // 'upload' | 'download' | 'delete' | 'conflict_resolved'
+  deviceInfo: json('device_info').$type<{
+    deviceName?: string;
+    platform?: string;
+    browserInfo?: string;
+    ipAddress?: string;
+  }>(),
+  status: text('status').notNull().default('success'), // 'success' | 'failed' | 'conflict'
+  errorMessage: text('error_message'),
+  bytesTransferred: integer('bytes_transferred'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Type exports for Cloud Saves
+export type CloudSave = typeof cloudSaves.$inferSelect;
+export type NewCloudSave = typeof cloudSaves.$inferInsert;
+export type CloudSaveVersion = typeof cloudSaveVersions.$inferSelect;
+export type NewCloudSaveVersion = typeof cloudSaveVersions.$inferInsert;
+export type CloudSaveSyncLog = typeof cloudSaveSyncLog.$inferSelect;
+export type NewCloudSaveSyncLog = typeof cloudSaveSyncLog.$inferInsert;
+
+// ============================================================================
+// SNIPPETS - User code snippets and templates for common patterns
+// ============================================================================
+
+// Supported programming languages for snippets
+export const SNIPPET_LANGUAGES = [
+  'javascript', 'typescript', 'python', 'java', 'csharp', 'cpp', 'c',
+  'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'scala', 'html',
+  'css', 'scss', 'sql', 'bash', 'powershell', 'yaml', 'json', 'xml',
+  'markdown', 'dockerfile', 'terraform', 'graphql', 'other'
+] as const;
+
+export type SnippetLanguage = typeof SNIPPET_LANGUAGES[number];
+
+// Snippet categories for organization
+export const SNIPPET_CATEGORIES = [
+  'function', 'class', 'component', 'hook', 'utility', 'api',
+  'database', 'testing', 'config', 'boilerplate', 'algorithm',
+  'pattern', 'snippet', 'template', 'other'
+] as const;
+
+export type SnippetCategory = typeof SNIPPET_CATEGORIES[number];
+
+// Snippets - User-created code snippets and templates
+export const snippets = pgTable('snippets', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  // Snippet content
+  title: text('title').notNull(),
+  description: text('description'),
+  code: text('code').notNull(),
+
+  // Metadata
+  language: text('language').notNull().default('other'), // Programming language
+  category: text('category').notNull().default('snippet'), // Category for organization
+  tags: json('tags').$type<string[]>().default([]), // User-defined tags
+
+  // Template variables (for parameterized snippets)
+  // Format: { "variableName": { "description": "...", "defaultValue": "..." } }
+  variables: json('variables').$type<Record<string, {
+    description?: string;
+    defaultValue?: string;
+    placeholder?: string;
+  }>>(),
+
+  // Usage and status
+  usageCount: integer('usage_count').default(0).notNull(),
+  isFavorite: boolean('is_favorite').default(false).notNull(),
+  isPublic: boolean('is_public').default(false).notNull(), // Share with community
+
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+}, (table) => [
+  // Index for faster lookups by user
+  uniqueIndex('snippets_user_title_idx').on(table.userId, table.title),
+]);
+
+// Snippet Collections - Organize snippets into folders/categories
+export const snippetCollections = pgTable('snippet_collections', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  description: text('description'),
+  color: text('color'), // Hex color for visual distinction (e.g., '#FF5733')
+  icon: text('icon'), // Icon identifier (e.g., 'folder', 'code', 'star')
+
+  sortOrder: integer('sort_order').default(0).notNull(),
+  isDefault: boolean('is_default').default(false).notNull(), // Default collection for new snippets
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('snippet_collections_user_name_idx').on(table.userId, table.name),
+]);
+
+// Snippets in Collections - Junction table for many-to-many relationship
+export const snippetsInCollections = pgTable('snippets_in_collections', {
+  id: text('id').primaryKey(), // UUID
+  snippetId: text('snippet_id')
+    .notNull()
+    .references(() => snippets.id, { onDelete: 'cascade' }),
+  collectionId: text('collection_id')
+    .notNull()
+    .references(() => snippetCollections.id, { onDelete: 'cascade' }),
+
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('snippets_in_collections_unique_idx').on(table.snippetId, table.collectionId),
+]);
+
+// Type exports for Snippets
+export type Snippet = typeof snippets.$inferSelect;
+export type NewSnippet = typeof snippets.$inferInsert;
+export type SnippetCollection = typeof snippetCollections.$inferSelect;
+export type NewSnippetCollection = typeof snippetCollections.$inferInsert;
+export type SnippetInCollection = typeof snippetsInCollections.$inferSelect;
+export type NewSnippetInCollection = typeof snippetsInCollections.$inferInsert;

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { ASessionAuthorizationService } from './ASessionAuthorizationService.js';
 import { organizationService } from '../organizations/OrganizationService.js';
 
@@ -224,6 +225,65 @@ export class SessionAuthorizationService extends ASessionAuthorizationService {
     }
 
     return { authorized: true, role: access.role };
+  }
+
+  verifyShareTokenAccess(
+    session: ChatSession | null,
+    shareToken: string
+  ): AuthorizationResult {
+    if (!session) {
+      return {
+        authorized: false,
+        error: 'Session not found',
+        statusCode: 404,
+      };
+    }
+
+    if (!session.shareToken) {
+      return {
+        authorized: false,
+        error: 'Session is not shared',
+        statusCode: 404,
+      };
+    }
+
+    // Use timing-safe comparison to prevent timing attacks
+    const storedTokenBuffer = Buffer.from(session.shareToken, 'utf8');
+    const providedTokenBuffer = Buffer.from(shareToken, 'utf8');
+
+    // If lengths differ, tokens don't match (but still do constant-time comparison)
+    const lengthsMatch = storedTokenBuffer.length === providedTokenBuffer.length;
+    const tokensMatch = lengthsMatch && timingSafeEqual(storedTokenBuffer, providedTokenBuffer);
+
+    if (!tokensMatch) {
+      return {
+        authorized: false,
+        error: 'Invalid share token',
+        statusCode: 403,
+      };
+    }
+
+    if (!this.isShareTokenValid(session)) {
+      return {
+        authorized: false,
+        error: 'Share link has expired',
+        statusCode: 410,
+      };
+    }
+
+    return { authorized: true, role: 'shared' };
+  }
+
+  isShareTokenValid(session: ChatSession): boolean {
+    if (!session.shareToken) {
+      return false;
+    }
+
+    if (session.shareExpiresAt && new Date(session.shareExpiresAt) < new Date()) {
+      return false;
+    }
+
+    return true;
   }
 }
 

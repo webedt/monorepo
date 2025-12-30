@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -16,23 +17,25 @@ import {
   ORPHAN_CLEANUP_INTERVAL_MINUTES,
   CLAUDE_SYNC_ENABLED,
   CLAUDE_SYNC_INTERVAL_MS,
+  SHUTDOWN_TIMEOUT_MS,
+  LB_DRAIN_DELAY_MS,
   validateEnv,
   logEnvConfig,
   bootstrapServices,
 } from '@webedt/shared';
 
-import { logger } from '@webedt/shared';
+import { logger, runWithCorrelation } from '@webedt/shared';
 
-// Import database (initializes on import)
-import { waitForDatabase } from '@webedt/shared';
+// Import database - initializeDatabase runs migrations and schema updates
+import { waitForDatabase, initializeDatabase } from '@webedt/shared';
 
 // Import routes
 import executeRemoteRoutes from './api/routes/executeRemote.js';
 import resumeRoutes from './api/routes/resume.js';
 import authRoutes from './api/routes/auth.js';
-import userRoutes from './api/routes/user.js';
-import sessionsRoutes from './api/routes/sessions.js';
-import githubRoutes from './api/routes/github.js';
+import userRoutes from './api/routes/user/index.js';
+import sessionsRoutes from './api/routes/sessions/index.js';
+import githubRoutes from './api/routes/github/index.js';
 import adminRoutes from './api/routes/admin.js';
 import transcribeRoutes from './api/routes/transcribe.js';
 import imageGenRoutes from './api/routes/imageGen.js';
@@ -48,19 +51,42 @@ import communityRoutes from './api/routes/community.js';
 import storageRoutes from './api/routes/storage.js';
 import searchRoutes from './api/routes/search.js';
 import channelsRoutes from './api/routes/channels.js';
+import collectionsRoutes from './api/routes/collections.js';
+import billingRoutes from './api/routes/billing.js';
+import paymentsRoutes from './api/routes/payments.js';
 import taxonomiesRoutes from './api/routes/taxonomies.js';
+import announcementsRoutes from './api/routes/announcements.js';
+import cloudSavesRoutes from './api/routes/cloudSaves.js';
+import importRoutes from './api/routes/import.js';
+import autocompleteRoutes from './api/routes/autocomplete.js';
+import snippetsRoutes from './api/routes/snippets.js';
+import diffsRoutes from './api/routes/diffs.js';
+
+// Import Swagger/OpenAPI
+import { swaggerSpec, swaggerUi, swaggerUiOptions } from './api/swagger/index.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
 
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';
+import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
+import { correlationIdMiddleware } from './api/middleware/correlationId.js';
+import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
+import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
+import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
+
+// Import graceful shutdown
+import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
 
 // Import health monitoring and metrics utilities
 import {
   healthMonitor,
   createDatabaseHealthCheck,
   metrics,
+  initializeExternalApiResilience,
+  getExternalApiCircuitBreakerStatus,
+  areExternalApisAvailable,
 } from '@webedt/shared';
 
 // Import background sync service
@@ -81,8 +107,12 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
     const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
 
     // Find sessions stuck in 'running' or 'pending' for too long
+    // Only select the columns we need to avoid failures if DB schema is out of sync
     const stuckSessions = await db
-      .select()
+      .select({
+        id: chatSessions.id,
+        status: chatSessions.status,
+      })
       .from(chatSessions)
       .where(
         and(
@@ -185,11 +215,115 @@ app.use(
     credentials: true,
   })
 );
+
+// Security headers with helmet
+// Configure Content-Security-Policy and other security headers
+app.use(
+  helmet({
+    // Content Security Policy
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          // Allow inline scripts for SPA hydration and dynamic content
+          "'unsafe-inline'",
+          // Allow eval for development tools (remove in hardened production)
+          ...(NODE_ENV === 'development' ? ["'unsafe-eval'"] : []),
+        ],
+        styleSrc: [
+          "'self'",
+          // Allow inline styles for dynamic styling and CSS-in-JS
+          "'unsafe-inline'",
+        ],
+        imgSrc: [
+          "'self'",
+          'data:',
+          'blob:',
+          // Allow external images (avatars, external content)
+          'https:',
+        ],
+        fontSrc: ["'self'", 'data:'],
+        connectSrc: [
+          "'self'",
+          // Allow WebSocket connections for SSE and real-time features
+          'wss:',
+          'ws:',
+        ],
+        mediaSrc: ["'self'", 'blob:'],
+        objectSrc: ["'none'"],
+        // Prevent clickjacking by restricting frame embedding
+        frameAncestors: ["'none'"],
+        frameSrc: ["'self'"],
+        workerSrc: ["'self'", 'blob:'],
+        childSrc: ["'self'", 'blob:'],
+        formAction: ["'self'"],
+        baseUri: ["'self'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    // X-Frame-Options: DENY - prevent clickjacking
+    // Note: frameAncestors in CSP provides the same protection but is more flexible
+    frameguard: { action: 'deny' },
+    // X-Content-Type-Options: nosniff - prevent MIME type sniffing
+    noSniff: true,
+    // Strict-Transport-Security (HSTS) - enforce HTTPS
+    // max-age: 1 year, includeSubDomains, preload-ready
+    strictTransportSecurity: {
+      maxAge: 31536000, // 1 year in seconds
+      includeSubDomains: true,
+      preload: true,
+    },
+    // X-XSS-Protection - legacy XSS filter (disabled as CSP is preferred)
+    xssFilter: true,
+    // Referrer-Policy - control referrer information
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    // X-DNS-Prefetch-Control - control DNS prefetching
+    dnsPrefetchControl: { allow: false },
+    // X-Download-Options - prevent IE from executing downloads
+    ieNoOpen: true,
+    // X-Permitted-Cross-Domain-Policies - restrict Adobe Flash/Acrobat
+    permittedCrossDomainPolicies: { permittedPolicies: 'none' },
+  })
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Correlation ID middleware - must be applied early for request tracing
+// Extracts X-Request-ID header or generates a new UUID
+app.use(correlationIdMiddleware);
+
+// Wrap all subsequent middleware in correlation context for async propagation
+// This enables automatic correlation ID inclusion in logs and database operations
+app.use((req, res, next) => {
+  runWithCorrelation(req.correlationId, () => {
+    next();
+  });
+});
+
+// Verbose logging middleware (enabled via VERBOSE_MODE or VERBOSE_HTTP env vars)
+app.use(verboseLoggingMiddleware);
+app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 seconds
+
 // Add auth middleware
 app.use(authMiddleware);
+
+// CSRF protection middleware
+// Token generation: Ensures a CSRF token cookie exists for all responses
+app.use(csrfTokenMiddleware);
+// Token validation: Validates CSRF tokens on state-changing requests (POST, PUT, DELETE, PATCH)
+// SSE endpoints, webhooks, and health checks are exempt
+app.use(csrfValidationMiddleware);
+
+// Connection tracker middleware for graceful shutdown
+// Tracks active HTTP connections and rejects new requests during shutdown
+app.use(connectionTrackerMiddleware);
+
+// Apply standard rate limiting to all API routes
+// This provides defense-in-depth alongside infrastructure-level limits
+// Note: Auth and public share endpoints have stricter limits applied at the route level
+app.use('/api', standardRateLimiter);
 
 // Initialize health monitoring with database health check
 healthMonitor.registerCheck('database', createDatabaseHealthCheck(async () => {
@@ -217,18 +351,28 @@ healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
 healthMonitor.startPeriodicChecks(30000);
 
 // Basic health check endpoint (fast, for load balancers)
+// Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints
+// at the root level, not part of the /api namespace, so they are not included in OpenAPI docs.
 app.get('/health', (req, res) => {
+  // Check external API availability via circuit breakers
+  const externalApis = areExternalApisAvailable();
+  const allExternalApisAvailable = externalApis.github && externalApis.claudeRemote;
+
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
     success: true,
     data: {
-      status: 'ok',
+      status: allExternalApisAvailable ? 'ok' : 'degraded',
       service: 'website-backend',
       containerId: CONTAINER_ID,
       build: {
         commitSha: BUILD_COMMIT_SHA,
         timestamp: BUILD_TIMESTAMP,
         imageTag: BUILD_IMAGE_TAG,
+      },
+      externalApis: {
+        github: externalApis.github ? 'available' : 'circuit_open',
+        claudeRemote: externalApis.claudeRemote ? 'available' : 'circuit_open',
       },
       timestamp: new Date().toISOString(),
     }
@@ -256,12 +400,28 @@ app.get('/health/status', async (req, res) => {
       },
     });
 
+    // Add external API circuit breaker details
+    const externalApiStatus = getExternalApiCircuitBreakerStatus();
+    const externalApis = areExternalApisAvailable();
+
     const statusCode = status.status === 'healthy' ? 200 : status.status === 'degraded' ? 200 : 503;
 
     res.setHeader('X-Container-ID', CONTAINER_ID);
     res.status(statusCode).json({
       success: status.status !== 'unhealthy',
-      data: status,
+      data: {
+        ...status,
+        externalApis: {
+          github: {
+            available: externalApis.github,
+            ...externalApiStatus.github,
+          },
+          claudeRemote: {
+            available: externalApis.claudeRemote,
+            ...externalApiStatus.claudeRemote,
+          },
+        },
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -305,6 +465,13 @@ app.get('/metrics', (req, res) => {
   });
 });
 
+// Swagger/OpenAPI Documentation
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+app.get('/api/openapi.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
+
 // Add API routes
 app.use('/api/execute-remote', executeRemoteRoutes);  // Claude Remote Sessions endpoint
 app.use('/api', resumeRoutes);
@@ -327,7 +494,16 @@ app.use('/api/community', communityRoutes);  // Community posts, reviews, and di
 app.use('/api/storage', storageRoutes);  // User storage quota management
 app.use('/api/search', searchRoutes);  // Universal search across all fields
 app.use('/api/channels', channelsRoutes);  // Community channels and real-time messaging
+app.use('/api/collections', collectionsRoutes);  // User-created organizational folders for sessions
+app.use('/api/billing', billingRoutes);  // Subscription billing and plan management
+app.use('/api/payments', paymentsRoutes);  // Stripe and PayPal payment processing
 app.use('/api/taxonomies', taxonomiesRoutes);  // Admin-configurable taxonomy system
+app.use('/api/announcements', announcementsRoutes);  // Official platform announcements
+app.use('/api/cloud-saves', cloudSavesRoutes);  // Cloud save synchronization
+app.use('/api/import', importRoutes);  // Import files from external URLs
+app.use('/api/autocomplete', autocompleteRoutes);  // AI-powered code completion
+app.use('/api/snippets', snippetsRoutes);  // User code snippets and templates
+app.use('/api/diffs', diffsRoutes);  // Diff visualization comparing branches
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');
@@ -348,26 +524,50 @@ app.use(
   ) => {
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorStack = err instanceof Error ? err.stack : undefined;
+    const correlationId = req.correlationId;
 
-    logger.error('Unhandled error:', err);
+    logger.error('Unhandled error:', err, {
+      component: 'GlobalErrorHandler',
+      requestId: correlationId,
+    });
     console.error('[GlobalErrorHandler] Error details:', {
       message: errorMessage,
       stack: errorStack,
       path: req.path,
-      method: req.method
+      method: req.method,
+      correlationId,
     });
 
-    // Return more descriptive error message for debugging
-    res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
+    // Return error response with correlation ID for client-side debugging
+    res.status(500).json({
+      success: false,
+      error: errorMessage || 'Internal server error',
+      requestId: correlationId,
+      timestamp: new Date().toISOString(),
+    });
   }
 );
 
+// Graceful shutdown configuration
+const shutdownConfig: GracefulShutdownConfig = {
+  shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+  loadBalancerDrainDelayMs: LB_DRAIN_DELAY_MS,
+  exitProcess: true,
+};
+
 // Start server
 async function startServer() {
+  // Initialize database first - runs migrations and schema updates
+  // This adds any missing columns (storage_quota_bytes, spending_limit_enabled, etc.)
+  await initializeDatabase();
+
   // Bootstrap all services (registers singletons with ServiceProvider)
   await bootstrapServices();
 
-  app.listen(PORT, () => {
+  // Initialize external API resilience (circuit breakers for GitHub and Claude Remote)
+  initializeExternalApiResilience();
+
+  const server = app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log('WebEDT Backend Server');
   console.log('='.repeat(60));
@@ -381,6 +581,9 @@ async function startServer() {
   // Log environment configuration
   logEnvConfig();
 
+  // Log rate limit configuration
+  logRateLimitConfig();
+
   console.log('');
   console.log('Available endpoints:');
   console.log('  GET  /health                           - Basic health check');
@@ -388,6 +591,9 @@ async function startServer() {
   console.log('  GET  /ready                            - Kubernetes readiness probe');
   console.log('  GET  /live                             - Kubernetes liveness probe');
   console.log('  GET  /metrics                          - Performance metrics (JSON)');
+  console.log('');
+  console.log('  GET  /api/docs                         - Swagger UI documentation');
+  console.log('  GET  /api/openapi.json                 - OpenAPI specification');
   console.log('');
   console.log('  POST /api/execute-remote               - Execute AI request (SSE)');
   console.log('  GET  /api/resume/:sessionId            - Resume session (SSE)');
@@ -412,10 +618,11 @@ async function startServer() {
   // Run initial cleanup on startup
   cleanupOrphanedSessions();
 
-  // Schedule periodic cleanup
-  setInterval(() => {
+  // Schedule periodic cleanup and track the interval for graceful shutdown
+  const orphanCleanupInterval = setInterval(() => {
     cleanupOrphanedSessions();
   }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+  setOrphanCleanupInterval(orphanCleanupInterval);
 
   // Start Claude session background sync
   if (CLAUDE_SYNC_ENABLED) {
@@ -424,6 +631,18 @@ async function startServer() {
   } else {
     logger.info('Claude session sync is disabled');
   }
+
+  // Register graceful shutdown handlers
+  // These handle SIGTERM, SIGINT, uncaughtException, and unhandledRejection
+  registerShutdownHandlers(server, shutdownConfig);
+
+  // Log current connection tracking status
+  const connStats = connectionTracker.getStats();
+  logger.info('Connection tracking initialized', {
+    component: 'Startup',
+    activeConnections: connStats.activeConnections,
+    shutdownTimeoutMs: shutdownConfig.shutdownTimeoutMs,
+  });
   });
 }
 
@@ -431,19 +650,4 @@ async function startServer() {
 startServer().catch((error) => {
   logger.error('Failed to start server', error);
   process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully...');
-  healthMonitor.stopPeriodicChecks();
-  stopBackgroundSync();
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully...');
-  healthMonitor.stopPeriodicChecks();
-  stopBackgroundSync();
-  process.exit(0);
 });
