@@ -1,5 +1,6 @@
 import { Component, ComponentOptions } from '../base';
 import { Button } from '../button';
+import { escapeText } from '../../lib/sanitize';
 import './modal.css';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -286,7 +287,7 @@ export function confirm(options: ConfirmOptions): Promise<boolean> {
       closeOnEscape: false,
     });
 
-    modal.setBody(`<p>${options.message}</p>`);
+    modal.setBody(`<p>${escapeText(options.message)}</p>`);
 
     const cancelBtn = new Button(options.cancelText ?? 'Cancel', {
       variant: 'secondary',

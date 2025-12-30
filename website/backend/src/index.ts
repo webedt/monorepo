@@ -26,8 +26,8 @@ import {
 
 import { logger, runWithCorrelation } from '@webedt/shared';
 
-// Import database (initializes on import)
-import { waitForDatabase } from '@webedt/shared';
+// Import database - initializeDatabase runs migrations and schema updates
+import { waitForDatabase, initializeDatabase } from '@webedt/shared';
 
 // Import routes
 import executeRemoteRoutes from './api/routes/executeRemote.js';
@@ -75,6 +75,7 @@ import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
 import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
+import { versionConflictErrorHandler } from './api/middleware/versionConflict.js';
 
 // Import graceful shutdown
 import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
@@ -87,6 +88,7 @@ import {
   initializeExternalApiResilience,
   getExternalApiCircuitBreakerStatus,
   areExternalApisAvailable,
+  getEventType,
 } from '@webedt/shared';
 
 // Import background sync service
@@ -107,8 +109,12 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
     const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
 
     // Find sessions stuck in 'running' or 'pending' for too long
+    // Only select the columns we need to avoid failures if DB schema is out of sync
     const stuckSessions = await db
-      .select()
+      .select({
+        id: chatSessions.id,
+        status: chatSessions.status,
+      })
       .from(chatSessions)
       .where(
         and(
@@ -136,7 +142,7 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
           .from(events)
           .where(eq(events.chatSessionId, session.id));
 
-        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+        const completedEvents = allEvents.filter(e => getEventType(e.eventData) === 'completed');
 
         // Check if session has any events at all (worker started processing)
         const totalEvents = allEvents.length;
@@ -510,6 +516,10 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
+// Version conflict error handler (handles optimistic locking errors)
+// Must be registered before the generic error handler
+app.use(versionConflictErrorHandler);
+
 // Error handler
 app.use(
   (
@@ -553,6 +563,10 @@ const shutdownConfig: GracefulShutdownConfig = {
 
 // Start server
 async function startServer() {
+  // Initialize database first - runs migrations and schema updates
+  // This adds any missing columns (storage_quota_bytes, spending_limit_enabled, etc.)
+  await initializeDatabase();
+
   // Bootstrap all services (registers singletons with ServiceProvider)
   await bootstrapServices();
 

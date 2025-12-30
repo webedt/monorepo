@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, eq, and, isNull, isNotNull, inArray, logger, decryptUserFields, executeBatch } from '@webedt/shared';
+import { db, chatSessions, users, eq, and, isNull, isNotNull, inArray, logger, decryptUserFields, executeBatch, sessionSoftDeleteService } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import type { BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
@@ -201,21 +201,20 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         batchFailureCount: batchResult.failureCount,
       });
     } else {
-      // Soft delete - set deletedAt
-      await db
-        .update(chatSessions)
-        .set({ deletedAt: new Date() })
-        .where(inArray(chatSessions.id, deletedIds));
+      // Soft delete with cascading to messages and events
+      const softDeleteResult = await sessionSoftDeleteService.softDeleteSessions(deletedIds);
 
       // Notify session list subscribers
       for (const session of validSessions) {
         sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, session.id);
       }
 
-      logger.info(`Soft deleted ${deletedIds.length} sessions`, {
+      logger.info(`Soft deleted ${softDeleteResult.successCount} sessions with cascading`, {
         component: 'Sessions',
         userId: authReq.user!.id,
         count: deletedIds.length,
+        softDeleteSuccessCount: softDeleteResult.successCount,
+        softDeleteFailureCount: softDeleteResult.failureCount,
         batchSuccessCount: batchResult.successCount,
         batchFailureCount: batchResult.failureCount,
       });
@@ -283,23 +282,23 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
 
     const restoredIds = sessions.map(s => s.id);
 
-    // Restore sessions
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: null })
-      .where(inArray(chatSessions.id, restoredIds));
+    // Restore sessions with cascading to messages and events
+    const restoreResult = await sessionSoftDeleteService.restoreSessions(restoredIds);
 
-    logger.info(`Restored ${restoredIds.length} sessions`, {
+    logger.info(`Restored ${restoreResult.successCount} sessions with cascading`, {
       component: 'Sessions',
       userId: authReq.user!.id,
       count: restoredIds.length,
+      restoreSuccessCount: restoreResult.successCount,
+      restoreFailureCount: restoreResult.failureCount,
     });
 
     res.json({
       success: true,
       data: {
-        restored: restoredIds.length,
+        restored: restoreResult.successCount,
         sessionIds: restoredIds,
+        results: restoreResult.results,
       }
     });
   } catch (error) {
@@ -471,13 +470,9 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
         process.env.CLAUDE_ENVIRONMENT_ID
       );
 
-      // Optionally soft delete the local session too
+      // Optionally soft delete the local session too (with cascading)
       if (archiveResult.success && archiveLocal) {
-        await db
-          .update(chatSessions)
-          .set({ deletedAt: new Date() })
-          .where(eq(chatSessions.id, session.id));
-
+        await sessionSoftDeleteService.softDeleteSession(session.id);
         sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, session.id);
       }
 

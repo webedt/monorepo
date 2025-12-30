@@ -15,6 +15,7 @@ import {
 } from '../utils/logger.js';
 import { ClaudeError, ErrorCode } from '../utils/errors.js';
 import { InvalidRefreshTokenError } from '../utils/claudeAuth.js';
+import { getSdkErrorMessage } from '../utils/typeGuards.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -833,7 +834,7 @@ Return ONLY the JSON array, no other text.`;
 
             // Handle result messages for errors
             if (message.type === 'result' && message.is_error) {
-              const errorMsg = (message as any).error_message || (message as any).result || 'Unknown SDK error';
+              const errorMsg = getSdkErrorMessage(message);
               throw new ClaudeError(
                 ErrorCode.CLAUDE_API_ERROR,
                 `Claude SDK error: ${errorMsg}`,

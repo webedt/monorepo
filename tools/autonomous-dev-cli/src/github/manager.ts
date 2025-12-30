@@ -29,6 +29,7 @@ import {
   type RetryContext,
 } from '../utils/retry.js';
 import { GitHubError, ErrorCode } from '../utils/errors.js';
+import { getHttpStatusCode } from '../utils/typeGuards.js';
 
 /**
  * Configuration for the GitHub API Manager
@@ -356,7 +357,7 @@ export class GitHubManager {
       this.stats.failedRequests++;
 
       // Check if rate limited
-      const statusCode = (error as any).status ?? (error as any).response?.status;
+      const statusCode = getHttpStatusCode(error);
       if (statusCode === 429) {
         this.stats.rateLimitedRequests++;
       }

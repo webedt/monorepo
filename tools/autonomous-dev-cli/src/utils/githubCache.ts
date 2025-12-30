@@ -18,6 +18,7 @@ import {
   logCacheOperation,
   logCachePerformanceSummary,
 } from './cache.js';
+import { createTypedRecord } from './typeGuards.js';
 
 /**
  * Cache entry with metadata
@@ -436,21 +437,17 @@ export class GitHubCache {
    * Get cache statistics
    */
   getStats(): GitHubCacheStats {
-    const byType: Record<CacheKeyType, { entries: number; hits: number; misses: number }> = {} as any;
-
     const types: CacheKeyType[] = [
       'repo-info', 'issue-list', 'issue', 'comment-list', 'comment',
       'branch-list', 'branch', 'branch-protection', 'pr-list', 'pr',
       'rate-limit', 'user', 'codeowners', 'pr-template'
     ];
 
-    for (const type of types) {
-      byType[type] = {
-        entries: 0,
-        hits: this.hitsByType.get(type) ?? 0,
-        misses: this.missesByType.get(type) ?? 0,
-      };
-    }
+    const byType = createTypedRecord(types, (type) => ({
+      entries: 0,
+      hits: this.hitsByType.get(type) ?? 0,
+      misses: this.missesByType.get(type) ?? 0,
+    }));
 
     return {
       totalEntries: this.cache.size,

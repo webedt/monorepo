@@ -4,9 +4,10 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { gameAchievements, userAchievements } from '../db/schema.js';
+import { createResultMap } from '../db/dataLoader.js';
 import { AGameAchievementService } from './AGameAchievementService.js';
 
 import type { Achievement } from './types.js';
@@ -314,11 +315,15 @@ export class GameAchievementService extends AGameAchievementService {
     const totalCount = achievements.length;
     const totalPoints = achievements.reduce((sum, a) => sum + a.points, 0);
 
+    // Create achievement map for O(1) lookup instead of O(N) find()
+    const achievementMap = createResultMap(achievements, 'id');
+
     const unlockedAchievements = userAchievementsList.filter((ua) => ua.unlocked);
     const unlockedCount = unlockedAchievements.length;
 
+    // O(N) instead of O(N²) with .find()
     const earnedPoints = unlockedAchievements.reduce((sum, ua) => {
-      const achievement = achievements.find((a) => a.id === ua.achievementId);
+      const achievement = achievementMap.get(ua.achievementId);
       return sum + (achievement?.points ?? 0);
     }, 0);
 
@@ -351,12 +356,10 @@ export class GameAchievementService extends AGameAchievementService {
     const totalAchievements = achievements.length;
     const totalPoints = achievements.reduce((sum, a) => sum + a.points, 0);
 
-    const globalUnlockRates = new Map<string, number>();
-
-    for (const achievement of achievements) {
-      const rate = await this.getGlobalUnlockRate(achievement.id);
-      globalUnlockRates.set(achievement.id, rate);
-    }
+    // Batch fetch unlock rates with single query using GROUP BY
+    const globalUnlockRates = await this.getBatchGlobalUnlockRates(
+      achievements.map((a) => a.id)
+    );
 
     return {
       gameId,
@@ -364,6 +367,46 @@ export class GameAchievementService extends AGameAchievementService {
       totalPoints,
       globalUnlockRates,
     };
+  }
+
+  /**
+   * Batch fetch global unlock rates for multiple achievements
+   * Uses a single query with GROUP BY instead of N individual queries
+   */
+  async getBatchGlobalUnlockRates(
+    achievementIds: string[]
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+
+    if (achievementIds.length === 0) {
+      return result;
+    }
+
+    // Single query to get total and unlocked counts per achievement
+    const stats = await db
+      .select({
+        achievementId: userAchievements.achievementId,
+        total: count(),
+        unlocked: sql<number>`COUNT(CASE WHEN ${userAchievements.unlocked} = true THEN 1 END)`,
+      })
+      .from(userAchievements)
+      .where(inArray(userAchievements.achievementId, achievementIds))
+      .groupBy(userAchievements.achievementId);
+
+    // Initialize all achievements with 0% rate
+    for (const id of achievementIds) {
+      result.set(id, 0);
+    }
+
+    // Calculate rates from batch results
+    for (const stat of stats) {
+      const rate = stat.total > 0
+        ? Math.round((stat.unlocked / stat.total) * 100)
+        : 0;
+      result.set(stat.achievementId, rate);
+    }
+
+    return result;
   }
 
   async getGlobalUnlockRate(achievementId: string): Promise<number> {
@@ -414,10 +457,12 @@ export class GameAchievementService extends AGameAchievementService {
     userId: string,
     callback: GamePlatformEventCallback
   ): () => void {
-    if (!this.eventSubscribers.has(userId)) {
-      this.eventSubscribers.set(userId, new Set());
+    let subscribers = this.eventSubscribers.get(userId);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.eventSubscribers.set(userId, subscribers);
     }
-    this.eventSubscribers.get(userId)!.add(callback);
+    subscribers.add(callback);
 
     return () => {
       this.eventSubscribers.get(userId)?.delete(callback);
