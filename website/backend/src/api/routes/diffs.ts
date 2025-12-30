@@ -8,6 +8,7 @@
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { requireAuth } from '../middleware/auth.js';
+import { validatePathParam } from '../middleware/pathValidation.js';
 import { logger, parseDiff } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import type { ParsedDiff } from '@webedt/shared';
@@ -309,7 +310,7 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, async (req: Request, res: Response) => {
+router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validatePathParam(), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo, base, head } = req.params;
