@@ -4,10 +4,11 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, isValidRole, syncRoleAndAdmin } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
+import type { UserRole } from '@webedt/shared';
 
 const router = Router();
 
@@ -73,9 +74,8 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role && !isValidRole(role)) {
+      res.status(400).json({ success: false, error: 'Invalid role. Must be one of: user, editor, developer, admin' });
       return;
     }
 
@@ -92,10 +92,8 @@ router.post('/users', requireAdmin, async (req, res) => {
     // Generate user ID
     const userId = crypto.randomUUID();
 
-    // Determine role - if explicitly provided, use it; otherwise derive from isAdmin flag
-    const userRole = role || (isAdmin ? 'admin' : 'user');
-    // Sync isAdmin flag with role
-    const userIsAdmin = isAdmin || role === 'admin';
+    // Synchronize role and isAdmin flag
+    const { role: userRole, isAdmin: userIsAdmin } = syncRoleAndAdmin(undefined, role as UserRole | undefined, isAdmin);
 
     // Create user
     const newUser = await db.insert(users).values({
@@ -129,9 +127,8 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role !== undefined && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role !== undefined && !isValidRole(role)) {
+      res.status(400).json({ success: false, error: 'Invalid role. Must be one of: user, editor, developer, admin' });
       return;
     }
 
@@ -147,22 +144,27 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       }
     }
 
+    // Fetch current user to get their current role for proper sync
+    const [existingUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!existingUser) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
     const updateData: Record<string, unknown> = {};
 
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;
 
-    // Handle role and isAdmin synchronization
-    if (role !== undefined) {
-      updateData.role = role;
-      // Sync isAdmin with role
-      updateData.isAdmin = role === 'admin';
-    } else if (isAdmin !== undefined) {
-      updateData.isAdmin = isAdmin;
-      // Sync role with isAdmin - only change role if going to/from admin
-      if (isAdmin) {
-        updateData.role = 'admin';
-      }
+    // Handle role and isAdmin synchronization using helper
+    if (role !== undefined || isAdmin !== undefined) {
+      const synced = syncRoleAndAdmin(
+        existingUser.role as UserRole | undefined,
+        role as UserRole | undefined,
+        isAdmin
+      );
+      updateData.role = synced.role;
+      updateData.isAdmin = synced.isAdmin;
     }
 
     if (password) {

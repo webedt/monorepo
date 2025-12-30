@@ -16,11 +16,58 @@ export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
 export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
 
 /**
- * Check if a role has at least the required permission level
+ * Check if a string is a valid UserRole
  */
-export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
+export function isValidRole(role: string | undefined | null): role is UserRole {
+  if (!role) return false;
+  return ROLE_HIERARCHY.includes(role as UserRole);
+}
+
+/**
+ * Synchronize role and isAdmin flag
+ * When role is set, isAdmin should reflect whether role is 'admin'
+ * When isAdmin is set without role, update role accordingly
+ */
+export function syncRoleAndAdmin(
+  currentRole: UserRole | undefined,
+  newRole?: UserRole,
+  newIsAdmin?: boolean
+): { role: UserRole; isAdmin: boolean } {
+  // If role is explicitly provided, use it and derive isAdmin
+  if (newRole !== undefined) {
+    return { role: newRole, isAdmin: newRole === 'admin' };
+  }
+
+  // If only isAdmin is provided, update role accordingly
+  if (newIsAdmin !== undefined) {
+    if (newIsAdmin) {
+      // Promoting to admin
+      return { role: 'admin', isAdmin: true };
+    } else {
+      // Demoting from admin - set to previous non-admin role or 'user'
+      const fallbackRole = currentRole === 'admin' ? 'user' : (currentRole || 'user');
+      return { role: fallbackRole, isAdmin: false };
+    }
+  }
+
+  // No changes
+  return { role: currentRole || 'user', isAdmin: currentRole === 'admin' };
+}
+
+/**
+ * Check if a role has at least the required permission level
+ * Returns false for invalid/unknown roles to fail-secure
+ */
+export function hasRolePermission(userRole: UserRole | undefined | null, requiredRole: UserRole): boolean {
+  // Fail-secure: treat undefined/null/unknown roles as having no permissions
+  if (!userRole) return false;
+
   const userLevel = ROLE_HIERARCHY.indexOf(userRole);
   const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+
+  // If either role is not found in hierarchy, deny access
+  if (userLevel === -1 || requiredLevel === -1) return false;
+
   return userLevel >= requiredLevel;
 }
 

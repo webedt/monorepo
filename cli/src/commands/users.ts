@@ -1,11 +1,9 @@
 import { Command } from 'commander';
-import { db, users, lucia, ROLE_HIERARCHY } from '@webedt/shared';
+import { db, users, lucia, ROLE_HIERARCHY, isValidRole, syncRoleAndAdmin } from '@webedt/shared';
 import type { UserRole } from '@webedt/shared';
 import { eq, desc } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
-
-const validRoles = ROLE_HIERARCHY;
 
 export const usersCommand = new Command('users')
   .description('User management operations');
@@ -35,8 +33,8 @@ usersCommand
 
       // Filter by role if specified
       if (options.role) {
-        if (!validRoles.includes(options.role)) {
-          console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        if (!isValidRole(options.role)) {
+          console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
           process.exit(1);
         }
         query = query.where(eq(users.role, options.role)) as typeof query;
@@ -123,8 +121,8 @@ usersCommand
   .action(async (email, password, options) => {
     try {
       // Validate role if provided
-      if (options.role && !validRoles.includes(options.role)) {
-        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      if (options.role && !isValidRole(options.role)) {
+        console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
         process.exit(1);
       }
 
@@ -142,9 +140,8 @@ usersCommand
       const userId = randomUUID();
       const passwordHash = await bcrypt.hash(password, 10);
 
-      // Determine role - use explicit role, or derive from admin flag
-      const role = (options.role || (options.admin ? 'admin' : 'user')) as UserRole;
-      const isAdmin = options.admin || role === 'admin';
+      // Synchronize role and isAdmin using helper
+      const { role, isAdmin } = syncRoleAndAdmin(undefined, options.role as UserRole | undefined, options.admin);
 
       await db.insert(users).values({
         id: userId,
@@ -170,9 +167,9 @@ usersCommand
 usersCommand
   .command('set-admin <userId> <isAdmin>')
   .description('Set user admin status (true or false)')
-  .action(async (userId, isAdmin) => {
+  .action(async (userId, isAdminArg) => {
     try {
-      const adminStatus = isAdmin === 'true';
+      const adminStatus = isAdminArg === 'true';
 
       const [user] = await db
         .select()
@@ -185,16 +182,16 @@ usersCommand
         process.exit(1);
       }
 
-      // Sync role with admin status
-      const role = adminStatus ? 'admin' : (user.role === 'admin' ? 'user' : user.role);
+      // Sync role with admin status using helper
+      const { role, isAdmin } = syncRoleAndAdmin(user.role as UserRole | undefined, undefined, adminStatus);
 
       await db
         .update(users)
-        .set({ isAdmin: adminStatus, role })
+        .set({ isAdmin, role })
         .where(eq(users.id, userId));
 
       console.log(`User ${user.email}:`);
-      console.log(`  Admin status: ${adminStatus}`);
+      console.log(`  Admin status: ${isAdmin}`);
       console.log(`  Role: ${role}`);
     } catch (error) {
       console.error('Error updating admin status:', error);
@@ -205,11 +202,11 @@ usersCommand
 usersCommand
   .command('set-role <userId> <role>')
   .description('Set user role (user, editor, developer, admin)')
-  .action(async (userId, role) => {
+  .action(async (userId, roleArg) => {
     try {
       // Validate role
-      if (!validRoles.includes(role)) {
-        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      if (!isValidRole(roleArg)) {
+        console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
         process.exit(1);
       }
 
@@ -224,12 +221,12 @@ usersCommand
         process.exit(1);
       }
 
-      // Sync isAdmin with role
-      const isAdmin = role === 'admin';
+      // Sync isAdmin with role using helper
+      const { role, isAdmin } = syncRoleAndAdmin(user.role as UserRole | undefined, roleArg);
 
       await db
         .update(users)
-        .set({ role: role as UserRole, isAdmin })
+        .set({ role, isAdmin })
         .where(eq(users.id, userId));
 
       console.log(`User ${user.email}:`);
