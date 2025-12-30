@@ -9,7 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth, requireEditor, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
@@ -729,7 +729,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 // ============================================================================
 
 // Main execute endpoint (POST for new requests, GET for SSE reconnect)
-router.post('/', requireAuth, executeRemoteHandler);
-router.get('/', requireAuth, executeRemoteHandler);
+// Requires editor role for AI execution
+router.post('/', requireEditor, executeRemoteHandler);
+router.get('/', requireEditor, executeRemoteHandler);
 
 export default router;

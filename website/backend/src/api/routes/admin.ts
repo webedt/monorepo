@@ -4,7 +4,8 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY, isValidRole } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -73,9 +74,8 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role && !isValidRole(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -129,9 +129,8 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role !== undefined && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role !== undefined && !isValidRole(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -147,6 +146,13 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       }
     }
 
+    // Fetch current user to check current role for synchronization
+    const [currentUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!currentUser) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
     const updateData: Record<string, unknown> = {};
 
     if (email !== undefined) updateData.email = email;
@@ -159,9 +165,12 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       updateData.isAdmin = role === 'admin';
     } else if (isAdmin !== undefined) {
       updateData.isAdmin = isAdmin;
-      // Sync role with isAdmin - only change role if going to/from admin
+      // Sync role with isAdmin
       if (isAdmin) {
         updateData.role = 'admin';
+      } else if (currentUser.role === 'admin') {
+        // When removing admin status, demote to 'user' if current role is 'admin'
+        updateData.role = 'user';
       }
     }
 

@@ -16,11 +16,23 @@ export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
 export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
 
 /**
+ * Check if a role is valid
+ */
+export function isValidRole(role: string): role is UserRole {
+  return ROLE_HIERARCHY.includes(role as UserRole);
+}
+
+/**
  * Check if a role has at least the required permission level
+ * Returns false if either role is invalid (unknown roles are denied access)
  */
 export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
   const userLevel = ROLE_HIERARCHY.indexOf(userRole);
   const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+  // If either role is invalid (not in hierarchy), deny access
+  if (userLevel === -1 || requiredLevel === -1) {
+    return false;
+  }
   return userLevel >= requiredLevel;
 }
 

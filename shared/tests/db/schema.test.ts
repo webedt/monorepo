@@ -11,6 +11,9 @@ import {
   chatSessions,
   messages,
   events,
+  ROLE_HIERARCHY,
+  hasRolePermission,
+  isValidRole,
   type User,
   type NewUser,
   type Session,
@@ -20,7 +23,8 @@ import {
   type Message,
   type NewMessage,
   type Event,
-  type NewEvent
+  type NewEvent,
+  type UserRole
 } from '../../src/db/schema.js';
 
 describe('Database Schema', () => {
@@ -725,5 +729,89 @@ describe('Unique Constraints', () => {
     // chatSessions.sessionPath is defined as unique
     const constraint = { field: 'session_path', unique: true };
     assert.strictEqual(constraint.unique, true);
+  });
+});
+
+describe('Role System', () => {
+  describe('ROLE_HIERARCHY', () => {
+    it('should define roles in ascending order of permission', () => {
+      assert.deepStrictEqual(ROLE_HIERARCHY, ['user', 'editor', 'developer', 'admin']);
+    });
+
+    it('should have user as lowest permission', () => {
+      assert.strictEqual(ROLE_HIERARCHY[0], 'user');
+    });
+
+    it('should have admin as highest permission', () => {
+      assert.strictEqual(ROLE_HIERARCHY[ROLE_HIERARCHY.length - 1], 'admin');
+    });
+  });
+
+  describe('isValidRole', () => {
+    it('should return true for valid roles', () => {
+      assert.strictEqual(isValidRole('user'), true);
+      assert.strictEqual(isValidRole('editor'), true);
+      assert.strictEqual(isValidRole('developer'), true);
+      assert.strictEqual(isValidRole('admin'), true);
+    });
+
+    it('should return false for invalid roles', () => {
+      assert.strictEqual(isValidRole('superuser'), false);
+      assert.strictEqual(isValidRole('guest'), false);
+      assert.strictEqual(isValidRole('moderator'), false);
+      assert.strictEqual(isValidRole(''), false);
+      assert.strictEqual(isValidRole('ADMIN'), false); // case sensitive
+    });
+  });
+
+  describe('hasRolePermission', () => {
+    it('should grant access when user role equals required role', () => {
+      assert.strictEqual(hasRolePermission('user', 'user'), true);
+      assert.strictEqual(hasRolePermission('editor', 'editor'), true);
+      assert.strictEqual(hasRolePermission('developer', 'developer'), true);
+      assert.strictEqual(hasRolePermission('admin', 'admin'), true);
+    });
+
+    it('should grant access when user role is higher than required', () => {
+      // Editor can access user-level resources
+      assert.strictEqual(hasRolePermission('editor', 'user'), true);
+      // Developer can access editor and user-level resources
+      assert.strictEqual(hasRolePermission('developer', 'user'), true);
+      assert.strictEqual(hasRolePermission('developer', 'editor'), true);
+      // Admin can access all resources
+      assert.strictEqual(hasRolePermission('admin', 'user'), true);
+      assert.strictEqual(hasRolePermission('admin', 'editor'), true);
+      assert.strictEqual(hasRolePermission('admin', 'developer'), true);
+    });
+
+    it('should deny access when user role is lower than required', () => {
+      // User cannot access editor-level resources
+      assert.strictEqual(hasRolePermission('user', 'editor'), false);
+      assert.strictEqual(hasRolePermission('user', 'developer'), false);
+      assert.strictEqual(hasRolePermission('user', 'admin'), false);
+      // Editor cannot access developer or admin resources
+      assert.strictEqual(hasRolePermission('editor', 'developer'), false);
+      assert.strictEqual(hasRolePermission('editor', 'admin'), false);
+      // Developer cannot access admin resources
+      assert.strictEqual(hasRolePermission('developer', 'admin'), false);
+    });
+
+    it('should deny access for invalid user roles', () => {
+      // Invalid roles should be denied access (returns false for unknown roles)
+      assert.strictEqual(hasRolePermission('unknown' as UserRole, 'user'), false);
+      assert.strictEqual(hasRolePermission('superuser' as UserRole, 'user'), false);
+    });
+
+    it('should deny access for invalid required roles', () => {
+      // If the required role is invalid, deny access
+      assert.strictEqual(hasRolePermission('admin', 'unknown' as UserRole), false);
+    });
+  });
+
+  describe('users table role field', () => {
+    it('should have role column', () => {
+      assert.ok(users.role);
+      assert.strictEqual(users.role.name, 'role');
+    });
   });
 });

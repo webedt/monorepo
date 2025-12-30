@@ -3,10 +3,12 @@
  * Exposes captured server logs via API
  *
  * NOTE: This endpoint should be disabled in production
+ * Requires developer role to access
  */
 
 import { Router } from 'express';
 import { logCapture, logger } from '@webedt/shared';
+import { requireDeveloper } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -25,7 +27,7 @@ const router = Router();
  * - success: boolean
  * - data: { logs: CapturedLog[], total: number, filtered: number, status: { enabled, count, maxLogs } }
  */
-router.get('/logs', (req, res) => {
+router.get('/logs', requireDeveloper, (req, res) => {
   try {
     const { level, component, sessionId, since, limit } = req.query;
 
@@ -59,7 +61,7 @@ router.get('/logs', (req, res) => {
  * DELETE /api/logs
  * Clears all captured logs
  */
-router.delete('/logs', (req, res) => {
+router.delete('/logs', requireDeveloper, (req, res) => {
   try {
     logCapture.clear();
     logger.info('Logs cleared via API');
@@ -83,7 +85,7 @@ router.delete('/logs', (req, res) => {
  * GET /api/logs/status
  * Returns log capture status
  */
-router.get('/logs/status', (req, res) => {
+router.get('/logs/status', requireDeveloper, (req, res) => {
   try {
     const status = logCapture.getStatus();
 
