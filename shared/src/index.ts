@@ -173,6 +173,9 @@ export * from './autocomplete/index.js';
 // Geometry - 3D geometry with right-handed coordinate system
 export * from './geometry/index.js';
 
+// MIDI - MIDI file parsing and utilities
+export * from './midi/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
