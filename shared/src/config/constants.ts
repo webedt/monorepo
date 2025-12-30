@@ -59,6 +59,7 @@ import {
   LIVE_CHAT_HISTORY_LIMIT,
   LIVE_CHAT_CONTEXT_MESSAGES,
   BATCH_DEFAULT_CONCURRENCY,
+  BATCH_MAX_BATCH_SIZE,
   // Retry
   RETRY_MAX_ATTEMPTS,
   RETRY_BASE_DELAY_MS,
@@ -342,14 +343,17 @@ export const LIMITS = {
   /**
    * Generic batch operation limits
    *
-   * Default concurrency for batch operations not specific to a domain.
+   * Default concurrency and batch sizes for batch operations not specific to a domain.
    *
    * Environment overrides:
    * - BATCH_DEFAULT_CONCURRENCY: Default parallel operations
+   * - BATCH_MAX_BATCH_SIZE: Maximum items per batch operation
    */
   BATCH_OPERATIONS: {
     /** Default concurrency for batch operations (default: 5) */
     DEFAULT_CONCURRENCY: BATCH_DEFAULT_CONCURRENCY,
+    /** Maximum items per generic batch operation (default: 100) */
+    MAX_BATCH_SIZE: BATCH_MAX_BATCH_SIZE,
   },
 } as const;
 

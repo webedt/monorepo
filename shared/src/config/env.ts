@@ -698,8 +698,10 @@ export const LIVE_CHAT_CONTEXT_MESSAGES = parseInt(process.env.LIVE_CHAT_CONTEXT
 /**
  * Batch operation defaults
  * - BATCH_DEFAULT_CONCURRENCY: Default concurrency for batch operations (5)
+ * - BATCH_MAX_BATCH_SIZE: Maximum items per generic batch operation (100)
  */
 export const BATCH_DEFAULT_CONCURRENCY = parseInt(process.env.BATCH_DEFAULT_CONCURRENCY || '5', 10);
+export const BATCH_MAX_BATCH_SIZE = parseInt(process.env.BATCH_MAX_BATCH_SIZE || '100', 10);
 
 /**
  * LRU eviction rate
@@ -891,7 +893,7 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
     warnings.push(`RETRY_BASE_DELAY_MS (${RETRY_BASE_DELAY_MS}) should not exceed RETRY_MAX_DELAY_MS (${RETRY_MAX_DELAY_MS})`);
   }
 
-  // Operational limits validation
+  // Operational limits validation - lower bounds
   if (SESSION_CONCURRENCY_LIMIT <= 0) {
     errors.push('SESSION_CONCURRENCY_LIMIT must be a positive number');
   }
@@ -939,6 +941,32 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   }
   if (BATCH_DEFAULT_CONCURRENCY <= 0) {
     errors.push('BATCH_DEFAULT_CONCURRENCY must be a positive number');
+  }
+  if (BATCH_MAX_BATCH_SIZE <= 0) {
+    errors.push('BATCH_MAX_BATCH_SIZE must be a positive number');
+  }
+
+  // Operational limits validation - upper bounds (prevent unreasonable values)
+  if (SESSION_CONCURRENCY_LIMIT > 50) {
+    warnings.push(`SESSION_CONCURRENCY_LIMIT (${SESSION_CONCURRENCY_LIMIT}) exceeds recommended maximum of 50`);
+  }
+  if (SESSION_MAX_BATCH_SIZE > 1000) {
+    warnings.push(`SESSION_MAX_BATCH_SIZE (${SESSION_MAX_BATCH_SIZE}) exceeds recommended maximum of 1000`);
+  }
+  if (DATALOADER_MAX_BATCH_SIZE > 1000) {
+    warnings.push(`DATALOADER_MAX_BATCH_SIZE (${DATALOADER_MAX_BATCH_SIZE}) exceeds recommended maximum of 1000`);
+  }
+  if (SEARCH_MAX_LIMIT > 500) {
+    warnings.push(`SEARCH_MAX_LIMIT (${SEARCH_MAX_LIMIT}) exceeds recommended maximum of 500`);
+  }
+  if (LIVE_CHAT_MESSAGES_DEFAULT_LIMIT > 500) {
+    warnings.push(`LIVE_CHAT_MESSAGES_DEFAULT_LIMIT (${LIVE_CHAT_MESSAGES_DEFAULT_LIMIT}) exceeds recommended maximum of 500`);
+  }
+  if (BATCH_DEFAULT_CONCURRENCY > 50) {
+    warnings.push(`BATCH_DEFAULT_CONCURRENCY (${BATCH_DEFAULT_CONCURRENCY}) exceeds recommended maximum of 50`);
+  }
+  if (BATCH_MAX_BATCH_SIZE > 1000) {
+    warnings.push(`BATCH_MAX_BATCH_SIZE (${BATCH_MAX_BATCH_SIZE}) exceeds recommended maximum of 1000`);
   }
 
   return {
