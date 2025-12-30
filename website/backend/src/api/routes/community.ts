@@ -7,14 +7,19 @@ import { Router, Request, Response } from 'express';
 import {
   db,
   games,
-  users,
   communityPosts,
   communityComments,
   communityVotes,
   eq,
   and,
-  desc,
-  asc,
+  // Query helpers
+  getPaginationParams,
+  // Community query helpers
+  listPosts,
+  findPublishedPostWithAuthor,
+  getPostComments,
+  formatAuthor,
+  type PostType,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -106,66 +111,34 @@ const router = Router();
 // Get community posts (public)
 router.get('/posts', async (req: Request, res: Response) => {
   try {
-    const { type, gameId, order = 'desc' } = req.query;
+    const { type, gameId, sort = 'createdAt', order = 'desc' } = req.query;
+    const { limit, offset } = getPaginationParams({
+      limit: parseInt(req.query.limit as string) || 20,
+      offset: parseInt(req.query.offset as string) || 0,
+    });
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
-
-    // Build base query conditions
-    const conditions = [eq(communityPosts.status, 'published')];
-
-    if (type) {
-      conditions.push(eq(communityPosts.type, type as string));
-    }
-
-    if (gameId) {
-      conditions.push(eq(communityPosts.gameId, gameId as string));
-    }
-
-    // Get posts with author info
-    const posts = await db
-      .select({
-        post: communityPosts,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-        game: games,
-      })
-      .from(communityPosts)
-      .innerJoin(users, eq(communityPosts.userId, users.id))
-      .leftJoin(games, eq(communityPosts.gameId, games.id))
-      .where(and(...conditions))
-      .orderBy(
-        order === 'asc' ? asc(communityPosts.createdAt) : desc(communityPosts.createdAt)
-      )
-      .limit(limit)
-      .offset(offset);
-
-    // Get total count
-    const allPosts = await db
-      .select({ id: communityPosts.id })
-      .from(communityPosts)
-      .where(and(...conditions));
-
-    const total = allPosts.length;
+    // Use community query helper
+    const result = await listPosts({
+      type: type as PostType | undefined,
+      gameId: gameId as string | undefined,
+      pagination: { limit, offset },
+      sort: {
+        field: (sort as 'createdAt' | 'upvotes' | 'commentCount') || 'createdAt',
+        order: (order as 'asc' | 'desc') || 'desc',
+      },
+    });
 
     res.json({
       success: true,
       data: {
-        posts: posts.map((p) => ({
-          ...p.post,
-          author: {
-            id: p.author.id,
-            displayName: p.author.displayName || p.author.email?.split('@')[0],
-          },
-          game: p.game,
+        posts: result.data.map((post) => ({
+          ...post,
+          author: formatAuthor(post.author),
         })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
+        total: result.meta.total,
+        limit: result.meta.limit,
+        offset: result.meta.offset,
+        hasMore: result.meta.hasMore,
       },
     });
   } catch (error) {
@@ -227,62 +200,25 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
   try {
     const postId = req.params.id;
 
-    const [post] = await db
-      .select({
-        post: communityPosts,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-        game: games,
-      })
-      .from(communityPosts)
-      .innerJoin(users, eq(communityPosts.userId, users.id))
-      .leftJoin(games, eq(communityPosts.gameId, games.id))
-      .where(eq(communityPosts.id, postId))
-      .limit(1);
+    // Use query helper to get post with author and game
+    const post = await findPublishedPostWithAuthor(postId);
 
-    if (!post || post.post.status !== 'published') {
+    if (!post) {
       res.status(404).json({ success: false, error: 'Post not found' });
       return;
     }
 
-    // Get comments
-    const comments = await db
-      .select({
-        comment: communityComments,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-      })
-      .from(communityComments)
-      .innerJoin(users, eq(communityComments.userId, users.id))
-      .where(
-        and(
-          eq(communityComments.postId, postId),
-          eq(communityComments.status, 'published')
-        )
-      )
-      .orderBy(asc(communityComments.createdAt));
+    // Use query helper to get comments with authors
+    const comments = await getPostComments(postId);
 
     res.json({
       success: true,
       data: {
-        ...post.post,
-        author: {
-          id: post.author.id,
-          displayName: post.author.displayName || post.author.email?.split('@')[0],
-        },
-        game: post.game,
+        ...post,
+        author: formatAuthor(post.author),
         comments: comments.map((c) => ({
-          ...c.comment,
-          author: {
-            id: c.author.id,
-            displayName: c.author.displayName || c.author.email?.split('@')[0],
-          },
+          ...c,
+          author: formatAuthor(c.author),
         })),
       },
     });
@@ -1233,32 +1169,23 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
 router.get('/users/:userId/posts', async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
+    const { limit, offset } = getPaginationParams({
+      limit: parseInt(req.query.limit as string) || 20,
+      offset: parseInt(req.query.offset as string) || 0,
+    });
 
-    const posts = await db
-      .select({
-        post: communityPosts,
-        game: games,
-      })
-      .from(communityPosts)
-      .leftJoin(games, eq(communityPosts.gameId, games.id))
-      .where(
-        and(
-          eq(communityPosts.userId, userId),
-          eq(communityPosts.status, 'published')
-        )
-      )
-      .orderBy(desc(communityPosts.createdAt))
-      .limit(limit)
-      .offset(offset);
+    // Use community query helper
+    const result = await listPosts({
+      userId,
+      pagination: { limit, offset },
+    });
 
     res.json({
       success: true,
       data: {
-        posts: posts.map((p) => ({
-          ...p.post,
-          game: p.game,
+        posts: result.data.map((post) => ({
+          ...post,
+          author: formatAuthor(post.author),
         })),
       },
     });
@@ -1332,40 +1259,25 @@ router.get('/users/:userId/posts', async (req: Request, res: Response) => {
 router.get('/games/:gameId/reviews', async (req: Request, res: Response) => {
   try {
     const gameId = req.params.gameId;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
+    const { limit, offset } = getPaginationParams({
+      limit: parseInt(req.query.limit as string) || 20,
+      offset: parseInt(req.query.offset as string) || 0,
+    });
 
-    const reviews = await db
-      .select({
-        post: communityPosts,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-      })
-      .from(communityPosts)
-      .innerJoin(users, eq(communityPosts.userId, users.id))
-      .where(
-        and(
-          eq(communityPosts.gameId, gameId),
-          eq(communityPosts.type, 'review'),
-          eq(communityPosts.status, 'published')
-        )
-      )
-      .orderBy(desc(communityPosts.upvotes))
-      .limit(limit)
-      .offset(offset);
+    // Use community query helper for game reviews
+    const result = await listPosts({
+      gameId,
+      type: 'review',
+      pagination: { limit, offset },
+      sort: { field: 'upvotes', order: 'desc' },
+    });
 
     res.json({
       success: true,
       data: {
-        reviews: reviews.map((r) => ({
-          ...r.post,
-          author: {
-            id: r.author.id,
-            displayName: r.author.displayName || r.author.email?.split('@')[0],
-          },
+        reviews: result.data.map((review) => ({
+          ...review,
+          author: formatAuthor(review.author),
         })),
       },
     });
