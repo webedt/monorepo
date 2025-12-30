@@ -5,9 +5,10 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { logger, withGitHubResilience } from '@webedt/shared';
+import { logger, withGitHubResilience, ServiceProvider, ACacheService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
+import type { CachedGitHubRepos } from '@webedt/shared';
 
 const router = Router();
 
@@ -32,12 +33,34 @@ const router = Router();
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const userId = authReq.user!.id;
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
       return;
     }
 
+    // Try to get from cache first (with graceful degradation)
+    let cacheService: ACacheService | null = null;
+    try {
+      cacheService = ServiceProvider.get(ACacheService);
+      const cachedResult = await cacheService.getGitHubRepos(userId) as { hit: boolean; value?: CachedGitHubRepos };
+
+      if (cachedResult.hit && cachedResult.value) {
+        res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
+        res.json({ success: true, data: cachedResult.value.repos });
+        return;
+      }
+    } catch (cacheError) {
+      // Cache read failed, fall back to GitHub API
+      logger.warn('Cache read failed, falling back to GitHub API', {
+        component: 'GitHub',
+        error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
+      });
+    }
+
+    // Cache miss or cache error - fetch from GitHub API
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
     const { data: repos } = await withGitHubResilience(
       () => octokit.repos.listForAuthenticatedUser({
@@ -59,6 +82,18 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       default_branch: repo.default_branch,
     }));
 
+    // Non-blocking cache write with error handling
+    if (cacheService) {
+      cacheService.setGitHubRepos(userId, formattedRepos).catch(err => {
+        logger.warn('Failed to cache GitHub repos', {
+          component: 'GitHub',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    }
+
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
     res.json({ success: true, data: formattedRepos });
   } catch (error) {
     logger.error('GitHub repos error', error as Error, { component: 'GitHub' });

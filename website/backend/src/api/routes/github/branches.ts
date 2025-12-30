@@ -5,9 +5,10 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { logger, withGitHubResilience } from '@webedt/shared';
+import { logger, withGitHubResilience, ServiceProvider, ACacheService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
+import type { CachedGitHubBranches } from '@webedt/shared';
 
 const router = Router();
 
@@ -43,6 +44,7 @@ const router = Router();
 router.get('/:owner/:repo/branches', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const userId = authReq.user!.id;
     const { owner, repo } = req.params;
 
     if (!authReq.user?.githubAccessToken) {
@@ -50,6 +52,27 @@ router.get('/:owner/:repo/branches', requireAuth, async (req: Request, res: Resp
       return;
     }
 
+    // Try to get from cache first (with graceful degradation)
+    let cacheService: ACacheService | null = null;
+    try {
+      cacheService = ServiceProvider.get(ACacheService);
+      const cachedResult = await cacheService.getGitHubBranches(userId, owner, repo) as { hit: boolean; value?: CachedGitHubBranches };
+
+      if (cachedResult.hit && cachedResult.value) {
+        res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
+        res.json({ success: true, data: cachedResult.value.branches });
+        return;
+      }
+    } catch (cacheError) {
+      // Cache read failed, fall back to GitHub API
+      logger.warn('Cache read failed, falling back to GitHub API', {
+        component: 'GitHub',
+        error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
+      });
+    }
+
+    // Cache miss or cache error - fetch from GitHub API
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
     const { data: branches } = await withGitHubResilience(
       () => octokit.repos.listBranches({
@@ -69,6 +92,18 @@ router.get('/:owner/:repo/branches', requireAuth, async (req: Request, res: Resp
       },
     }));
 
+    // Non-blocking cache write with error handling
+    if (cacheService) {
+      cacheService.setGitHubBranches(userId, owner, repo, formattedBranches).catch(err => {
+        logger.warn('Failed to cache GitHub branches', {
+          component: 'GitHub',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    }
+
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
     res.json({ success: true, data: formattedBranches });
   } catch (error) {
     logger.error('GitHub branches error', error as Error, { component: 'GitHub' });
@@ -168,6 +203,19 @@ router.post('/:owner/:repo/branches', requireAuth, async (req: Request, res: Res
 
     logger.info(`Created branch ${branchName} from ${base} in ${owner}/${repo}`, { component: 'GitHub' });
 
+    // Invalidate branch cache (non-blocking)
+    try {
+      const cacheService = ServiceProvider.get(ACacheService);
+      cacheService.invalidateRepoBranches(authReq.user!.id, owner, repo).catch(err => {
+        logger.warn('Failed to invalidate branch cache', {
+          component: 'GitHub',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    } catch {
+      // Cache service not available, skip invalidation
+    }
+
     res.json({
       success: true,
       data: {
@@ -216,11 +264,35 @@ router.delete('/:owner/:repo/branches/*', requireAuth, async (req: Request, res:
     });
 
     logger.info(`Deleted branch ${owner}/${repo}/${branch}`, { component: 'GitHub' });
+
+    // Invalidate branch cache (non-blocking)
+    try {
+      const cacheService = ServiceProvider.get(ACacheService);
+      cacheService.invalidateRepoBranches(authReq.user!.id, owner, repo).catch(err => {
+        logger.warn('Failed to invalidate branch cache after delete', {
+          component: 'GitHub',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    } catch {
+      // Cache service not available, skip invalidation
+    }
+
     res.json({ success: true, data: { message: 'Branch deleted' } });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
     if (err.status === 422 || err.status === 404) {
       logger.info(`Branch ${req.params.owner}/${req.params.repo}/${req.params[0]} not found (already deleted)`, { component: 'GitHub' });
+
+      // Also invalidate cache in case branch was deleted externally
+      try {
+        const authReq = req as AuthRequest;
+        const cacheService = ServiceProvider.get(ACacheService);
+        cacheService.invalidateRepoBranches(authReq.user!.id, req.params.owner, req.params.repo).catch(() => {});
+      } catch {
+        // Cache service not available
+      }
+
       res.json({ success: true, data: { message: 'Branch already deleted or does not exist' } });
       return;
     }
