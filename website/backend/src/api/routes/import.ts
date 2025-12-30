@@ -94,7 +94,7 @@ router.post('/validate', requireAuth, async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    logger.error('URL validation error', error, { component: 'import', operation: 'validateUrl' });
+    logger.error('URL validation error', error as Error, { component: 'import', operation: 'validateUrl' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Validation failed',
@@ -221,7 +221,7 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('URL import error', error, { component: 'import', operation: 'importFromUrl' });
+    logger.error('URL import error', error as Error, { component: 'import', operation: 'importFromUrl' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Import failed',

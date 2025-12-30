@@ -56,7 +56,7 @@ export async function authMiddleware(
   } catch (error) {
     // Pass async errors to Express error handler
     // This is necessary because Express 4 doesn't automatically catch async errors
-    logger.error('Error validating session', error, { component: 'auth', operation: 'validateSession' });
+    logger.error('Error validating session', error as Error, { component: 'auth', operation: 'validateSession' });
     next(error);
   }
 }

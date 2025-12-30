@@ -65,7 +65,7 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       data: { message: 'Codex authentication updated successfully' },
     });
   } catch (error) {
-    logger.error('Update Codex auth error', error, { component: 'user', operation: 'updateCodexAuth' });
+    logger.error('Update Codex auth error', error as Error, { component: 'user', operation: 'updateCodexAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Codex authentication' });
   }
 });
@@ -100,7 +100,7 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
       data: { message: 'Codex authentication removed' },
     });
   } catch (error) {
-    logger.error('Remove Codex auth error', error, { component: 'user', operation: 'removeCodexAuth' });
+    logger.error('Remove Codex auth error', error as Error, { component: 'user', operation: 'removeCodexAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Codex authentication' });
   }
 });
@@ -181,7 +181,7 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       data: { message: 'Gemini OAuth authentication updated successfully' },
     });
   } catch (error) {
-    logger.error('Update Gemini auth error', error, { component: 'user', operation: 'updateGeminiAuth' });
+    logger.error('Update Gemini auth error', error as Error, { component: 'user', operation: 'updateGeminiAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Gemini authentication' });
   }
 });
@@ -216,7 +216,7 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Gemini authentication removed' },
     });
   } catch (error) {
-    logger.error('Remove Gemini auth error', error, { component: 'user', operation: 'removeGeminiAuth' });
+    logger.error('Remove Gemini auth error', error as Error, { component: 'user', operation: 'removeGeminiAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Gemini authentication' });
   }
 });

@@ -129,7 +129,7 @@ router.get('/current', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get billing info error', error, { component: 'billing', operation: 'getCurrent' });
+    logger.error('Get billing info error', error as Error, { component: 'billing', operation: 'getCurrent' });
     res.status(500).json({ success: false, error: 'Failed to get billing information' });
   }
 });
@@ -209,7 +209,7 @@ router.get('/tiers', async (_req: Request, res: Response) => {
       data: { tiers },
     });
   } catch (error) {
-    logger.error('Get pricing tiers error', error, { component: 'billing', operation: 'getTiers' });
+    logger.error('Get pricing tiers error', error as Error, { component: 'billing', operation: 'getTiers' });
     res.status(500).json({ success: false, error: 'Failed to get pricing tiers' });
   }
 });
@@ -321,7 +321,7 @@ router.post('/change-plan', requireAuth, async (req: Request, res: Response) => 
       },
     });
   } catch (error) {
-    logger.error('Change plan error', error, { component: 'billing', operation: 'changePlan' });
+    logger.error('Change plan error', error as Error, { component: 'billing', operation: 'changePlan' });
     res.status(500).json({ success: false, error: 'Failed to change plan' });
   }
 });

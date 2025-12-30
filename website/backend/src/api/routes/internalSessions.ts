@@ -86,7 +86,7 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
       claudeAuth = refreshedAuth;
     }
   } catch (error) {
-    logger.error('Failed to refresh Claude token', error, { component: 'InternalSessions' });
+    logger.error('Failed to refresh Claude token', error as Error, { component: 'InternalSessions' });
     return null;
   }
 
@@ -203,7 +203,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       lastId: response.last_id,
     });
   } catch (error) {
-    logger.error('Failed to list sessions', error, { component: 'InternalSessions' });
+    logger.error('Failed to list sessions', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to list sessions' });
   }
 });
@@ -415,7 +415,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Failed to create session', error, { component: 'InternalSessions' });
+    logger.error('Failed to create session', error as Error, { component: 'InternalSessions' });
 
     if (chatSessionId) {
       await db.update(chatSessions)
@@ -510,7 +510,7 @@ router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Failed to get session status', error, { component: 'InternalSessions' });
+    logger.error('Failed to get session status', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: 'Failed to get session status' });
   }
 });
@@ -585,7 +585,7 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    logger.error('Failed to get session events', error, { component: 'InternalSessions' });
+    logger.error('Failed to get session events', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: 'Failed to get session events' });
   }
 });
@@ -738,7 +738,7 @@ const streamHandler = async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Failed to stream session', error, { component: 'InternalSessions' });
+    logger.error('Failed to stream session', error as Error, { component: 'InternalSessions' });
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: 'Failed to stream session' });
     } else {
@@ -931,7 +931,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Failed to resume session', error, { component: 'InternalSessions' });
+    logger.error('Failed to resume session', error as Error, { component: 'InternalSessions' });
 
     await db.update(chatSessions)
       .set({ status: 'error' })
@@ -1048,7 +1048,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Failed to rename session', error, { component: 'InternalSessions' });
+    logger.error('Failed to rename session', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to rename session' });
   }
 });
@@ -1125,7 +1125,7 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
       },
     });
   } catch (error) {
-    logger.error('Failed to archive session', error, { component: 'InternalSessions' });
+    logger.error('Failed to archive session', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to archive session' });
   }
 });
@@ -1198,7 +1198,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Failed to delete session', error, { component: 'InternalSessions' });
+    logger.error('Failed to delete session', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: 'Failed to delete session' });
   }
 });
@@ -1296,7 +1296,7 @@ router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) =
       },
     });
   } catch (error) {
-    logger.error('Failed to interrupt session', error, { component: 'InternalSessions' });
+    logger.error('Failed to interrupt session', error as Error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to interrupt session' });
   }
 });

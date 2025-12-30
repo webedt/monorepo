@@ -171,7 +171,7 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
       },
     }, 201);
   } catch (error) {
-    logger.error('Registration error', error, { component: 'auth', operation: 'register' });
+    logger.error('Registration error', error as Error, { component: 'auth', operation: 'register' });
     sendInternalError(res);
   }
 });
@@ -307,7 +307,7 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req:
       },
     });
   } catch (error) {
-    logger.error('Login error', error, { component: 'auth', operation: 'login' });
+    logger.error('Login error', error as Error, { component: 'auth', operation: 'login' });
     sendInternalError(res);
   }
 });
@@ -366,7 +366,7 @@ router.post('/logout', async (req: Request, res: Response) => {
     res.appendHeader('Set-Cookie', blankCookie.serialize());
     sendSuccess(res, { message: 'Logged out successfully' });
   } catch (error) {
-    logger.error('Logout error', error, { component: 'auth', operation: 'logout' });
+    logger.error('Logout error', error as Error, { component: 'auth', operation: 'logout' });
     sendInternalError(res);
   }
 });
@@ -511,7 +511,7 @@ router.get('/session', async (req: Request, res: Response) => {
       session: authReq.authSession,
     });
   } catch (error) {
-    logger.error('Session error', error, { component: 'auth', operation: 'session' });
+    logger.error('Session error', error as Error, { component: 'auth', operation: 'session' });
     sendInternalError(res);
   }
 });

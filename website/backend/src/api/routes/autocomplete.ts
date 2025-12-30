@@ -161,7 +161,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       data: response,
     });
   } catch (error) {
-    logger.error('Autocomplete error', error, { component: 'autocomplete', operation: 'complete' });
+    logger.error('Autocomplete error', error as Error, { component: 'autocomplete', operation: 'complete' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error',

@@ -370,7 +370,7 @@ router.get('/resume/:sessionId', requireAuth, sseRateLimiter, async (req: Reques
     });
 
   } catch (error) {
-    logger.error('Resume failed', error, {
+    logger.error('Resume failed', error as Error, {
       component: 'ResumeRoute',
       sessionId
     });
@@ -491,7 +491,7 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
     });
 
   } catch (error) {
-    logger.error('Get events failed', error, {
+    logger.error('Get events failed', error as Error, {
       component: 'ResumeRoute',
       sessionId
     });

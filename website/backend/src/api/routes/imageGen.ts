@@ -151,7 +151,7 @@ async function generateWithOpenAICompatible(
 
     return { success: false, error: 'No content in response' };
   } catch (error) {
-    logger.error('ImageGen error', error, { component: 'imageGen', operation: 'openaiCompatible' });
+    logger.error('ImageGen error', error as Error, { component: 'imageGen', operation: 'openaiCompatible' });
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
@@ -233,7 +233,7 @@ async function generateWithGoogle(
 
     return { success: false, error: 'No image in response' };
   } catch (error) {
-    logger.error('ImageGen Google API error', error, { component: 'imageGen', operation: 'googleApi' });
+    logger.error('ImageGen Google API error', error as Error, { component: 'imageGen', operation: 'googleApi' });
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
@@ -391,7 +391,7 @@ router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Reques
       });
     }
   } catch (error) {
-    logger.error('ImageGen unexpected error', error, { component: 'imageGen', operation: 'generate' });
+    logger.error('ImageGen unexpected error', error as Error, { component: 'imageGen', operation: 'generate' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error',
