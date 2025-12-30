@@ -635,6 +635,18 @@ export {
   type TransactionResult,
 } from './transaction.js';
 
+// Re-export bulk transaction utilities
+export {
+  executeBulkTransaction,
+  executeBulkWrite,
+  createBulkApiResponse,
+  type BulkItemResult,
+  type BulkTransactionResult,
+  type BulkTransactionMode,
+  type BulkTransactionConfig,
+  type BulkApiResponse,
+} from './bulkTransaction.js';
+
 // Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds
 // Consumers should import these from @webedt/shared instead of drizzle-orm directly
 export {
