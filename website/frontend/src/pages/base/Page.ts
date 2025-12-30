@@ -183,6 +183,9 @@ export abstract class Page<T extends PageOptions = PageOptions> {
   /**
    * Add event listener with cleanup tracking (legacy method for backward compatibility).
    * Prefer using this.listeners.add() or this.addListener() for new code.
+   *
+   * @deprecated Use {@link addListener}, {@link addListenerBySelector}, or
+   * {@link addListenerToAll} instead. This method will be removed in a future version.
    */
   protected on(selector: string, type: string, handler: EventListener): void {
     const el = this.$(selector);

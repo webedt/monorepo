@@ -77,6 +77,9 @@ export class SoundPage extends Page<SoundPageOptions> {
   private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
   private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
 
+  // ResizeObserver for canvas resizing
+  private resizeObserver: ResizeObserver | null = null;
+
   // Beat grid state
   private beatGridSettings: BeatGridSettings = beatGridStore.getSettings();
   private unsubscribeBeatGrid: (() => void) | null = null;
@@ -569,13 +572,13 @@ export class SoundPage extends Page<SoundPageOptions> {
       this.waveformCtx = this.waveformCanvas.getContext('2d');
 
       // Handle resize
-      const resizeObserver = new ResizeObserver(() => {
+      this.resizeObserver = new ResizeObserver(() => {
         this.resizeCanvas();
         this.renderWaveform();
       });
       const container = this.$('.waveform-canvas-container') as HTMLElement;
       if (container) {
-        resizeObserver.observe(container);
+        this.resizeObserver.observe(container);
       }
 
       // Mouse events for selection - using addListener for automatic cleanup
@@ -1944,6 +1947,12 @@ export class SoundPage extends Page<SoundPageOptions> {
     // Clear references to avoid memory leaks from closures
     this.keyboardHandler = null;
     this.keyUpHandler = null;
+
+    // Disconnect ResizeObserver to prevent memory leaks
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
 
     if (this.sourceNode) {
       this.sourceNode.stop();

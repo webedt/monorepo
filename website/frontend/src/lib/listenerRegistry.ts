@@ -98,6 +98,11 @@ export class ListenerRegistry {
   /**
    * Remove a specific listener.
    * Returns true if the listener was found and removed.
+   *
+   * Note: The options parameter is accepted for API symmetry with addEventListener
+   * but is not used for matching. Listeners are matched by target, type, and handler
+   * reference only, since the same handler cannot be registered multiple times with
+   * different options on the same target/type combination.
    */
   remove(
     target: EventTarget,
