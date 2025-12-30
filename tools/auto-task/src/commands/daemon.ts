@@ -17,6 +17,7 @@ import {
   getClaudeCredentials,
   shouldRefreshClaudeToken,
   DaemonTokenRefreshService,
+  GitHubRateLimiter,
 } from '@webedt/shared';
 
 import type { ClaudeAuth } from '@webedt/shared';
@@ -25,6 +26,20 @@ import type { ReviewIssue } from '@webedt/shared';
 import type { ProjectItem } from '@webedt/shared';
 import type { AutoTaskCommentInfo } from '@webedt/shared';
 
+/**
+ * Default poll interval: 5 minutes
+ * This is a reasonable default that balances responsiveness with rate limit considerations.
+ *
+ * GitHub rate limits:
+ * - Primary: 5,000 requests/hour (authenticated)
+ * - Secondary: 80 content-creation/min, 500/hr
+ * - GraphQL: 5,000 points/hour
+ *
+ * With a 5-minute poll interval:
+ * - ~12 cycles/hour
+ * - Each cycle makes ~10-20 API calls (varies with task count)
+ * - Well under the 5,000/hour limit
+ */
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export const daemonCommand = new Command('daemon')
@@ -93,6 +108,14 @@ export const daemonCommand = new Command('daemon')
     // Initialize token refresh service
     const tokenRefreshService = new DaemonTokenRefreshService();
 
+    // Initialize rate limiter for GitHub API calls
+    const rateLimiter = new GitHubRateLimiter({
+      mutationDelayMs: 1000, // 1 second between mutations
+      maxMutationsPerMinute: 60, // Conservative (GitHub allows 80)
+      maxMutationsPerHour: 400, // Conservative (GitHub allows 500)
+      primaryLimitBuffer: 100, // Keep buffer before hitting 5000/hr limit
+    });
+
     const context: DaemonContext = {
       rootDir,
       owner,
@@ -110,6 +133,7 @@ export const daemonCommand = new Command('daemon')
       basePollInterval: pollInterval,
       refreshFailureCount: 0,
       issueCooldowns: new Map(),
+      rateLimiter,
     };
 
     // Main loop
@@ -204,6 +228,37 @@ interface DaemonContext {
   refreshFailureCount: number;
   /** Tracks cooldown state for issues to prevent re-processing too quickly */
   issueCooldowns: Map<number, IssueCooldown>;
+  /** Rate limiter for GitHub API calls */
+  rateLimiter: GitHubRateLimiter;
+}
+
+/**
+ * Execute a GitHub API call with rate limiting.
+ * @param ctx - Daemon context containing the rate limiter
+ * @param fn - Async function to execute
+ * @param isMutation - Whether this is a mutation (write) operation
+ * @returns Result of the function call
+ */
+async function withGitHubRateLimit<T>(
+  ctx: DaemonContext,
+  fn: () => Promise<T>,
+  isMutation: boolean = false
+): Promise<T> {
+  await ctx.rateLimiter.waitForSlot(isMutation);
+  try {
+    return await fn();
+  } catch (error) {
+    // Check for rate limit errors
+    if (error && typeof error === 'object' && 'status' in error) {
+      const status = (error as { status: number }).status;
+      if (status === 403 || status === 429) {
+        const headers =
+          'headers' in error ? (error as { headers: Record<string, string> }).headers : {};
+        ctx.rateLimiter.handleRateLimitError(status, headers);
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -329,13 +384,16 @@ async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
 
   console.log('\n--- Daemon Cycle ---');
   console.log(new Date().toISOString());
+  console.log(`Rate limit: ${ctx.rateLimiter.getSummary()}`);
 
   // Increment cycle counts for all active cooldowns
   incrementCooldownCycles(ctx);
 
   // Get current project items from GitHub (source of truth)
   console.log('\nFetching project items from GitHub...');
-  const itemsByStatus = await projectsService.getItemsByStatus(projectCache.projectId);
+  const itemsByStatus = await withGitHubRateLimit(ctx, () =>
+    projectsService.getItemsByStatus(projectCache.projectId)
+  );
 
   // Print current state - normalize status names to lowercase for lookup
   const statusCounts: Record<string, number> = {};
@@ -397,10 +455,12 @@ async function discoverAndSync(
   const todos = await todoScanner.scan(rootDir);
 
   // Get existing issues with auto-task label
-  const existingIssues = await issuesService.listIssues(owner, repo, {
-    labels: ['auto-task'],
-    state: 'open',
-  });
+  const existingIssues = await withGitHubRateLimit(ctx, () =>
+    issuesService.listIssues(owner, repo, {
+      labels: ['auto-task'],
+      state: 'open',
+    })
+  );
   const existingTitles = new Set(existingIssues.map((i) => i.title));
 
   // Find new tasks from TODO comments
@@ -410,24 +470,35 @@ async function discoverAndSync(
     if (existingTitles.has(title)) continue;
 
     try {
-      const issue = await issuesService.createIssue(owner, repo, {
-        title,
-        body: `**File:** \`${todo.file}:${todo.line}\`\n\n${todo.text}\n\n---\n*Created by auto-task*`,
-        labels: ['auto-task', todo.type],
-      });
+      const issue = await withGitHubRateLimit(
+        ctx,
+        () =>
+          issuesService.createIssue(owner, repo, {
+            title,
+            body: `**File:** \`${todo.file}:${todo.line}\`\n\n${todo.text}\n\n---\n*Created by auto-task*`,
+            labels: ['auto-task', todo.type],
+          }),
+        true
+      );
 
-      const { itemId } = await projectsService.addItemToProject(
-        projectCache.projectId,
-        issue.nodeId
+      const { itemId } = await withGitHubRateLimit(
+        ctx,
+        () => projectsService.addItemToProject(projectCache.projectId, issue.nodeId),
+        true
       );
 
       const backlogId = projectCache.statusOptions['backlog'];
       if (backlogId) {
-        await projectsService.updateItemStatus(
-          projectCache.projectId,
-          itemId,
-          projectCache.statusFieldId,
-          backlogId
+        await withGitHubRateLimit(
+          ctx,
+          () =>
+            projectsService.updateItemStatus(
+              projectCache.projectId,
+              itemId,
+              projectCache.statusFieldId,
+              backlogId
+            ),
+          true
         );
       }
 
@@ -582,24 +653,35 @@ Do NOT suggest tasks that duplicate these existing ones.`;
       if (existingTitles.has(task.title)) continue;
 
       try {
-        const issue = await issuesService.createIssue(owner, repo, {
-          title: task.title,
-          body: `${task.body}\n\n---\n*Discovered by auto-task AI*`,
-          labels: ['auto-task', 'ai-discovered'],
-        });
+        const issue = await withGitHubRateLimit(
+          ctx,
+          () =>
+            issuesService.createIssue(owner, repo, {
+              title: task.title,
+              body: `${task.body}\n\n---\n*Discovered by auto-task AI*`,
+              labels: ['auto-task', 'ai-discovered'],
+            }),
+          true
+        );
 
-        const { itemId } = await projectsService.addItemToProject(
-          projectCache.projectId,
-          issue.nodeId
+        const { itemId } = await withGitHubRateLimit(
+          ctx,
+          () => projectsService.addItemToProject(projectCache.projectId, issue.nodeId),
+          true
         );
 
         const backlogId = projectCache.statusOptions['backlog'];
         if (backlogId) {
-          await projectsService.updateItemStatus(
-            projectCache.projectId,
-            itemId,
-            projectCache.statusFieldId,
-            backlogId
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              projectsService.updateItemStatus(
+                projectCache.projectId,
+                itemId,
+                projectCache.statusFieldId,
+                backlogId
+              ),
+            true
           );
         }
 
@@ -655,7 +737,9 @@ async function moveBacklogToReady(
   for (const item of backlogIssues) {
     if (!item.number) continue;
     try {
-      const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      const taskInfo = await withGitHubRateLimit(ctx, () =>
+        issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+      );
       issueFailureCounts.set(item.number, taskInfo?.failureCount || 0);
     } catch {
       issueFailureCounts.set(item.number, 0);
@@ -682,11 +766,16 @@ async function moveBacklogToReady(
   for (const item of toMove) {
     const failures = issueFailureCounts.get(item.number!) || 0;
     try {
-      await projectsService.updateItemStatus(
-        projectCache.projectId,
-        item.id,
-        projectCache.statusFieldId,
-        readyId
+      await withGitHubRateLimit(
+        ctx,
+        () =>
+          projectsService.updateItemStatus(
+            projectCache.projectId,
+            item.id,
+            projectCache.statusFieldId,
+            readyId
+          ),
+        true
       );
       console.log(`   Moved #${item.number} to Ready${failures > 0 ? ` (${failures} prior failures)` : ''}`);
     } catch (error) {
@@ -744,19 +833,28 @@ async function startTasks(
 
     try {
       // Update status in GitHub Project
-      await projectsService.updateItemStatus(
-        projectCache.projectId,
-        item.id,
-        projectCache.statusFieldId,
-        inProgressId
+      await withGitHubRateLimit(
+        ctx,
+        () =>
+          projectsService.updateItemStatus(
+            projectCache.projectId,
+            item.id,
+            projectCache.statusFieldId,
+            inProgressId
+          ),
+        true
       );
 
       // Get issue details for prompt
-      const issue = await issuesService.getIssue(owner, repo, item.number);
+      const issue = await withGitHubRateLimit(ctx, () =>
+        issuesService.getIssue(owner, repo, item.number!)
+      );
       const gitUrl = `https://github.com/${owner}/${repo}`;
 
       // Check if this is a re-work by looking at previous comments
-      const previousInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      const previousInfo = await withGitHubRateLimit(ctx, () =>
+        issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+      );
       const isRework = previousInfo?.branchName && previousInfo?.prNumber;
 
       console.log(`   Starting #${item.number}: ${item.title.slice(0, 40)}...`);
@@ -824,7 +922,11 @@ async function startTasks(
         ? `### 🔄 Re-work\n\nAddressing code review feedback (resuming session).\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${previousInfo.branchName}\`\n**PR:** #${previousInfo.prNumber}`
         : `### 🤖 Auto-Task Started\n\nClaude is working on this issue.\n\n**Session:** [View in Claude](${webUrl})`;
 
-      await issuesService.addComment(owner, repo, item.number, commentBody);
+      await withGitHubRateLimit(
+        ctx,
+        () => issuesService.addComment(owner, repo, item.number!, commentBody),
+        true
+      );
 
     } catch (error) {
       console.error(`   Failed to start task: ${error}`);
@@ -969,7 +1071,9 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
     if (!item.number) continue;
 
     // Get session info from GitHub comments
-    const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+    const taskInfo = await withGitHubRateLimit(ctx, () =>
+      issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+    );
     if (!taskInfo?.sessionId) {
       console.log(`   #${item.number}: No session ID found in comments, skipping`);
       continue;
@@ -1012,11 +1116,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
               console.log(`   Failed to create PR, moving to backlog`);
 
               if (backlogId) {
-                await projectsService.updateItemStatus(
-                  projectCache.projectId,
-                  item.id,
-                  projectCache.statusFieldId,
-                  backlogId
+                await withGitHubRateLimit(
+                  ctx,
+                  () =>
+                    projectsService.updateItemStatus(
+                      projectCache.projectId,
+                      item.id,
+                      projectCache.statusFieldId,
+                      backlogId
+                    ),
+                  true
                 );
               }
               continue;
@@ -1027,11 +1136,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
 
           // Move to In Review
           if (inReviewId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              inReviewId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  inReviewId
+                ),
+              true
             );
           }
           console.log(`   Moved to In Review`);
@@ -1044,11 +1158,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
             ? `\n\n<details>\n<summary>Implementation Details</summary>\n\n${implementationSummary}\n\n</details>`
             : '';
 
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}${summarySection}\n\nThe PR is now being reviewed.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}${summarySection}\n\nThe PR is now being reviewed.`
+              ),
+            true
           );
         } else {
           // No branch created - session failed to produce output
@@ -1063,40 +1182,60 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           console.log(`   ${errorMsg}, moving back to backlog`);
 
           if (backlogId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              backlogId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  backlogId
+                ),
+              true
             );
           }
 
           // Add failure comment
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ⚠️ Session Issue\n\n${errorMsg}\n\nTask moved back to backlog and will be retried.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ⚠️ Session Issue\n\n${errorMsg}\n\nTask moved back to backlog and will be retried.`
+              ),
+            true
           );
         }
       } else if (session.session_status === 'failed') {
         console.log(`   Session failed, moving back to backlog`);
 
         if (backlogId) {
-          await projectsService.updateItemStatus(
-            projectCache.projectId,
-            item.id,
-            projectCache.statusFieldId,
-            backlogId
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              projectsService.updateItemStatus(
+                projectCache.projectId,
+                item.id,
+                projectCache.statusFieldId,
+                backlogId
+              ),
+            true
           );
         }
 
         // Add failure comment
-        await issuesService.addComment(
-          owner,
-          repo,
-          item.number,
-          `### ❌ Session Failed\n\nThe Claude session failed to complete.\n\nTask moved back to backlog and will be retried.`
+        await withGitHubRateLimit(
+          ctx,
+          () =>
+            issuesService.addComment(
+              owner,
+              repo,
+              item.number!,
+              `### ❌ Session Failed\n\nThe Claude session failed to complete.\n\nTask moved back to backlog and will be retried.`
+            ),
+          true
         );
       } else if (session.session_status === 'archived') {
         // Session was archived - check if there's a PR to review
@@ -1106,11 +1245,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           // Has PR - move to In Review
           console.log(`   PR #${taskInfo.prNumber} exists, moving to In Review`);
           if (inReviewId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              inReviewId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  inReviewId
+                ),
+              true
             );
           }
         } else {
@@ -1118,20 +1262,30 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           console.log(`   No PR found, moving to Ready for re-work`);
           const readyId = projectCache.statusOptions['ready'];
           if (readyId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              readyId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  readyId
+                ),
+              true
             );
           }
 
           // Add comment about archived session
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ⚠️ Session Archived\n\nThe Claude session was archived before completing.\n\nTask moved to Ready for a new attempt.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ⚠️ Session Archived\n\nThe Claude session was archived before completing.\n\nTask moved to Ready for a new attempt.`
+              ),
+            true
           );
         }
       } else {
@@ -1164,11 +1318,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
 
           // Move back to backlog for retry
           if (backlogId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              backlogId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  backlogId
+                ),
+              true
             );
           }
 
@@ -1176,11 +1335,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           clearCooldown(ctx, item.number);
 
           // Add comment about timeout
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ⏱️ Session Timeout\n\nThe Claude session was running for ${elapsed} minutes without completing.\n\nSession interrupted and task moved back to backlog for retry.\n\n**Previous Session:** ${taskInfo.sessionId}`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ⏱️ Session Timeout\n\nThe Claude session was running for ${elapsed} minutes without completing.\n\nSession interrupted and task moved back to backlog for retry.\n\n**Previous Session:** ${taskInfo.sessionId}`
+              ),
+            true
           );
         } else {
           const elapsed = Math.round((Date.now() - trackingStartTime.getTime()) / 60000);
@@ -1402,7 +1566,9 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
       }
 
       // Get task info from GitHub comments to find PR number
-      const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      const taskInfo = await withGitHubRateLimit(ctx, () =>
+        issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+      );
       if (!taskInfo?.prNumber) {
         console.log(`   #${item.number}: No PR found in comments, skipping review`);
         return;
@@ -1446,11 +1612,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
                 clearCooldown(ctx, item.number);
 
                 // Add comment about restart
-                await issuesService.addComment(
-                  owner,
-                  repo,
-                  item.number,
-                  `### ⚠️ Session Timeout\n\nThe ${taskInfo.type} session was running for ${elapsed} minutes without completing.\n\n**Previous Session:** ${taskInfo.sessionId}`
+                await withGitHubRateLimit(
+                  ctx,
+                  () =>
+                    issuesService.addComment(
+                      owner,
+                      repo,
+                      item.number!,
+                      `### ⚠️ Session Timeout\n\nThe ${taskInfo.type} session was running for ${elapsed} minutes without completing.\n\n**Previous Session:** ${taskInfo.sessionId}`
+                    ),
+                  true
                 );
                 return;
               }
@@ -1537,16 +1708,25 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
             console.log(`   PR merged successfully`);
 
             if (doneId) {
-              await projectsService.updateItemStatus(
-                projectCache.projectId,
-                item.id,
-                projectCache.statusFieldId,
-                doneId
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  projectsService.updateItemStatus(
+                    projectCache.projectId,
+                    item.id,
+                    projectCache.statusFieldId,
+                    doneId
+                  ),
+                true
               );
             }
 
             // Close the issue (should auto-close from PR, but ensure it)
-            await issuesService.closeIssue(owner, repo, item.number);
+            await withGitHubRateLimit(
+              ctx,
+              () => issuesService.closeIssue(owner, repo, item.number!),
+              true
+            );
             console.log(`   Moved to Done, issue closed`);
 
             // Archive the Claude session now that work is complete
@@ -1568,11 +1748,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               ? `\n\n<details>\n<summary>Review Summary</summary>\n\n${result.summary}\n\n</details>`
               : '';
 
-            await issuesService.addComment(
-              owner,
-              repo,
-              item.number,
-              `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.${reviewSummarySection}\n\nThis issue is now closed.`
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                issuesService.addComment(
+                  owner,
+                  repo,
+                  item.number!,
+                  `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.${reviewSummarySection}\n\nThis issue is now closed.`
+                ),
+              true
             );
           } else if (mergeResult.hasConflicts) {
             // Has merge conflicts - needs resolution
@@ -1585,30 +1770,45 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               // Set cooldown to prevent re-processing while conflict resolution runs
               setCooldown(ctx, item.number, 'conflict_resolution', mergeResult.sessionId);
 
-              await issuesService.addComment(
-                owner,
-                repo,
-                item.number,
-                `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  issuesService.addComment(
+                    owner,
+                    repo,
+                    item.number!,
+                    `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
+                  ),
+                true
               );
             } else {
               // Failed to start conflict resolution - move back to ready
               console.log(`   Moving back to Ready for manual conflict resolution`);
 
               if (readyId) {
-                await projectsService.updateItemStatus(
-                  projectCache.projectId,
-                  item.id,
-                  projectCache.statusFieldId,
-                  readyId
+                await withGitHubRateLimit(
+                  ctx,
+                  () =>
+                    projectsService.updateItemStatus(
+                      projectCache.projectId,
+                      item.id,
+                      projectCache.statusFieldId,
+                      readyId
+                    ),
+                  true
                 );
               }
 
-              await issuesService.addComment(
-                owner,
-                repo,
-                item.number,
-                `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  issuesService.addComment(
+                    owner,
+                    repo,
+                    item.number!,
+                    `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+                  ),
+                true
               );
             }
           } else {
@@ -1618,20 +1818,30 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
 
             // Move back to Ready so it gets picked up again
             if (readyId) {
-              await projectsService.updateItemStatus(
-                projectCache.projectId,
-                item.id,
-                projectCache.statusFieldId,
-                readyId
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  projectsService.updateItemStatus(
+                    projectCache.projectId,
+                    item.id,
+                    projectCache.statusFieldId,
+                    readyId
+                  ),
+                true
               );
             }
 
             // Add comment explaining the merge failure
-            await issuesService.addComment(
-              owner,
-              repo,
-              item.number,
-              `### ⚠️ Merge Failed\n\nPR #${taskInfo.prNumber} could not be merged.\n\n**Reason:** ${mergeResult.reason}\n\nMoving back to Ready for re-work. The issue will be picked up in the next cycle to resolve the problem.`
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                issuesService.addComment(
+                  owner,
+                  repo,
+                  item.number!,
+                  `### ⚠️ Merge Failed\n\nPR #${taskInfo.prNumber} could not be merged.\n\n**Reason:** ${mergeResult.reason}\n\nMoving back to Ready for re-work. The issue will be picked up in the next cycle to resolve the problem.`
+                ),
+              true
             );
           }
         } else {
@@ -1639,11 +1849,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           console.log(`   Review rejected, moving back to Ready for re-work`);
 
           if (readyId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              readyId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  readyId
+                ),
+              true
             );
           }
 
@@ -1651,11 +1866,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           const issuesText = formatReviewIssuesForComment(result.issues);
 
           // Add comment about review rejection WITH the actual issues
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
+              ),
+            true
           );
         }
       } catch (error) {
