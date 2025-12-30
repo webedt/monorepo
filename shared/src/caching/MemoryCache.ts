@@ -19,6 +19,15 @@ import {
   type CacheHealth,
 } from './types.js';
 
+/**
+ * Doubly-linked list node for O(1) LRU eviction
+ */
+interface LRUNode {
+  key: string;
+  prev: LRUNode | null;
+  next: LRUNode | null;
+}
+
 export class MemoryCache {
   private cache: Map<string, CacheEntry> = new Map();
   private tags: Map<string, Set<string>> = new Map(); // tag -> keys
@@ -29,6 +38,11 @@ export class MemoryCache {
   private lastCleanup: Date | null = null;
   private accessTimings: number[] = [];
   private errors: string[] = [];
+
+  // Doubly-linked list for O(1) LRU eviction
+  private lruHead: LRUNode | null = null; // Most recently used
+  private lruTail: LRUNode | null = null; // Least recently used
+  private lruNodes: Map<string, LRUNode> = new Map(); // key -> node for O(1) lookup
 
   constructor(config: Partial<CacheConfig> = {}) {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
@@ -113,6 +127,9 @@ export class MemoryCache {
     entry.lastAccessedAt = now;
     entry.accessCount++;
 
+    // Move to head of LRU list (most recently used)
+    this.moveToHead(key);
+
     if (this.config.enableStats) {
       this.stats.hits++;
       this.updateHitRate();
@@ -140,6 +157,7 @@ export class MemoryCache {
     if (existingEntry) {
       this.stats.sizeBytes -= existingEntry.sizeBytes;
       this.removeFromTags(key);
+      this.removeFromLRU(key);
     }
 
     // Create new entry
@@ -153,6 +171,9 @@ export class MemoryCache {
     };
 
     this.cache.set(key, entry);
+
+    // Add to head of LRU list (most recently used)
+    this.addToHead(key);
 
     // Track tags
     if (options?.tags) {
@@ -179,6 +200,7 @@ export class MemoryCache {
 
     this.cache.delete(key);
     this.removeFromTags(key);
+    this.removeFromLRU(key);
 
     if (this.config.enableStats) {
       this.stats.deletes++;
@@ -207,6 +229,9 @@ export class MemoryCache {
   async clear(): Promise<void> {
     this.cache.clear();
     this.tags.clear();
+    this.lruHead = null;
+    this.lruTail = null;
+    this.lruNodes.clear();
     this.stats = this.createEmptyStats();
   }
 
@@ -471,30 +496,99 @@ export class MemoryCache {
     }
   }
 
+  /**
+   * O(1) LRU eviction - removes the tail (least recently used) entry
+   */
   private evictLRU(): void {
-    // Find the least recently used entry
-    let lruKey: string | null = null;
-    let lruTime = Infinity;
-
-    for (const [key, entry] of this.cache.entries()) {
-      if (entry.lastAccessedAt < lruTime) {
-        lruTime = entry.lastAccessedAt;
-        lruKey = key;
-      }
+    if (!this.lruTail) {
+      return;
     }
 
-    if (lruKey) {
-      const entry = this.cache.get(lruKey);
-      if (entry) {
-        this.cache.delete(lruKey);
-        this.removeFromTags(lruKey);
-        if (this.config.enableStats) {
-          this.stats.evictions++;
-          this.stats.entryCount = this.cache.size;
-          this.stats.sizeBytes -= entry.sizeBytes;
-        }
+    const lruKey = this.lruTail.key;
+    const entry = this.cache.get(lruKey);
+
+    if (entry) {
+      this.cache.delete(lruKey);
+      this.removeFromTags(lruKey);
+      this.removeFromLRU(lruKey);
+
+      if (this.config.enableStats) {
+        this.stats.evictions++;
+        this.stats.entryCount = this.cache.size;
+        this.stats.sizeBytes -= entry.sizeBytes;
       }
     }
+  }
+
+  /**
+   * Add a key to the head of the LRU list (most recently used)
+   */
+  private addToHead(key: string): void {
+    const node: LRUNode = { key, prev: null, next: this.lruHead };
+
+    if (this.lruHead) {
+      this.lruHead.prev = node;
+    }
+    this.lruHead = node;
+
+    if (!this.lruTail) {
+      this.lruTail = node;
+    }
+
+    this.lruNodes.set(key, node);
+  }
+
+  /**
+   * Move an existing key to the head of the LRU list
+   */
+  private moveToHead(key: string): void {
+    const node = this.lruNodes.get(key);
+    if (!node || node === this.lruHead) {
+      return;
+    }
+
+    // Remove from current position
+    if (node.prev) {
+      node.prev.next = node.next;
+    }
+    if (node.next) {
+      node.next.prev = node.prev;
+    }
+    if (node === this.lruTail) {
+      this.lruTail = node.prev;
+    }
+
+    // Add to head
+    node.prev = null;
+    node.next = this.lruHead;
+    if (this.lruHead) {
+      this.lruHead.prev = node;
+    }
+    this.lruHead = node;
+  }
+
+  /**
+   * Remove a key from the LRU list
+   */
+  private removeFromLRU(key: string): void {
+    const node = this.lruNodes.get(key);
+    if (!node) {
+      return;
+    }
+
+    if (node.prev) {
+      node.prev.next = node.next;
+    } else {
+      this.lruHead = node.next;
+    }
+
+    if (node.next) {
+      node.next.prev = node.prev;
+    } else {
+      this.lruTail = node.prev;
+    }
+
+    this.lruNodes.delete(key);
   }
 
   private removeFromTags(key: string): void {
