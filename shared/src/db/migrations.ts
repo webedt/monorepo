@@ -486,7 +486,16 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       preferred_model TEXT,
       chat_verbosity_level TEXT NOT NULL DEFAULT 'verbose',
       is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      storage_quota_bytes TEXT NOT NULL DEFAULT '5368709120',
+      storage_used_bytes TEXT NOT NULL DEFAULT '0',
+      spending_limit_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      monthly_budget_cents TEXT NOT NULL DEFAULT '0',
+      per_transaction_limit_cents TEXT NOT NULL DEFAULT '0',
+      spending_reset_day INTEGER NOT NULL DEFAULT 1,
+      current_month_spent_cents TEXT NOT NULL DEFAULT '0',
+      spending_limit_action TEXT NOT NULL DEFAULT 'warn',
+      spending_reset_at TIMESTAMP
     );
 
     -- Sessions table (for Lucia auth)
@@ -500,6 +509,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      organization_id TEXT,
       session_path TEXT UNIQUE,
       repository_owner TEXT,
       repository_name TEXT,
@@ -519,7 +529,10 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMP,
       deleted_at TIMESTAMP,
-      worker_last_activity TIMESTAMP
+      worker_last_activity TIMESTAMP,
+      favorite BOOLEAN NOT NULL DEFAULT FALSE,
+      share_token TEXT UNIQUE,
+      share_expires_at TIMESTAMP
     );
 
     -- Messages table
@@ -536,6 +549,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS events (
       id SERIAL PRIMARY KEY,
       chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      uuid TEXT,
       event_data JSONB NOT NULL,
       timestamp TIMESTAMP NOT NULL DEFAULT NOW()
     );
@@ -695,7 +709,13 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'chat_sessions.provider_session_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS provider_session_id TEXT',
   'chat_sessions.deleted_at': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP',
   'chat_sessions.worker_last_activity': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS worker_last_activity TIMESTAMP',
-  // users columns (for future additions)
+  'chat_sessions.organization_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS organization_id TEXT',
+  'chat_sessions.favorite': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS favorite BOOLEAN NOT NULL DEFAULT FALSE',
+  'chat_sessions.share_token': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE',
+  'chat_sessions.share_expires_at': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_expires_at TIMESTAMP',
+  // events columns
+  'events.uuid': 'ALTER TABLE events ADD COLUMN IF NOT EXISTS uuid TEXT',
+  // users columns
   'users.openrouter_api_key': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS openrouter_api_key TEXT',
   'users.autocomplete_enabled': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS autocomplete_enabled BOOLEAN NOT NULL DEFAULT TRUE',
   'users.autocomplete_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS autocomplete_model TEXT DEFAULT \'openai/gpt-oss-120b:cerebras\'',
@@ -703,6 +723,15 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'users.image_ai_provider': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_provider TEXT DEFAULT \'openrouter\'',
   'users.image_ai_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_model TEXT DEFAULT \'google/gemini-2.5-flash-image\'',
   'users.is_admin': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE',
+  'users.storage_quota_bytes': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_quota_bytes TEXT NOT NULL DEFAULT \'5368709120\'',
+  'users.storage_used_bytes': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_bytes TEXT NOT NULL DEFAULT \'0\'',
+  'users.spending_limit_enabled': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_limit_enabled BOOLEAN NOT NULL DEFAULT FALSE',
+  'users.monthly_budget_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_budget_cents TEXT NOT NULL DEFAULT \'0\'',
+  'users.per_transaction_limit_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS per_transaction_limit_cents TEXT NOT NULL DEFAULT \'0\'',
+  'users.spending_reset_day': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_reset_day INTEGER NOT NULL DEFAULT 1',
+  'users.current_month_spent_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS current_month_spent_cents TEXT NOT NULL DEFAULT \'0\'',
+  'users.spending_limit_action': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_limit_action TEXT NOT NULL DEFAULT \'warn\'',
+  'users.spending_reset_at': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_reset_at TIMESTAMP',
 };
 
 /**
@@ -718,6 +747,8 @@ const INDEX_DEFINITIONS: string[] = [
   // Unique index for event deduplication by UUID (extracted from JSONB)
   // Partial index excludes NULL UUIDs; enables ON CONFLICT DO NOTHING for race condition handling
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>\'uuid\')::text)) WHERE event_data->>\'uuid\' IS NOT NULL',
+  // Unique index for event deduplication by UUID column (for newer schema)
+  'CREATE UNIQUE INDEX IF NOT EXISTS events_session_uuid_idx ON events(chat_session_id, uuid)',
 ];
 
 /**
