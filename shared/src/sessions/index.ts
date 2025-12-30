@@ -26,6 +26,10 @@ export { SessionCleanupService, sessionCleanupService } from './SessionCleanupSe
 export { ATrashCleanupService, type TrashCleanupResult, type TrashCleanupSession } from './ATrashCleanupService.js';
 export { TrashCleanupService, trashCleanupService } from './TrashCleanupService.js';
 
+// Invitation cleanup service (automatic cleanup of expired organization invitations)
+export { AInvitationCleanupService, type InvitationCleanupResult, type ExpiredInvitation } from './AInvitationCleanupService.js';
+export { InvitationCleanupService, invitationCleanupService } from './InvitationCleanupService.js';
+
 // Event storage service
 export { AEventStorageService, type StoredEvent, type StoreEventResult } from './AEventStorageService.js';
 export { EventStorageService, eventStorageService } from './EventStorageService.js';
