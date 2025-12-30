@@ -536,6 +536,9 @@ export type {
   NewSnippetInCollection,
   SnippetLanguage,
   SnippetCategory,
+  // Idempotency types
+  IdempotencyKey,
+  NewIdempotencyKey,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -594,6 +597,8 @@ export {
   snippetsInCollections,
   SNIPPET_LANGUAGES,
   SNIPPET_CATEGORIES,
+  // Idempotency tables
+  idempotencyKeys,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
