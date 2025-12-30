@@ -171,10 +171,13 @@ export class FilterDropdown extends Component<HTMLDivElement> {
     const rangeContainer = document.createElement('div');
     rangeContainer.className = 'filter-dropdown__range';
 
+    // Escape unit to prevent XSS
+    const escapedUnit = this.escapeHtml(unit);
+
     rangeContainer.innerHTML = `
       <div class="filter-dropdown__range-inputs">
         <div class="filter-dropdown__range-field">
-          <label>Min${unit ? ` (${unit})` : ''}</label>
+          <label>Min${escapedUnit ? ` (${escapedUnit})` : ''}</label>
           <input
             type="number"
             class="filter-dropdown__range-input"
@@ -188,7 +191,7 @@ export class FilterDropdown extends Component<HTMLDivElement> {
         </div>
         <span class="filter-dropdown__range-separator">to</span>
         <div class="filter-dropdown__range-field">
-          <label>Max${unit ? ` (${unit})` : ''}</label>
+          <label>Max${escapedUnit ? ` (${escapedUnit})` : ''}</label>
           <input
             type="number"
             class="filter-dropdown__range-input"
