@@ -7,7 +7,9 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, events, eq, and, asc, isNotNull, logger, generateSessionPath } from '@webedt/shared';
+import { db, chatSessions, messages, events, eq, and, asc, isNotNull, logger, generateSessionPath, ServiceProvider, ACacheService } from '@webedt/shared';
+
+import type { CachedSessionList } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -195,10 +197,51 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const userId = authReq.user!.id;
 
+    // Try to get from cache first (with graceful degradation)
+    let cacheService: ACacheService | null = null;
+    try {
+      cacheService = ServiceProvider.get(ACacheService);
+      const cachedResult = await cacheService.getSessionList(userId) as { hit: boolean; value?: CachedSessionList };
+
+      if (cachedResult.hit && cachedResult.value) {
+        // Add cache header to indicate cache hit
+        res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+        res.json({
+          success: true,
+          data: {
+            sessions: cachedResult.value.sessions,
+            total: cachedResult.value.total,
+          },
+        });
+        return;
+      }
+    } catch (cacheError) {
+      // Cache read failed - continue with database fetch
+      logger.warn('Cache read failed, falling back to database', {
+        component: 'Sessions',
+        error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
+      });
+    }
+
+    // Cache miss or cache error - fetch from database
     // Use injected service instead of ServiceProvider.get()
-    const sessions = await services.sessionQueryService.listActive(authReq.user!.id);
+    const sessions = await services.sessionQueryService.listActive(userId);
 
+    // Try to cache the result (non-blocking, ignore errors)
+    if (cacheService) {
+      cacheService.setSessionList(userId, sessions).catch(err => {
+        logger.warn('Failed to cache session list', {
+          component: 'Sessions',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    }
+
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     res.json({
       success: true,
       data: {

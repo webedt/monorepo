@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { logger, withGitHubResilience, ServiceProvider, ACacheService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
+
 import type { AuthRequest } from '../../middleware/auth.js';
 import type { CachedGitHubRepos } from '@webedt/shared';
 
@@ -48,12 +49,11 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
       if (cachedResult.hit && cachedResult.value) {
         res.setHeader('X-Cache', 'HIT');
-        res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
         res.json({ success: true, data: cachedResult.value.repos });
         return;
       }
     } catch (cacheError) {
-      // Cache read failed, fall back to GitHub API
+      // Cache read failed - continue with GitHub API fetch
       logger.warn('Cache read failed, falling back to GitHub API', {
         component: 'GitHub',
         error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
@@ -82,7 +82,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       default_branch: repo.default_branch,
     }));
 
-    // Non-blocking cache write with error handling
+    // Try to cache the result (non-blocking, ignore errors)
     if (cacheService) {
       cacheService.setGitHubRepos(userId, formattedRepos).catch(err => {
         logger.warn('Failed to cache GitHub repos', {
@@ -93,7 +93,6 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     res.setHeader('X-Cache', 'MISS');
-    res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
     res.json({ success: true, data: formattedRepos });
   } catch (error) {
     logger.error('GitHub repos error', error as Error, { component: 'GitHub' });

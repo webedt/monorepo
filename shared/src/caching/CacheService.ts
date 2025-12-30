@@ -379,4 +379,5 @@ export class CacheService extends ACacheService {
 }
 
 // Note: Use ServiceProvider.get(ACacheService) instead of a singleton
-// This ensures proper dependency injection and testability
+// to ensure consistent cache instance throughout the application.
+// The singleton pattern has been removed to avoid conflicts with ServiceProvider.

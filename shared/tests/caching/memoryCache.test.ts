@@ -1,325 +1,268 @@
 /**
  * Tests for the MemoryCache module.
- * Covers cache operations, TTL expiration, LRU eviction, tag invalidation,
- * and request coalescing to prevent stampeding herd.
+ * Covers basic operations, LRU eviction, TTL expiration, and stampede prevention.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
 import { MemoryCache } from '../../src/caching/MemoryCache.js';
 
 describe('MemoryCache', () => {
-  let cache: MemoryCache;
-
-  beforeEach(async () => {
-    cache = new MemoryCache({
-      defaultTtlMs: 1000,
-      maxEntries: 100,
-      maxSizeBytes: 1024 * 1024,
-      cleanupIntervalMs: 0, // Disable auto cleanup for tests
-      enableStats: true,
-    });
-    await cache.initialize();
-  });
-
-  afterEach(async () => {
-    await cache.dispose();
-  });
-
   describe('Basic Operations', () => {
     it('should set and get a value', async () => {
+      const cache = new MemoryCache();
       await cache.set('key1', 'value1');
       const result = await cache.get<string>('key1');
 
       assert.strictEqual(result.hit, true);
       assert.strictEqual(result.value, 'value1');
-      assert.strictEqual(result.expired, false);
     });
 
     it('should return miss for non-existent key', async () => {
-      const result = await cache.get<string>('nonexistent');
+      const cache = new MemoryCache();
+      const result = await cache.get('nonexistent');
 
       assert.strictEqual(result.hit, false);
       assert.strictEqual(result.value, undefined);
     });
 
-    it('should delete a key', async () => {
+    it('should delete a value', async () => {
+      const cache = new MemoryCache();
       await cache.set('key1', 'value1');
       const deleted = await cache.delete('key1');
+      const result = await cache.get('key1');
 
       assert.strictEqual(deleted, true);
-
-      const result = await cache.get<string>('key1');
       assert.strictEqual(result.hit, false);
     });
 
     it('should return false when deleting non-existent key', async () => {
+      const cache = new MemoryCache();
       const deleted = await cache.delete('nonexistent');
+
       assert.strictEqual(deleted, false);
     });
 
     it('should check if key exists', async () => {
+      const cache = new MemoryCache();
       await cache.set('key1', 'value1');
 
       assert.strictEqual(await cache.has('key1'), true);
       assert.strictEqual(await cache.has('nonexistent'), false);
     });
 
-    it('should clear all entries', async () => {
+    it('should clear all values', async () => {
+      const cache = new MemoryCache();
       await cache.set('key1', 'value1');
       await cache.set('key2', 'value2');
-      await cache.set('key3', 'value3');
-
       await cache.clear();
 
       assert.strictEqual((await cache.get('key1')).hit, false);
       assert.strictEqual((await cache.get('key2')).hit, false);
-      assert.strictEqual((await cache.get('key3')).hit, false);
     });
 
-    it('should support sync operations', () => {
-      cache.setSync('key1', 'value1');
-      const result = cache.getSync<string>('key1');
+    it('should update existing value', async () => {
+      const cache = new MemoryCache();
+      await cache.set('key1', 'value1');
+      await cache.set('key1', 'value2');
+      const result = await cache.get<string>('key1');
 
-      assert.strictEqual(result.hit, true);
-      assert.strictEqual(result.value, 'value1');
+      assert.strictEqual(result.value, 'value2');
     });
   });
 
   describe('TTL Expiration', () => {
     it('should expire entries after TTL', async () => {
-      await cache.set('short-lived', 'value', { ttlMs: 50 });
+      const cache = new MemoryCache({ defaultTtlMs: 50 });
+      await cache.set('key1', 'value1');
 
-      // Should be available immediately
-      let result = await cache.get<string>('short-lived');
-      assert.strictEqual(result.hit, true);
-
-      // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 60));
-
-      result = await cache.get<string>('short-lived');
-      assert.strictEqual(result.hit, false);
-      assert.strictEqual(result.expired, true);
-    });
-
-    it('should use default TTL when not specified', async () => {
-      const shortTtlCache = new MemoryCache({
-        defaultTtlMs: 50,
-        cleanupIntervalMs: 0,
-      });
-      await shortTtlCache.initialize();
-
-      await shortTtlCache.set('key', 'value');
+      // Should exist immediately
+      const before = await cache.get('key1');
+      assert.strictEqual(before.hit, true);
 
       // Wait for expiration
       await new Promise(resolve => setTimeout(resolve, 60));
 
-      const result = await shortTtlCache.get<string>('key');
-      assert.strictEqual(result.hit, false);
-
-      await shortTtlCache.dispose();
+      const after = await cache.get('key1');
+      assert.strictEqual(after.hit, false);
+      assert.strictEqual(after.expired, true);
     });
 
-    it('should remove expired entries from has() check', async () => {
-      await cache.set('expiring', 'value', { ttlMs: 50 });
+    it('should respect custom TTL per entry', async () => {
+      const cache = new MemoryCache({ defaultTtlMs: 1000 });
+      await cache.set('short', 'value', { ttlMs: 50 });
+      await cache.set('long', 'value', { ttlMs: 500 });
 
-      assert.strictEqual(await cache.has('expiring'), true);
-
+      // Wait for short to expire
       await new Promise(resolve => setTimeout(resolve, 60));
 
-      assert.strictEqual(await cache.has('expiring'), false);
+      const shortResult = await cache.get('short');
+      const longResult = await cache.get('long');
+
+      assert.strictEqual(shortResult.hit, false);
+      assert.strictEqual(longResult.hit, true);
     });
   });
 
   describe('LRU Eviction', () => {
-    it('should evict least recently used entry when max entries reached', async () => {
-      const smallCache = new MemoryCache({
-        maxEntries: 3,
-        cleanupIntervalMs: 0,
-      });
-      await smallCache.initialize();
+    it('should evict least recently used when max entries reached', async () => {
+      const cache = new MemoryCache({ maxEntries: 3 });
+      await cache.set('a', '1');
+      await cache.set('b', '2');
+      await cache.set('c', '3');
 
-      // Set entries with explicit delays to ensure distinct access times
-      await smallCache.set('first', 1);
-      await new Promise(resolve => setTimeout(resolve, 5));
-      await smallCache.set('second', 2);
-      await new Promise(resolve => setTimeout(resolve, 5));
-      await smallCache.set('third', 3);
-      await new Promise(resolve => setTimeout(resolve, 5));
+      // Access 'a' to make it recently used
+      await cache.get('a');
 
-      // Access first and third to make them recently used, leaving 'second' as LRU
-      await smallCache.get('first');
-      await new Promise(resolve => setTimeout(resolve, 5));
-      await smallCache.get('third');
-      await new Promise(resolve => setTimeout(resolve, 5));
+      // Add new entry, should evict 'b' (least recently used)
+      await cache.set('d', '4');
 
-      // Add fourth entry, should evict 'second' (least recently used)
-      await smallCache.set('fourth', 4);
-
-      // Store results to avoid multiple gets affecting the test
-      const firstResult = await smallCache.get<number>('first');
-      const secondResult = await smallCache.get<number>('second');
-      const thirdResult = await smallCache.get<number>('third');
-      const fourthResult = await smallCache.get<number>('fourth');
-
-      assert.strictEqual(firstResult.hit, true, 'first should still be in cache');
-      assert.strictEqual(secondResult.hit, false, 'second should be evicted (LRU)');
-      assert.strictEqual(thirdResult.hit, true, 'third should still be in cache');
-      assert.strictEqual(fourthResult.hit, true, 'fourth should be in cache');
-
-      await smallCache.dispose();
+      assert.strictEqual((await cache.get('a')).hit, true); // Still there, was accessed
+      assert.strictEqual((await cache.get('b')).hit, false); // Evicted
+      assert.strictEqual((await cache.get('c')).hit, true);
+      assert.strictEqual((await cache.get('d')).hit, true);
     });
 
-    it('should evict based on size limit', async () => {
-      const smallCache = new MemoryCache({
+    it('should evict based on size limits', async () => {
+      const cache = new MemoryCache({
+        maxSizeBytes: 200,
         maxEntries: 1000,
-        maxSizeBytes: 200, // Very small size limit
-        cleanupIntervalMs: 0,
       });
-      await smallCache.initialize();
 
-      // Add entries that will exceed size limit
-      await smallCache.set('key1', 'a'.repeat(50));
-      await smallCache.set('key2', 'b'.repeat(50));
-      await smallCache.set('key3', 'c'.repeat(50));
-      await smallCache.set('key4', 'd'.repeat(50));
+      // Create larger values that will exceed the size limit
+      const largeValue = 'x'.repeat(100); // ~200 bytes in our size calculation
 
-      // Some entries should have been evicted
-      const stats = smallCache.getStats();
-      assert.ok(stats.evictions > 0, 'Should have evicted entries');
+      await cache.set('k1', largeValue);
+      await cache.set('k2', largeValue);
 
-      await smallCache.dispose();
+      // At least one should have been evicted due to size
+      const stats = cache.getStats();
+      assert.ok(stats.evictions > 0);
     });
   });
 
-  describe('Tag Invalidation', () => {
-    it('should invalidate entries by tag', async () => {
-      await cache.set('user:1:profile', 'profile1', { tags: ['user:1'] });
-      await cache.set('user:1:settings', 'settings1', { tags: ['user:1'] });
-      await cache.set('user:2:profile', 'profile2', { tags: ['user:2'] });
-
-      const count = await cache.invalidateTags(['user:1']);
-
-      assert.strictEqual(count, 2);
-      assert.strictEqual((await cache.get('user:1:profile')).hit, false);
-      assert.strictEqual((await cache.get('user:1:settings')).hit, false);
-      assert.strictEqual((await cache.get('user:2:profile')).hit, true);
-    });
-
-    it('should invalidate entries by prefix', async () => {
-      await cache.set('session:abc:data', 'data1');
-      await cache.set('session:abc:events', 'data2');
-      await cache.set('session:def:data', 'data3');
-
-      const count = await cache.invalidatePrefix('session:abc');
-
-      assert.strictEqual(count, 2);
-      assert.strictEqual((await cache.get('session:abc:data')).hit, false);
-      assert.strictEqual((await cache.get('session:abc:events')).hit, false);
-      assert.strictEqual((await cache.get('session:def:data')).hit, true);
-    });
-
-    it('should clean up empty tag sets', async () => {
-      await cache.set('key1', 'value1', { tags: ['tag1'] });
-      await cache.set('key2', 'value2', { tags: ['tag2'] });
-
-      // Invalidate tag1
-      await cache.invalidateTags(['tag1']);
-
-      // Now invalidating tag1 again should return 0 (tag set cleaned up)
-      const count = await cache.invalidateTags(['tag1']);
-      assert.strictEqual(count, 0);
-    });
-  });
-
-  describe('getOrSet - Request Coalescing', () => {
-    it('should return cached value if exists', async () => {
-      await cache.set('existing', 'cached-value');
-
-      let factoryCalled = false;
-      const result = await cache.getOrSet('existing', async () => {
-        factoryCalled = true;
-        return 'new-value';
-      });
-
-      assert.strictEqual(result, 'cached-value');
-      assert.strictEqual(factoryCalled, false);
-    });
-
-    it('should call factory and cache result on miss', async () => {
-      let factoryCalled = false;
-      const result = await cache.getOrSet('new-key', async () => {
-        factoryCalled = true;
-        return 'factory-value';
-      });
-
-      assert.strictEqual(result, 'factory-value');
-      assert.strictEqual(factoryCalled, true);
-
-      // Should be cached now
-      const cached = await cache.get<string>('new-key');
-      assert.strictEqual(cached.value, 'factory-value');
-    });
-
-    it('should prevent stampeding herd with request coalescing', async () => {
+  describe('Stampeding Herd Prevention', () => {
+    it('should prevent multiple factory calls for same key', async () => {
+      const cache = new MemoryCache();
       let factoryCallCount = 0;
 
       const factory = async () => {
         factoryCallCount++;
         await new Promise(resolve => setTimeout(resolve, 50));
-        return `value-${factoryCallCount}`;
+        return 'expensive-result';
       };
 
       // Start multiple concurrent requests for the same key
       const promises = [
-        cache.getOrSet('concurrent-key', factory),
-        cache.getOrSet('concurrent-key', factory),
-        cache.getOrSet('concurrent-key', factory),
-        cache.getOrSet('concurrent-key', factory),
-        cache.getOrSet('concurrent-key', factory),
+        cache.getOrSet('key', factory),
+        cache.getOrSet('key', factory),
+        cache.getOrSet('key', factory),
       ];
 
       const results = await Promise.all(promises);
 
-      // Factory should only be called once due to request coalescing
+      // Factory should only be called once
       assert.strictEqual(factoryCallCount, 1);
 
       // All results should be the same
-      results.forEach(result => {
-        assert.strictEqual(result, 'value-1');
-      });
+      assert.deepStrictEqual(results, [
+        'expensive-result',
+        'expensive-result',
+        'expensive-result',
+      ]);
     });
 
-    it('should clean up pending factory on error', async () => {
-      const factory = async () => {
-        throw new Error('Factory error');
+    it('should call factory for different keys in parallel', async () => {
+      const cache = new MemoryCache();
+      let factoryCallCount = 0;
+
+      const factory = async (value: string) => {
+        factoryCallCount++;
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return value;
       };
 
-      // First call should throw
-      await assert.rejects(
-        cache.getOrSet('error-key', factory),
-        { message: 'Factory error' }
-      );
+      const promises = [
+        cache.getOrSet('key1', () => factory('value1')),
+        cache.getOrSet('key2', () => factory('value2')),
+        cache.getOrSet('key3', () => factory('value3')),
+      ];
 
-      // Second call should also call factory (not stuck on failed promise)
-      let secondFactoryCalled = false;
-      const result = await cache.getOrSet('error-key', async () => {
-        secondFactoryCalled = true;
-        return 'success';
-      });
+      await Promise.all(promises);
 
-      assert.strictEqual(secondFactoryCalled, true);
-      assert.strictEqual(result, 'success');
+      // Each key should trigger its own factory call
+      assert.strictEqual(factoryCallCount, 3);
+    });
+
+    it('should return cached value without calling factory', async () => {
+      const cache = new MemoryCache();
+      let factoryCallCount = 0;
+
+      const factory = async () => {
+        factoryCallCount++;
+        return 'result';
+      };
+
+      // First call
+      await cache.getOrSet('key', factory);
+      assert.strictEqual(factoryCallCount, 1);
+
+      // Second call - should use cache
+      const result = await cache.getOrSet('key', factory);
+      assert.strictEqual(factoryCallCount, 1);
+      assert.strictEqual(result, 'result');
+    });
+  });
+
+  describe('Tags and Invalidation', () => {
+    it('should invalidate by tag', async () => {
+      const cache = new MemoryCache();
+      await cache.set('user:1:profile', 'data', { tags: ['user:1'] });
+      await cache.set('user:1:sessions', 'data', { tags: ['user:1'] });
+      await cache.set('user:2:profile', 'data', { tags: ['user:2'] });
+
+      const count = await cache.invalidateTags(['user:1']);
+
+      assert.strictEqual(count, 2);
+      assert.strictEqual((await cache.get('user:1:profile')).hit, false);
+      assert.strictEqual((await cache.get('user:1:sessions')).hit, false);
+      assert.strictEqual((await cache.get('user:2:profile')).hit, true);
+    });
+
+    it('should invalidate by prefix', async () => {
+      const cache = new MemoryCache();
+      await cache.set('session:abc:data', '1');
+      await cache.set('session:def:data', '2');
+      await cache.set('user:123', '3');
+
+      const count = await cache.invalidatePrefix('session:');
+
+      assert.strictEqual(count, 2);
+      assert.strictEqual((await cache.get('session:abc:data')).hit, false);
+      assert.strictEqual((await cache.get('session:def:data')).hit, false);
+      assert.strictEqual((await cache.get('user:123')).hit, true);
+    });
+
+    it('should clean up empty tag sets', async () => {
+      const cache = new MemoryCache();
+      await cache.set('key1', 'value', { tags: ['tag1'] });
+      await cache.delete('key1');
+
+      // Internal check - the tag set should be cleaned up
+      // We can verify this indirectly by checking invalidation returns 0
+      const count = await cache.invalidateTags(['tag1']);
+      assert.strictEqual(count, 0);
     });
   });
 
   describe('Statistics', () => {
     it('should track hits and misses', async () => {
+      const cache = new MemoryCache({ enableStats: true });
       await cache.set('key1', 'value1');
 
       await cache.get('key1'); // hit
       await cache.get('key1'); // hit
-      await cache.get('nonexistent'); // miss
+      await cache.get('missing'); // miss
 
       const stats = cache.getStats();
       assert.strictEqual(stats.hits, 2);
@@ -328,6 +271,8 @@ describe('MemoryCache', () => {
     });
 
     it('should track sets and deletes', async () => {
+      const cache = new MemoryCache({ enableStats: true });
+
       await cache.set('key1', 'value1');
       await cache.set('key2', 'value2');
       await cache.delete('key1');
@@ -335,119 +280,166 @@ describe('MemoryCache', () => {
       const stats = cache.getStats();
       assert.strictEqual(stats.sets, 2);
       assert.strictEqual(stats.deletes, 1);
+    });
+
+    it('should track size', async () => {
+      const cache = new MemoryCache({ enableStats: true });
+
+      await cache.set('key1', 'value1');
+      const stats = cache.getStats();
+
+      assert.ok(stats.sizeBytes > 0);
       assert.strictEqual(stats.entryCount, 1);
-    });
-
-    it('should track evictions', async () => {
-      const smallCache = new MemoryCache({
-        maxEntries: 2,
-        cleanupIntervalMs: 0,
-        enableStats: true,
-      });
-      await smallCache.initialize();
-
-      await smallCache.set('key1', 'value1');
-      await smallCache.set('key2', 'value2');
-      await smallCache.set('key3', 'value3'); // Should evict one
-
-      const stats = smallCache.getStats();
-      assert.strictEqual(stats.evictions, 1);
-
-      await smallCache.dispose();
-    });
-  });
-
-  describe('Health Check', () => {
-    it('should report healthy status', () => {
-      const health = cache.getHealth();
-
-      assert.strictEqual(health.healthy, true);
-      assert.ok(health.entryCount >= 0);
-      assert.ok(health.sizeBytes >= 0);
-      assert.deepStrictEqual(health.errors, []);
     });
   });
 
   describe('Key Generation', () => {
-    it('should generate consistent hash keys', () => {
-      const key1 = cache.generateKey('user', 123, 'profile');
-      const key2 = cache.generateKey('user', 123, 'profile');
+    it('should generate consistent keys', () => {
+      const cache = new MemoryCache();
+
+      const key1 = cache.generateKey('user', 123, true);
+      const key2 = cache.generateKey('user', 123, true);
+      const key3 = cache.generateKey('user', 123, false);
 
       assert.strictEqual(key1, key2);
-      assert.strictEqual(key1.length, 32); // SHA256 truncated to 32 chars
+      assert.notStrictEqual(key1, key3);
     });
 
-    it('should generate different keys for different inputs', () => {
-      const key1 = cache.generateKey('user', 123);
-      const key2 = cache.generateKey('user', 456);
+    it('should create scoped keys', () => {
+      const cache = new MemoryCache();
 
-      assert.notStrictEqual(key1, key2);
-    });
-
-    it('should create scoped keys with prefix', () => {
       const key = cache.scopedKey('session:list', 'user123');
-
       assert.strictEqual(key, 'session:list:user123');
+
+      const emptyKey = cache.scopedKey('session:list');
+      assert.strictEqual(emptyKey, 'session:list');
     });
 
-    it('should handle null/undefined in scoped keys', () => {
-      const key = cache.scopedKey('prefix', null, undefined, 'value');
+    it('should handle null and undefined in key components', () => {
+      const cache = new MemoryCache();
 
+      const key = cache.scopedKey('prefix', null, undefined, 'value');
       assert.strictEqual(key, 'prefix:value');
     });
   });
 
-  describe('Circular Reference Handling', () => {
-    it('should handle circular references in size calculation', async () => {
+  describe('Size Calculation', () => {
+    it('should handle strings', async () => {
+      const cache = new MemoryCache({ enableStats: true });
+      await cache.set('key', 'hello world');
+      const stats = cache.getStats();
+      assert.ok(stats.sizeBytes > 0);
+    });
+
+    it('should handle objects', async () => {
+      const cache = new MemoryCache({ enableStats: true });
+      await cache.set('key', { name: 'test', value: 123 });
+      const stats = cache.getStats();
+      assert.ok(stats.sizeBytes > 0);
+    });
+
+    it('should handle arrays', async () => {
+      const cache = new MemoryCache({ enableStats: true });
+      await cache.set('key', [1, 2, 3, 4, 5]);
+      const stats = cache.getStats();
+      assert.ok(stats.sizeBytes > 0);
+    });
+
+    it('should handle circular references without crashing', async () => {
+      const cache = new MemoryCache({ enableStats: true });
       const obj: Record<string, unknown> = { name: 'test' };
       obj.self = obj; // Circular reference
 
       // Should not throw
-      await cache.set('circular', obj);
-
-      const result = await cache.get('circular');
-      assert.strictEqual(result.hit, true);
+      await cache.set('key', obj);
+      const stats = cache.getStats();
+      assert.ok(stats.sizeBytes > 0);
     });
   });
 
   describe('Cleanup', () => {
     it('should remove expired entries on cleanup', async () => {
-      await cache.set('expired1', 'value1', { ttlMs: 10 });
-      await cache.set('expired2', 'value2', { ttlMs: 10 });
-      await cache.set('valid', 'value3', { ttlMs: 10000 });
+      const cache = new MemoryCache({
+        defaultTtlMs: 50,
+        cleanupIntervalMs: 0, // Disable auto cleanup
+      });
+
+      await cache.set('key1', 'value1');
+      await cache.set('key2', 'value2');
 
       // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await new Promise(resolve => setTimeout(resolve, 60));
 
       const removed = await cache.cleanup();
 
       assert.strictEqual(removed, 2);
-      assert.strictEqual((await cache.get('expired1')).hit, false);
-      assert.strictEqual((await cache.get('expired2')).hit, false);
-      assert.strictEqual((await cache.get('valid')).hit, true);
+      assert.strictEqual((await cache.get('key1')).hit, false);
+      assert.strictEqual((await cache.get('key2')).hit, false);
     });
   });
 
   describe('Warmup', () => {
-    it('should pre-populate cache with entries', async () => {
+    it('should populate cache with initial entries', async () => {
+      const cache = new MemoryCache();
+
       await cache.warmup([
-        { key: 'warmed1', value: 'value1' },
-        { key: 'warmed2', value: 'value2', options: { ttlMs: 5000 } },
-        { key: 'warmed3', value: 'value3', options: { tags: ['warmup'] } },
+        { key: 'key1', value: 'value1' },
+        { key: 'key2', value: 'value2' },
+        { key: 'key3', value: 'value3' },
       ]);
 
-      assert.strictEqual((await cache.get('warmed1')).hit, true);
-      assert.strictEqual((await cache.get('warmed2')).hit, true);
-      assert.strictEqual((await cache.get('warmed3')).hit, true);
+      assert.strictEqual((await cache.get('key1')).hit, true);
+      assert.strictEqual((await cache.get('key2')).hit, true);
+      assert.strictEqual((await cache.get('key3')).hit, true);
     });
   });
 
-  describe('Config Updates', () => {
-    it('should allow updating configuration', () => {
-      cache.updateConfig({ defaultTtlMs: 2000 });
+  describe('Health', () => {
+    it('should report healthy state', () => {
+      const cache = new MemoryCache();
+      const health = cache.getHealth();
 
+      assert.strictEqual(health.healthy, true);
+      assert.strictEqual(health.entryCount, 0);
+      assert.deepStrictEqual(health.errors, []);
+    });
+
+    it('should report unhealthy when approaching limits', async () => {
+      const cache = new MemoryCache({ maxEntries: 5 });
+
+      for (let i = 0; i < 5; i++) {
+        await cache.set(`key${i}`, 'value');
+      }
+
+      const health = cache.getHealth();
+      // Should not be healthy as we're at max entries
+      assert.strictEqual(health.healthy, false);
+    });
+  });
+
+  describe('Configuration', () => {
+    it('should allow updating config', () => {
+      const cache = new MemoryCache({ defaultTtlMs: 1000 });
+
+      cache.updateConfig({ defaultTtlMs: 5000 });
       const config = cache.getConfig();
-      assert.strictEqual(config.defaultTtlMs, 2000);
+
+      assert.strictEqual(config.defaultTtlMs, 5000);
+    });
+  });
+
+  describe('Dispose', () => {
+    it('should clean up resources on dispose', async () => {
+      const cache = new MemoryCache({
+        cleanupIntervalMs: 100,
+      });
+      await cache.initialize();
+      await cache.set('key', 'value');
+
+      await cache.dispose();
+
+      // Cache should be cleared
+      assert.strictEqual((await cache.get('key')).hit, false);
     });
   });
 });

@@ -6,7 +6,8 @@
  *
  * @example
  * ```typescript
- * import { ACacheService, CACHE_TTL, ServiceProvider } from '@webedt/shared';
+ * import { ACacheService, CACHE_TTL } from '@webedt/shared';
+ * import { ServiceProvider } from '@webedt/shared';
  *
  * // Using dependency injection (recommended)
  * const cache = ServiceProvider.get(ACacheService);
@@ -16,7 +17,7 @@
  *   await cache.setSessionList(userId, sessions);
  * }
  *
- * // Set with custom TTL
+ * // Or with generic methods
  * await cache.set('my-key', myValue, { ttlMs: CACHE_TTL.LONG });
  * ```
  */
