@@ -32,6 +32,8 @@ export class MidiPlayer extends Component {
   private timeCurrentEl: HTMLElement | null = null;
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
+  private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseUp: (() => void) | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
@@ -344,20 +346,30 @@ export class MidiPlayer extends Component {
     this.isDragging = true;
     this.updateProgressFromMouse(e);
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    this.boundHandleMouseMove = (moveEvent: MouseEvent) => {
       if (this.isDragging) {
         this.updateProgressFromMouse(moveEvent);
       }
     };
 
-    const handleMouseUp = () => {
-      this.isDragging = false;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+    this.boundHandleMouseUp = () => {
+      this.cleanupDragListeners();
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', this.boundHandleMouseMove);
+    document.addEventListener('mouseup', this.boundHandleMouseUp);
+  }
+
+  private cleanupDragListeners(): void {
+    this.isDragging = false;
+    if (this.boundHandleMouseMove) {
+      document.removeEventListener('mousemove', this.boundHandleMouseMove);
+      this.boundHandleMouseMove = null;
+    }
+    if (this.boundHandleMouseUp) {
+      document.removeEventListener('mouseup', this.boundHandleMouseUp);
+      this.boundHandleMouseUp = null;
+    }
   }
 
   private updateProgressFromMouse(e: MouseEvent): void {
@@ -464,6 +476,7 @@ export class MidiPlayer extends Component {
   }
 
   protected onUnmount(): void {
+    this.cleanupDragListeners();
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
