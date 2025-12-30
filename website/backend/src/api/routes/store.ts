@@ -57,7 +57,17 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, wishlists, eq, and, desc } from '@webedt/shared';
+import {
+  db,
+  games,
+  userLibrary,
+  wishlists,
+  eq,
+  and,
+  desc,
+  parseOffsetPagination,
+  buildLegacyPaginatedResponse,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -345,8 +355,7 @@ router.get('/browse', async (req: Request, res: Response) => {
       free,
     } = req.query;
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
+    const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
     // Build query - start with published games only
     let baseQuery = db
@@ -419,18 +428,12 @@ router.get('/browse', async (req: Request, res: Response) => {
 
     // Paginate
     const total = allGames.length;
-    const paginatedGames = allGames.slice(offset, offset + limit);
+    const paginatedGames = allGames.slice(
+      pagination.offset,
+      pagination.offset + pagination.limit
+    );
 
-    res.json({
-      success: true,
-      data: {
-        games: paginatedGames,
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    });
+    res.json(buildLegacyPaginatedResponse(paginatedGames, total, pagination, 'games'));
   } catch (error) {
     logger.error('Browse games error', error as Error, { component: 'Store' });
     res.status(500).json({ success: false, error: 'Failed to browse games' });
@@ -845,8 +848,10 @@ router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Respon
 router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
-    const wishlistItems = await db
+    // Get total count
+    const allWishlistItems = await db
       .select({
         wishlistItem: wishlists,
         game: games,
@@ -856,14 +861,23 @@ router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
       .where(eq(wishlists.userId, authReq.user!.id))
       .orderBy(desc(wishlists.addedAt));
 
+    const total = allWishlistItems.length;
+    const paginatedItems = allWishlistItems.slice(
+      pagination.offset,
+      pagination.offset + pagination.limit
+    );
+
     res.json({
       success: true,
       data: {
-        items: wishlistItems.map((item) => ({
+        items: paginatedItems.map((item) => ({
           ...item.wishlistItem,
           game: item.game,
         })),
-        total: wishlistItems.length,
+        total,
+        limit: pagination.limit,
+        offset: pagination.offset,
+        hasMore: pagination.offset + pagination.limit < total,
       },
     });
   } catch (error) {

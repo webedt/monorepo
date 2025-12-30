@@ -27,6 +27,7 @@ import {
   isValidHexColor,
   isValidLanguage,
   isValidCategory,
+  parseOffsetPagination,
 } from '@webedt/shared';
 import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -161,13 +162,13 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       collectionId,
       sortBy = 'updatedAt',
       order = 'desc',
-      limit: limitParam,
-      offset: offsetParam,
     } = req.query;
 
-    // Parse pagination parameters
-    const limit = Math.min(Math.max(parseInt(limitParam as string, 10) || 50, 1), 100);
-    const offset = Math.max(parseInt(offsetParam as string, 10) || 0, 0);
+    // Parse pagination parameters using utility
+    const pagination = parseOffsetPagination(req.query as Record<string, unknown>, {
+      limit: 50,
+      maxLimit: 100,
+    });
 
     // Build base query conditions
     const conditions = [eq(snippets.userId, authReq.user!.id)];
@@ -232,8 +233,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       .from(snippets)
       .where(and(...conditions))
       .orderBy(orderDirection)
-      .limit(limit)
-      .offset(offset);
+      .limit(pagination.limit)
+      .offset(pagination.offset);
 
     // Apply collection filter in-memory if needed (after main query for pagination)
     if (snippetIdsInCollection !== null) {
@@ -247,8 +248,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       data: {
         snippets: userSnippets,
         total,
-        limit,
-        offset,
+        limit: pagination.limit,
+        offset: pagination.offset,
+        hasMore: pagination.offset + pagination.limit < total,
         languages: SNIPPET_LANGUAGES,
         categories: SNIPPET_CATEGORIES,
       },

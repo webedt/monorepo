@@ -1020,8 +1020,15 @@ export const storeApi = {
   getTags: () =>
     fetchApi<{ tags: string[] }>('/api/store/tags'),
 
-  getWishlist: () =>
-    fetchApi<{ items: WishlistItem[]; total: number }>('/api/store/wishlist'),
+  getWishlist: (options?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ items: WishlistItem[]; total: number; limit: number; offset: number; hasMore: boolean }>(
+      `/api/store/wishlist${queryString ? `?${queryString}` : ''}`
+    );
+  },
 
   addToWishlist: (gameId: string) =>
     fetchApi<{ wishlistItem: WishlistItem }>(`/api/store/wishlist/${gameId}`, { method: 'POST' }),
@@ -1237,7 +1244,13 @@ export const communityApi = {
     if (options?.limit) params.append('limit', String(options.limit));
     if (options?.offset) params.append('offset', String(options.offset));
     const queryString = params.toString();
-    return fetchApi<{ posts: CommunityPost[] }>(`/api/community/users/${userId}/posts${queryString ? `?${queryString}` : ''}`);
+    return fetchApi<{
+      posts: CommunityPost[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/community/users/${userId}/posts${queryString ? `?${queryString}` : ''}`);
   },
 
   getGameReviews: (gameId: string, options?: { limit?: number; offset?: number }) => {
@@ -1245,7 +1258,13 @@ export const communityApi = {
     if (options?.limit) params.append('limit', String(options.limit));
     if (options?.offset) params.append('offset', String(options.offset));
     const queryString = params.toString();
-    return fetchApi<{ reviews: CommunityPost[] }>(`/api/community/games/${gameId}/reviews${queryString ? `?${queryString}` : ''}`);
+    return fetchApi<{
+      reviews: CommunityPost[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/community/games/${gameId}/reviews${queryString ? `?${queryString}` : ''}`);
   },
 };
 
@@ -1305,17 +1324,25 @@ export const channelsApi = {
   getChannelBySlug: (slug: string) =>
     fetchApi<CommunityChannel>(`/api/channels/by-slug/${slug}`),
 
-  getMessages: (channelId: string, options?: { limit?: number; offset?: number }) => {
+  getMessages: (channelId: string, options?: {
+    limit?: number;
+    offset?: number;
+    cursor?: string;
+    direction?: 'forward' | 'backward';
+  }) => {
     const params = new URLSearchParams();
     if (options?.limit) params.append('limit', String(options.limit));
-    if (options?.offset) params.append('offset', String(options.offset));
+    if (options?.offset !== undefined) params.append('offset', String(options.offset));
+    if (options?.cursor) params.append('cursor', options.cursor);
+    if (options?.direction) params.append('direction', options.direction);
     const queryString = params.toString();
     return fetchApi<{
       messages: ChannelMessage[];
-      total: number;
-      limit: number;
-      offset: number;
+      total?: number;
+      limit?: number;
+      offset?: number;
       hasMore: boolean;
+      nextCursor?: string | null;
     }>(`/api/channels/${channelId}/messages${queryString ? `?${queryString}` : ''}`);
   },
 
@@ -1885,7 +1912,7 @@ export const autocompleteApi = {
 // ============================================================================
 export const snippetsApi = {
   // List user's snippets with optional filtering
-  list: (filters?: SnippetListFilters) => {
+  list: (filters?: SnippetListFilters & { limit?: number; offset?: number }) => {
     const params = new URLSearchParams();
     if (filters?.language) params.append('language', filters.language);
     if (filters?.category) params.append('category', filters.category);
@@ -1894,10 +1921,15 @@ export const snippetsApi = {
     if (filters?.collectionId) params.append('collectionId', filters.collectionId);
     if (filters?.sortBy) params.append('sortBy', filters.sortBy);
     if (filters?.order) params.append('order', filters.order);
+    if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.offset) params.append('offset', String(filters.offset));
     const queryString = params.toString();
     return fetchApi<ApiResponse<{
       snippets: Snippet[];
       total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
       languages: readonly SnippetLanguage[];
       categories: readonly SnippetCategory[];
     }>>(`/api/snippets${queryString ? `?${queryString}` : ''}`).then(r => r.data!);

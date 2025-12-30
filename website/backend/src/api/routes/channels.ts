@@ -15,6 +15,10 @@ import {
   desc,
   asc,
   sql,
+  lt,
+  gt,
+  parseCursorPagination,
+  parseOffsetPagination,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -296,7 +300,10 @@ router.get('/:id', async (req: Request, res: Response) => {
  *     tags:
  *       - Channels
  *     summary: Get channel messages
- *     description: Returns paginated messages for a channel.
+ *     description: |
+ *       Returns paginated messages for a channel. Supports both offset-based and cursor-based pagination.
+ *       - Offset-based: Use `offset` and `limit` params (for initial load)
+ *       - Cursor-based: Use `cursor`, `limit`, and `direction` params (for real-time feeds)
  *     security: []
  *     parameters:
  *       - name: id
@@ -315,6 +322,19 @@ router.get('/:id', async (req: Request, res: Response) => {
  *         schema:
  *           type: integer
  *           default: 0
+ *         description: Offset for pagination (ignored if cursor is provided)
+ *       - name: cursor
+ *         in: query
+ *         schema:
+ *           type: string
+ *         description: Message ID to paginate from (for cursor-based pagination)
+ *       - name: direction
+ *         in: query
+ *         schema:
+ *           type: string
+ *           enum: [forward, backward]
+ *           default: backward
+ *         description: Direction to paginate (forward=newer, backward=older)
  *     responses:
  *       200:
  *         description: Messages retrieved successfully
@@ -327,8 +347,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.get('/:id/messages', async (req: Request, res: Response) => {
   try {
     const channelId = req.params.id;
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
+    const query = req.query as Record<string, unknown>;
 
     // Verify channel exists
     const [channel] = await db
@@ -342,60 +361,145 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
       return;
     }
 
-    // Get messages with author info
-    const messages = await db
-      .select({
-        message: channelMessages,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-      })
-      .from(channelMessages)
-      .innerJoin(users, eq(channelMessages.userId, users.id))
-      .where(
-        and(
-          eq(channelMessages.channelId, channelId),
-          eq(channelMessages.status, 'published')
-        )
-      )
-      .orderBy(desc(channelMessages.createdAt))
-      .limit(limit)
-      .offset(offset);
+    // Check if cursor-based pagination is requested
+    const hasCursor = typeof query.cursor === 'string' && query.cursor.length > 0;
 
-    // Get total count using efficient SQL COUNT
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(channelMessages)
-      .where(
-        and(
-          eq(channelMessages.channelId, channelId),
-          eq(channelMessages.status, 'published')
-        )
-      );
+    if (hasCursor) {
+      // Cursor-based pagination for real-time feeds
+      const cursorParams = parseCursorPagination(query, { limit: 50, maxLimit: 100 });
 
-    const total = count;
+      // Build base conditions
+      const baseConditions = [
+        eq(channelMessages.channelId, channelId),
+        eq(channelMessages.status, 'published'),
+      ];
 
-    // Reverse to get chronological order for display
-    const sortedMessages = messages.reverse();
+      // Add cursor condition if provided
+      if (cursorParams.cursor) {
+        // Get the cursor message's createdAt for comparison
+        const [cursorMessage] = await db
+          .select({ createdAt: channelMessages.createdAt })
+          .from(channelMessages)
+          .where(eq(channelMessages.id, cursorParams.cursor))
+          .limit(1);
 
-    res.json({
-      success: true,
-      data: {
-        messages: sortedMessages.map((m) => ({
-          ...m.message,
+        if (cursorMessage) {
+          if (cursorParams.direction === 'forward') {
+            // Get newer messages
+            baseConditions.push(gt(channelMessages.createdAt, cursorMessage.createdAt));
+          } else {
+            // Get older messages (default)
+            baseConditions.push(lt(channelMessages.createdAt, cursorMessage.createdAt));
+          }
+        }
+      }
+
+      // Fetch one extra to check if there are more
+      const messages = await db
+        .select({
+          message: channelMessages,
           author: {
-            id: m.author.id,
-            displayName: m.author.displayName || m.author.email?.split('@')[0],
+            id: users.id,
+            displayName: users.displayName,
+            email: users.email,
           },
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    });
+        })
+        .from(channelMessages)
+        .innerJoin(users, eq(channelMessages.userId, users.id))
+        .where(and(...baseConditions))
+        .orderBy(
+          cursorParams.direction === 'forward'
+            ? asc(channelMessages.createdAt)
+            : desc(channelMessages.createdAt)
+        )
+        .limit(cursorParams.limit + 1);
+
+      const hasMore = messages.length > cursorParams.limit;
+      const trimmedMessages = hasMore ? messages.slice(0, cursorParams.limit) : messages;
+
+      // Reverse if we fetched backwards to get chronological order
+      const sortedMessages =
+        cursorParams.direction === 'backward' ? trimmedMessages.reverse() : trimmedMessages;
+
+      const formattedMessages = sortedMessages.map((m) => ({
+        ...m.message,
+        author: {
+          id: m.author.id,
+          displayName: m.author.displayName || m.author.email?.split('@')[0],
+        },
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          messages: formattedMessages,
+          nextCursor: hasMore
+            ? cursorParams.direction === 'forward'
+              ? formattedMessages[formattedMessages.length - 1]?.id
+              : formattedMessages[0]?.id
+            : null,
+          hasMore,
+        },
+      });
+    } else {
+      // Offset-based pagination (backwards compatible)
+      const pagination = parseOffsetPagination(query, { limit: 50, maxLimit: 100 });
+
+      // Get messages with author info
+      const messages = await db
+        .select({
+          message: channelMessages,
+          author: {
+            id: users.id,
+            displayName: users.displayName,
+            email: users.email,
+          },
+        })
+        .from(channelMessages)
+        .innerJoin(users, eq(channelMessages.userId, users.id))
+        .where(
+          and(
+            eq(channelMessages.channelId, channelId),
+            eq(channelMessages.status, 'published')
+          )
+        )
+        .orderBy(desc(channelMessages.createdAt))
+        .limit(pagination.limit)
+        .offset(pagination.offset);
+
+      // Get total count using efficient SQL COUNT
+      const [{ count }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(channelMessages)
+        .where(
+          and(
+            eq(channelMessages.channelId, channelId),
+            eq(channelMessages.status, 'published')
+          )
+        );
+
+      const total = count;
+
+      // Reverse to get chronological order for display
+      const sortedMessages = messages.reverse();
+
+      res.json({
+        success: true,
+        data: {
+          messages: sortedMessages.map((m) => ({
+            ...m.message,
+            author: {
+              id: m.author.id,
+              displayName: m.author.displayName || m.author.email?.split('@')[0],
+            },
+          })),
+          total,
+          limit: pagination.limit,
+          offset: pagination.offset,
+          hasMore: pagination.offset + pagination.limit < total,
+        },
+      });
+    }
   } catch (error) {
     logger.error('Get channel messages error', error as Error, { component: 'Channels' });
     res.status(500).json({ success: false, error: 'Failed to fetch messages' });
