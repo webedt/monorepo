@@ -752,14 +752,39 @@ const INDEX_DEFINITIONS: string[] = [
 ];
 
 /**
+ * Remove duplicate events that would prevent unique index creation.
+ * Keeps the first event (by id) for each (chat_session_id, uuid) combination.
+ */
+async function deduplicateEventsByUuid(pool: pg.Pool): Promise<number> {
+  // Delete duplicate events, keeping the one with the smallest id
+  const result = await pool.query(`
+    DELETE FROM events
+    WHERE id IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY chat_session_id, event_data->>'uuid'
+            ORDER BY id
+          ) as row_num
+        FROM events
+        WHERE event_data->>'uuid' IS NOT NULL
+      ) duplicates
+      WHERE row_num > 1
+    )
+  `);
+  return result.rowCount || 0;
+}
+
+/**
  * Ensure the database schema is up to date by adding any missing columns
  * This runs after initial schema creation or migrations to handle schema drift
  */
-export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[] }> {
+export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[]; duplicatesRemoved: number }> {
   const columnsAdded: string[] = [];
   const columnsRemoved: string[] = [];
   const indexesCreated: string[] = [];
   const errors: string[] = [];
+  let duplicatesRemoved = 0;
 
   // Drop deprecated columns
   const COLUMNS_TO_DROP: { table: string; column: string }[] = [
@@ -817,9 +842,23 @@ export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdde
   // Create any missing indexes
   for (const indexSql of INDEX_DEFINITIONS) {
     try {
+      // For unique indexes on events table, deduplicate first to avoid constraint violations
+      if (indexSql.includes('idx_events_session_uuid') || indexSql.includes('events_session_uuid_idx')) {
+        // Check if index already exists
+        const indexExists = await pool.query(`
+          SELECT 1 FROM pg_indexes
+          WHERE indexname IN ('idx_events_session_uuid', 'events_session_uuid_idx')
+        `);
+
+        if (indexExists.rowCount === 0) {
+          // Index doesn't exist yet - deduplicate events before creating it
+          duplicatesRemoved = await deduplicateEventsByUuid(pool);
+        }
+      }
+
       await pool.query(indexSql);
       // Extract index name from SQL for logging
-      const match = indexSql.match(/CREATE INDEX IF NOT EXISTS (\w+)/);
+      const match = indexSql.match(/CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)/);
       if (match) {
         indexesCreated.push(match[1]);
       }
@@ -829,7 +868,7 @@ export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdde
     }
   }
 
-  return { columnsAdded, columnsRemoved, indexesCreated, errors };
+  return { columnsAdded, columnsRemoved, indexesCreated, errors, duplicatesRemoved };
 }
 
 /**
