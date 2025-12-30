@@ -56,7 +56,7 @@ export class MidiParser {
           for (const event of track.events) {
             if (event.type === 'meta') {
               const metaEvent = event as MidiMetaEvent;
-              if (metaEvent.subtype === 'setTempo' && metaEvent.tempo !== undefined) {
+              if (metaEvent.subtype === 'setTempo' && metaEvent.tempo !== undefined && metaEvent.tempo > 0) {
                 tempoChanges.push({
                   time: event.absoluteTime,
                   microsecondsPerQuarterNote: metaEvent.tempo,
@@ -198,6 +198,22 @@ export class MidiParser {
         // Track note on/off for duration calculation
         if (event.type === 'noteOn' && event.velocity > 0) {
           const key = `${event.channel}-${event.note}`;
+          // Handle overlapping notes: if note is already active, end it first
+          const existingNote = activeNotes.get(key);
+          if (existingNote && existingNote.event.type === 'noteOn') {
+            const noteEvent = existingNote.event;
+            const duration = absoluteTime - existingNote.startTime;
+            notes.push({
+              note: noteEvent.note,
+              noteName: this.midiNoteToName(noteEvent.note),
+              velocity: noteEvent.velocity,
+              channel: noteEvent.channel,
+              startTime: existingNote.startTime,
+              duration,
+              startTimeSeconds: 0, // Will be calculated later
+              durationSeconds: 0, // Will be calculated later
+            });
+          }
           activeNotes.set(key, { event, startTime: absoluteTime });
         } else if (event.type === 'noteOff' || (event.type === 'noteOn' && event.velocity === 0)) {
           const key = `${event.channel}-${event.note}`;
@@ -428,7 +444,12 @@ export class MidiParser {
 
       case 0x51: // Set Tempo
         baseEvent.subtype = 'setTempo';
-        baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        if (data.length >= 3) {
+          baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        } else {
+          // Default to 120 BPM if malformed
+          baseEvent.tempo = 500000; // 120 BPM in microseconds per quarter note
+        }
         break;
 
       case 0x54: // SMPTE Offset
@@ -437,16 +458,30 @@ export class MidiParser {
 
       case 0x58: // Time Signature
         baseEvent.subtype = 'timeSignature';
-        baseEvent.numerator = data[0];
-        baseEvent.denominator = Math.pow(2, data[1]);
-        baseEvent.metronome = data[2];
-        baseEvent.thirtyseconds = data[3];
+        if (data.length >= 4) {
+          baseEvent.numerator = data[0];
+          baseEvent.denominator = Math.pow(2, data[1]);
+          baseEvent.metronome = data[2];
+          baseEvent.thirtyseconds = data[3];
+        } else {
+          // Default values for malformed time signature events
+          baseEvent.numerator = 4;
+          baseEvent.denominator = 4;
+          baseEvent.metronome = 24;
+          baseEvent.thirtyseconds = 8;
+        }
         break;
 
       case 0x59: // Key Signature
         baseEvent.subtype = 'keySignature';
-        baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
-        baseEvent.scale = data[1];
+        if (data.length >= 2) {
+          baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
+          baseEvent.scale = data[1];
+        } else {
+          // Default values for malformed key signature events
+          baseEvent.key = 0; // C major
+          baseEvent.scale = 0; // Major
+        }
         break;
 
       case 0x7f: // Sequencer Specific
@@ -518,6 +553,9 @@ export class MidiParser {
    * Read a single byte
    */
   private readByte(): number {
+    if (this.position >= this.data.length) {
+      throw new Error('Unexpected end of file while reading byte');
+    }
     return this.data[this.position++];
   }
 
@@ -525,6 +563,9 @@ export class MidiParser {
    * Read a 16-bit unsigned integer (big-endian)
    */
   private readUint16(): number {
+    if (this.position + 2 > this.data.length) {
+      throw new Error('Unexpected end of file while reading uint16');
+    }
     const value = (this.data[this.position] << 8) | this.data[this.position + 1];
     this.position += 2;
     return value;
@@ -534,6 +575,9 @@ export class MidiParser {
    * Read a 32-bit unsigned integer (big-endian)
    */
   private readUint32(): number {
+    if (this.position + 4 > this.data.length) {
+      throw new Error('Unexpected end of file while reading uint32');
+    }
     const value =
       (this.data[this.position] << 24) |
       (this.data[this.position + 1] << 16) |
@@ -547,6 +591,9 @@ export class MidiParser {
    * Read a string of specified length
    */
   private readString(length: number): string {
+    if (this.position + length > this.data.length) {
+      throw new Error('Unexpected end of file while reading string');
+    }
     let result = '';
     for (let i = 0; i < length; i++) {
       result += String.fromCharCode(this.data[this.position++]);
