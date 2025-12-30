@@ -32,6 +32,9 @@ export class MidiPlayer extends Component {
   private timeCurrentEl: HTMLElement | null = null;
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
+  // Bound event handlers for cleanup
+  private boundMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+  private boundMouseUpHandler: (() => void) | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
@@ -344,20 +347,33 @@ export class MidiPlayer extends Component {
     this.isDragging = true;
     this.updateProgressFromMouse(e);
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    // Clean up any existing listeners first
+    this.cleanupDragListeners();
+
+    this.boundMouseMoveHandler = (moveEvent: MouseEvent) => {
       if (this.isDragging) {
         this.updateProgressFromMouse(moveEvent);
       }
     };
 
-    const handleMouseUp = () => {
+    this.boundMouseUpHandler = () => {
       this.isDragging = false;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      this.cleanupDragListeners();
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', this.boundMouseMoveHandler);
+    document.addEventListener('mouseup', this.boundMouseUpHandler);
+  }
+
+  private cleanupDragListeners(): void {
+    if (this.boundMouseMoveHandler) {
+      document.removeEventListener('mousemove', this.boundMouseMoveHandler);
+      this.boundMouseMoveHandler = null;
+    }
+    if (this.boundMouseUpHandler) {
+      document.removeEventListener('mouseup', this.boundMouseUpHandler);
+      this.boundMouseUpHandler = null;
+    }
   }
 
   private updateProgressFromMouse(e: MouseEvent): void {
@@ -464,6 +480,9 @@ export class MidiPlayer extends Component {
   }
 
   protected onUnmount(): void {
+    // Clean up drag event listeners
+    this.cleanupDragListeners();
+
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;

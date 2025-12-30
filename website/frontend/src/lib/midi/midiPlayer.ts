@@ -40,6 +40,9 @@ export class MidiPlayer {
   private playbackStartTime: number = 0;
   private pauseTime: number = 0;
   private animationFrameId: number | null = null;
+  private scheduleAheadTime: number = 2; // Schedule notes 2 seconds ahead
+  private lastScheduledTime: number = 0;
+  private scheduleIntervalId: number | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     this.options = {
@@ -220,9 +223,9 @@ export class MidiPlayer {
   seek(time: number): void {
     const clampedTime = Math.max(0, Math.min(time, this.state.duration));
 
-    if (this.state.isPlaying && !this.state.isPaused) {
+    if (this.state.isPlaying && !this.state.isPaused && this.audioContext) {
       this.stopAllNotes();
-      this.playbackStartTime = this.audioContext!.currentTime - clampedTime / this.options.speed;
+      this.playbackStartTime = this.audioContext.currentTime - clampedTime / this.options.speed;
       this.scheduleNotes(clampedTime);
     } else {
       this.pauseTime = clampedTime;
@@ -251,11 +254,11 @@ export class MidiPlayer {
    */
   setSpeed(speed: number): void {
     const clampedSpeed = Math.max(0.25, Math.min(4, speed));
-    if (this.state.isPlaying && !this.state.isPaused) {
+    if (this.state.isPlaying && !this.state.isPaused && this.audioContext) {
       const currentTime = this.state.currentTime;
       this.options.speed = clampedSpeed;
       this.stopAllNotes();
-      this.playbackStartTime = this.audioContext!.currentTime - currentTime / this.options.speed;
+      this.playbackStartTime = this.audioContext.currentTime - currentTime / this.options.speed;
       this.scheduleNotes(currentTime);
     } else {
       this.options.speed = clampedSpeed;
@@ -371,6 +374,7 @@ export class MidiPlayer {
    */
   dispose(): void {
     this.stop();
+    this.stopProgressiveScheduling();
     this.unload();
     if (this.masterGain) {
       this.masterGain.disconnect();
@@ -435,11 +439,61 @@ export class MidiPlayer {
 
   /**
    * Schedule notes for playback from a given start time
+   * Uses progressive scheduling to avoid memory pressure with large files
    */
   private scheduleNotes(startTime: number): void {
     if (!this.midiFile || !this.audioContext || !this.masterGain) return;
 
+    this.lastScheduledTime = startTime;
+
+    // Schedule initial batch
+    this.scheduleNotesInWindow(startTime, startTime + this.scheduleAheadTime);
+
+    // Start progressive scheduling interval
+    this.startProgressiveScheduling();
+  }
+
+  /**
+   * Start the progressive scheduling interval
+   */
+  private startProgressiveScheduling(): void {
+    this.stopProgressiveScheduling();
+
+    // Check every 500ms if we need to schedule more notes
+    this.scheduleIntervalId = window.setInterval(() => {
+      if (!this.state.isPlaying || this.state.isPaused || !this.audioContext) {
+        return;
+      }
+
+      const currentTime = this.state.currentTime;
+      const scheduleEndTime = currentTime + this.scheduleAheadTime;
+
+      // Only schedule if we're approaching the end of the scheduled window
+      if (scheduleEndTime > this.lastScheduledTime) {
+        this.scheduleNotesInWindow(this.lastScheduledTime, scheduleEndTime);
+        this.lastScheduledTime = scheduleEndTime;
+      }
+    }, 500);
+  }
+
+  /**
+   * Stop the progressive scheduling interval
+   */
+  private stopProgressiveScheduling(): void {
+    if (this.scheduleIntervalId !== null) {
+      clearInterval(this.scheduleIntervalId);
+      this.scheduleIntervalId = null;
+    }
+  }
+
+  /**
+   * Schedule notes within a specific time window
+   */
+  private scheduleNotesInWindow(windowStart: number, windowEnd: number): void {
+    if (!this.midiFile || !this.audioContext || !this.masterGain) return;
+
     const now = this.audioContext.currentTime;
+    const playbackOffset = this.state.currentTime;
 
     for (let trackIndex = 0; trackIndex < this.midiFile.tracks.length; trackIndex++) {
       if (this.options.mutedTracks.has(trackIndex)) continue;
@@ -447,13 +501,17 @@ export class MidiPlayer {
       const track = this.midiFile.tracks[trackIndex];
       for (const note of track.notes) {
         if (this.options.mutedChannels.has(note.channel)) continue;
-        if (note.startTimeSeconds < startTime) continue;
 
-        const noteStartTime = (note.startTimeSeconds - startTime) / this.options.speed;
+        // Only schedule notes within the window
+        if (note.startTimeSeconds < windowStart || note.startTimeSeconds >= windowEnd) continue;
+
+        const noteStartTime = (note.startTimeSeconds - playbackOffset) / this.options.speed;
         const noteDuration = note.durationSeconds / this.options.speed;
 
-        // Schedule all notes - Web Audio API handles far-future scheduling
-        this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
+        // Only schedule notes that haven't started yet
+        if (now + noteStartTime > now) {
+          this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
+        }
       }
     }
   }
@@ -504,6 +562,9 @@ export class MidiPlayer {
    * Stop all currently playing notes
    */
   private stopAllNotes(): void {
+    // Stop progressive scheduling
+    this.stopProgressiveScheduling();
+
     if (!this.audioContext) return;
 
     const now = this.audioContext.currentTime;
