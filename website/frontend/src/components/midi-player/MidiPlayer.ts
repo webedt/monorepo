@@ -33,6 +33,10 @@ export class MidiPlayer extends Component {
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
 
+  // Track document-level event listeners for cleanup
+  private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseUp: (() => void) | null = null;
+
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
     this.options = {
@@ -344,20 +348,34 @@ export class MidiPlayer extends Component {
     this.isDragging = true;
     this.updateProgressFromMouse(e);
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    // Store bound handlers for cleanup
+    this.boundHandleMouseMove = (moveEvent: MouseEvent) => {
       if (this.isDragging) {
         this.updateProgressFromMouse(moveEvent);
       }
     };
 
-    const handleMouseUp = () => {
+    this.boundHandleMouseUp = () => {
       this.isDragging = false;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      this.cleanupDragListeners();
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', this.boundHandleMouseMove);
+    document.addEventListener('mouseup', this.boundHandleMouseUp);
+  }
+
+  /**
+   * Clean up document-level drag listeners
+   */
+  private cleanupDragListeners(): void {
+    if (this.boundHandleMouseMove) {
+      document.removeEventListener('mousemove', this.boundHandleMouseMove);
+      this.boundHandleMouseMove = null;
+    }
+    if (this.boundHandleMouseUp) {
+      document.removeEventListener('mouseup', this.boundHandleMouseUp);
+      this.boundHandleMouseUp = null;
+    }
   }
 
   private updateProgressFromMouse(e: MouseEvent): void {
@@ -464,6 +482,9 @@ export class MidiPlayer extends Component {
   }
 
   protected onUnmount(): void {
+    // Clean up document-level listeners to prevent memory leaks
+    this.cleanupDragListeners();
+
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;

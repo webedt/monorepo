@@ -30,6 +30,7 @@ interface MidiStoreState extends MidiPlayerState {
 type MidiStoreListener = (state: MidiStoreState) => void;
 
 const STORAGE_KEY = 'webedt_midi_settings';
+const SAVE_DEBOUNCE_MS = 500;
 
 const DEFAULT_SETTINGS: MidiStoreSettings = {
   volume: 0.5,
@@ -38,6 +39,11 @@ const DEFAULT_SETTINGS: MidiStoreSettings = {
   mutedTracks: [],
   mutedChannels: [],
 };
+
+/**
+ * Debounce timer for settings saves
+ */
+let saveTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Load settings from localStorage
@@ -56,14 +62,23 @@ function loadSettings(): MidiStoreSettings {
 }
 
 /**
- * Save settings to localStorage
+ * Save settings to localStorage (debounced to prevent frequent writes)
  */
 function saveSettings(settings: MidiStoreSettings): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // Ignore storage errors
+  // Cancel any pending save
+  if (saveTimeoutId !== null) {
+    clearTimeout(saveTimeoutId);
   }
+
+  // Debounce the save operation
+  saveTimeoutId = setTimeout(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Ignore storage errors
+    }
+    saveTimeoutId = null;
+  }, SAVE_DEBOUNCE_MS);
 }
 
 /**

@@ -349,6 +349,7 @@ export class MidiParser {
     } else if (statusByte === 0xf0 || statusByte === 0xf7) {
       // SysEx event
       const length = this.readVariableLengthQuantity();
+      this.ensureBytes(length);
       const data = this.data.slice(this.position, this.position + length);
       this.position += length;
       return {
@@ -367,6 +368,7 @@ export class MidiParser {
   private parseMetaEvent(deltaTime: number, absoluteTime: number): MidiMetaEvent {
     const metaType = this.readByte();
     const length = this.readVariableLengthQuantity();
+    this.ensureBytes(length);
     const data = this.data.slice(this.position, this.position + length);
     this.position += length;
 
@@ -515,9 +517,19 @@ export class MidiParser {
   }
 
   /**
+   * Check if there are enough bytes remaining
+   */
+  private ensureBytes(count: number): void {
+    if (this.position + count > this.data.length) {
+      throw new Error(`Unexpected end of file: need ${count} bytes at position ${this.position}, but only ${this.data.length - this.position} remaining`);
+    }
+  }
+
+  /**
    * Read a single byte
    */
   private readByte(): number {
+    this.ensureBytes(1);
     return this.data[this.position++];
   }
 
@@ -525,6 +537,7 @@ export class MidiParser {
    * Read a 16-bit unsigned integer (big-endian)
    */
   private readUint16(): number {
+    this.ensureBytes(2);
     const value = (this.data[this.position] << 8) | this.data[this.position + 1];
     this.position += 2;
     return value;
@@ -534,6 +547,7 @@ export class MidiParser {
    * Read a 32-bit unsigned integer (big-endian)
    */
   private readUint32(): number {
+    this.ensureBytes(4);
     const value =
       (this.data[this.position] << 24) |
       (this.data[this.position + 1] << 16) |
@@ -547,6 +561,7 @@ export class MidiParser {
    * Read a string of specified length
    */
   private readString(length: number): string {
+    this.ensureBytes(length);
     let result = '';
     for (let i = 0; i < length; i++) {
       result += String.fromCharCode(this.data[this.position++]);
