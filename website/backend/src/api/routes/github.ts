@@ -373,8 +373,9 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
 router.post('/repos/:owner/:repo/branches', requireAuth, validateRequest(createBranchSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    // Extract validated data consistently from both params and body
     const { owner, repo } = (req as Request & { validatedParams: { owner: string; repo: string } }).validatedParams;
-    const { branchName, baseBranch } = req.body;
+    const { branchName, baseBranch } = req.body as { branchName: string; baseBranch?: string };
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
@@ -1548,9 +1549,10 @@ router.post('/repos/:owner/:repo/commit', requireAuth, validateRequest(commitFil
       return;
     }
 
-    const hasFiles = files && Array.isArray(files) && files.length > 0;
-    const hasImages = images && Array.isArray(images) && images.length > 0;
-    const hasDeletions = deletions && Array.isArray(deletions) && deletions.length > 0;
+    // Schema already validates these are arrays if present; just check for content
+    const hasFiles = files?.length > 0;
+    const hasImages = images?.length > 0;
+    const hasDeletions = deletions?.length > 0;
 
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
 

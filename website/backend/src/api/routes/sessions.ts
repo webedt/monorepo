@@ -48,7 +48,8 @@ const createCodeSessionSchema = {
 // Search sessions schema
 const searchSessionsSchema = {
   query: z.object({
-    q: CommonSchemas.nonEmptyString,
+    // Trim search query to reject whitespace-only and normalize input
+    q: z.string().trim().min(1, 'Search query is required'),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     offset: z.coerce.number().int().min(0).default(0),
     status: z.enum(['pending', 'running', 'completed', 'error']).optional(),
@@ -65,12 +66,17 @@ const paginationQuerySchema = {
 };
 
 // Create event schema
+// Use z.record() for eventData to enforce object structure while allowing flexible content
+// This prevents storing problematic payloads like primitives while still allowing varied event types
 const createEventSchema = {
   params: z.object({
     id: CommonSchemas.uuid,
   }),
   body: z.object({
-    eventData: z.unknown(),
+    eventData: z.record(z.unknown()).refine(
+      (data) => Object.keys(data).length > 0,
+      { message: 'eventData must be a non-empty object' }
+    ),
   }),
 };
 
@@ -86,13 +92,14 @@ const createMessageSchema = {
 };
 
 // Update session schema
+// Use trim() before min(1) to reject whitespace-only strings
 const updateSessionSchema = {
   params: z.object({
     id: CommonSchemas.uuid,
   }),
   body: z.object({
-    userRequest: z.string().min(1).optional(),
-    branch: z.string().min(1).optional(),
+    userRequest: z.string().trim().min(1, 'userRequest cannot be empty or whitespace-only').optional(),
+    branch: z.string().trim().min(1, 'branch cannot be empty or whitespace-only').optional(),
   }).refine(
     (data) => data.userRequest !== undefined || data.branch !== undefined,
     { message: 'At least one field (userRequest or branch) must be provided' }
@@ -562,8 +569,9 @@ router.get('/search', requireAuth, validateRequest(searchSessionsSchema), async 
       validatedQuery: { q: string; limit: number; offset: number; status?: string; favorite?: boolean }
     }).validatedQuery;
 
+    // Note: Schema already trims the query, no need for .trim() here
     const result = await queryService.search(authReq.user!.id, {
-      query: query.trim(),
+      query,
       limit,
       offset,
       status,
@@ -578,7 +586,7 @@ router.get('/search', requireAuth, validateRequest(searchSessionsSchema), async 
         limit,
         offset,
         hasMore: result.hasMore,
-        query: query.trim(),
+        query,
       },
     });
   } catch (error) {
@@ -934,12 +942,13 @@ router.patch('/:id', requireAuth, validateRequest(updateSessionSchema), async (r
     }
 
     // Build update object with only provided fields
+    // Note: Schema already trims strings, so no need for .trim() here
     const updateData: { userRequest?: string; branch?: string } = {};
     if (userRequest) {
-      updateData.userRequest = userRequest.trim();
+      updateData.userRequest = userRequest;
     }
     if (branch) {
-      updateData.branch = branch.trim();
+      updateData.branch = branch;
     }
 
     // Update session

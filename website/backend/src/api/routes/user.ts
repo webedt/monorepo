@@ -88,10 +88,12 @@ const preferredProviderSchema = {
   }),
 };
 
+// Simplified: Accept either string or number and coerce to number with validation
 const imageResizeSchema = {
   body: z.object({
-    maxDimension: z.enum(['512', '1024', '2048', '4096', '8000'] as const).transform(Number).or(
-      z.literal(512).or(z.literal(1024)).or(z.literal(2048)).or(z.literal(4096)).or(z.literal(8000))
+    maxDimension: z.coerce.number().refine(
+      (val) => [512, 1024, 2048, 4096, 8000].includes(val),
+      { message: 'maxDimension must be one of: 512, 1024, 2048, 4096, 8000' }
     ),
   }),
 };
@@ -104,7 +106,10 @@ const displayNameSchema = {
 
 const voiceKeywordsSchema = {
   body: z.object({
-    keywords: z.array(z.string()).max(20, 'Maximum of 20 keywords allowed'),
+    // Reject empty strings at validation time rather than filtering in handler
+    keywords: z.array(
+      z.string().trim().min(1, 'Keywords cannot be empty strings')
+    ).max(20, 'Maximum of 20 keywords allowed'),
   }),
 };
 
@@ -549,13 +554,10 @@ router.post('/display-name', requireAuth, validateRequest(displayNameSchema), as
 router.post('/voice-command-keywords', requireAuth, validateRequest(voiceKeywordsSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { keywords } = req.body;
+    const { keywords } = req.body as { keywords: string[] };
 
-    // Normalize: trim, lowercase, and remove duplicates
-    const normalizedKeywords: string[] = keywords
-      .filter((k: string): k is string => typeof k === 'string' && k.trim().length > 0)
-      .map((k: string) => k.trim().toLowerCase());
-    const uniqueKeywords: string[] = [...new Set(normalizedKeywords)];
+    // Schema already trims and rejects empty strings, just need to lowercase and dedupe
+    const uniqueKeywords: string[] = [...new Set(keywords.map((k) => k.toLowerCase()))];
 
     await db
       .update(users)
