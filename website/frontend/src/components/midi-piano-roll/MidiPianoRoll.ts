@@ -253,7 +253,6 @@ export class MidiPianoRoll extends Component {
         midiStore.seek(time);
       });
     }
-
   }
 
   private updatePlayhead(): void {
