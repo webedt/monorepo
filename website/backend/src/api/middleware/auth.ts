@@ -114,7 +114,7 @@ export function requireRole(requiredRole: UserRole) {
  * Editors have full access to the editor suite for game creation
  */
 export function requireEditor(req: Request, res: Response, next: NextFunction): void {
-  return requireRole('editor')(req, res, next);
+  requireRole('editor')(req, res, next);
 }
 
 /**
@@ -122,5 +122,5 @@ export function requireEditor(req: Request, res: Response, next: NextFunction): 
  * Developers have full access plus development tools and API access
  */
 export function requireDeveloper(req: Request, res: Response, next: NextFunction): void {
-  return requireRole('developer')(req, res, next);
+  requireRole('developer')(req, res, next);
 }

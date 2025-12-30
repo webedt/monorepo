@@ -4,10 +4,13 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
+
+// Use the role hierarchy as the valid roles list
+const validRoles = ROLE_HIERARCHY;
 
 const router = Router();
 
@@ -73,7 +76,6 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
     if (role && !validRoles.includes(role)) {
       res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
@@ -129,7 +131,6 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
     if (role !== undefined && !validRoles.includes(role)) {
       res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
@@ -147,21 +148,33 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       }
     }
 
+    // Fetch current user to get existing role for sync logic
+    const [existingUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!existingUser) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
     const updateData: Record<string, unknown> = {};
 
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;
 
     // Handle role and isAdmin synchronization
+    // When role is explicitly set, derive isAdmin from it
+    // When isAdmin is set without role, sync role accordingly
     if (role !== undefined) {
       updateData.role = role;
       // Sync isAdmin with role
       updateData.isAdmin = role === 'admin';
     } else if (isAdmin !== undefined) {
       updateData.isAdmin = isAdmin;
-      // Sync role with isAdmin - only change role if going to/from admin
+      // Sync role with isAdmin
       if (isAdmin) {
         updateData.role = 'admin';
+      } else if (existingUser.role === 'admin') {
+        // Demote from admin to user when isAdmin is set to false
+        updateData.role = 'user';
       }
     }
 
