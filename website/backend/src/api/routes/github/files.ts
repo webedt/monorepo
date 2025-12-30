@@ -605,7 +605,7 @@ router.delete('/:owner/:repo/folder/*', requireAuth, validatePathParam(), async 
       data: {
         message: 'Folder deleted successfully',
         path: folderPath,
-        filesDeleted: filesToDelete.length,
+        filesDeleted: treeChanges.length,
       },
     });
   } catch (error: unknown) {
@@ -745,7 +745,7 @@ router.post('/:owner/:repo/rename-folder/*', requireAuth, validatePathParam(), v
         message: 'Folder renamed successfully',
         oldPath: oldFolderPath,
         newPath: newFolderPath,
-        filesMoved: filesToMove.length,
+        filesMoved: treeChanges.length / 2,
       },
     });
   } catch (error: unknown) {
