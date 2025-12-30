@@ -645,6 +645,64 @@ export const IMPORT_MAX_FILE_SIZE_BYTES = parseInt(process.env.IMPORT_MAX_FILE_S
 export const CRDT_MAX_BATCH_SIZE = parseInt(process.env.CRDT_MAX_BATCH_SIZE || '50', 10);
 export const MAX_CONCURRENT_API_CALLS = parseInt(process.env.MAX_CONCURRENT_API_CALLS || '5', 10);
 
+// =============================================================================
+// OPERATIONAL LIMITS - Session, batch, query, and pagination limits
+// =============================================================================
+
+/**
+ * Session operation limits
+ * - SESSION_CONCURRENCY_LIMIT: Default concurrency for session operations (3)
+ * - SESSION_MAX_BATCH_SIZE: Maximum sessions per bulk operation (100)
+ * - SESSION_MAX_ARCHIVE_BATCH_SIZE: Maximum sessions per archive batch (50)
+ */
+export const SESSION_CONCURRENCY_LIMIT = parseInt(process.env.SESSION_CONCURRENCY_LIMIT || '3', 10);
+export const SESSION_MAX_BATCH_SIZE = parseInt(process.env.SESSION_MAX_BATCH_SIZE || '100', 10);
+export const SESSION_MAX_ARCHIVE_BATCH_SIZE = parseInt(process.env.SESSION_MAX_ARCHIVE_BATCH_SIZE || '50', 10);
+
+/**
+ * DataLoader batch limits
+ * - DATALOADER_MAX_BATCH_SIZE: Maximum items per DataLoader batch (100)
+ */
+export const DATALOADER_MAX_BATCH_SIZE = parseInt(process.env.DATALOADER_MAX_BATCH_SIZE || '100', 10);
+
+/**
+ * Search and query limits
+ * - SEARCH_GAMES_LIMIT: Maximum games returned from search (50)
+ * - SEARCH_USERS_LIMIT: Maximum users returned from search (20)
+ * - SEARCH_SESSIONS_LIMIT: Maximum sessions returned from search (30)
+ * - SEARCH_POSTS_LIMIT: Maximum posts returned from search (30)
+ * - SEARCH_DEFAULT_LIMIT: Default search results limit (10)
+ * - SEARCH_MAX_LIMIT: Maximum allowed search results limit (50)
+ * - SEARCH_SUGGESTIONS_DEFAULT_LIMIT: Default suggestions limit (5)
+ * - SEARCH_SUGGESTIONS_MAX_LIMIT: Maximum suggestions limit (10)
+ */
+export const SEARCH_GAMES_LIMIT = parseInt(process.env.SEARCH_GAMES_LIMIT || '50', 10);
+export const SEARCH_USERS_LIMIT = parseInt(process.env.SEARCH_USERS_LIMIT || '20', 10);
+export const SEARCH_SESSIONS_LIMIT = parseInt(process.env.SEARCH_SESSIONS_LIMIT || '30', 10);
+export const SEARCH_POSTS_LIMIT = parseInt(process.env.SEARCH_POSTS_LIMIT || '30', 10);
+export const SEARCH_DEFAULT_LIMIT = parseInt(process.env.SEARCH_DEFAULT_LIMIT || '10', 10);
+export const SEARCH_MAX_LIMIT = parseInt(process.env.SEARCH_MAX_LIMIT || '50', 10);
+export const SEARCH_SUGGESTIONS_DEFAULT_LIMIT = parseInt(process.env.SEARCH_SUGGESTIONS_DEFAULT_LIMIT || '5', 10);
+export const SEARCH_SUGGESTIONS_MAX_LIMIT = parseInt(process.env.SEARCH_SUGGESTIONS_MAX_LIMIT || '10', 10);
+
+/**
+ * Live chat limits
+ * - LIVE_CHAT_MESSAGES_DEFAULT_LIMIT: Default messages to fetch (100)
+ * - LIVE_CHAT_HISTORY_LIMIT: Messages for execution context (50)
+ * - LIVE_CHAT_CONTEXT_MESSAGES: Messages for conversation context (10)
+ */
+export const LIVE_CHAT_MESSAGES_DEFAULT_LIMIT = parseInt(process.env.LIVE_CHAT_MESSAGES_DEFAULT_LIMIT || '100', 10);
+export const LIVE_CHAT_HISTORY_LIMIT = parseInt(process.env.LIVE_CHAT_HISTORY_LIMIT || '50', 10);
+export const LIVE_CHAT_CONTEXT_MESSAGES = parseInt(process.env.LIVE_CHAT_CONTEXT_MESSAGES || '10', 10);
+
+/**
+ * Batch operation defaults
+ * - BATCH_DEFAULT_CONCURRENCY: Default concurrency for batch operations (5)
+ * - BATCH_MAX_BATCH_SIZE: Maximum items per generic batch operation (100)
+ */
+export const BATCH_DEFAULT_CONCURRENCY = parseInt(process.env.BATCH_DEFAULT_CONCURRENCY || '5', 10);
+export const BATCH_MAX_BATCH_SIZE = parseInt(process.env.BATCH_MAX_BATCH_SIZE || '100', 10);
+
 /**
  * LRU eviction rate
  * - LRU_EVICTION_RATE: Percentage of LRU entries to evict (0.2 = 20%)
@@ -833,6 +891,85 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   }
   if (RETRY_BASE_DELAY_MS > RETRY_MAX_DELAY_MS) {
     warnings.push(`RETRY_BASE_DELAY_MS (${RETRY_BASE_DELAY_MS}) should not exceed RETRY_MAX_DELAY_MS (${RETRY_MAX_DELAY_MS})`);
+  }
+
+  // Operational limits validation - lower bounds
+  if (SESSION_CONCURRENCY_LIMIT <= 0) {
+    errors.push('SESSION_CONCURRENCY_LIMIT must be a positive number');
+  }
+  if (SESSION_MAX_BATCH_SIZE <= 0) {
+    errors.push('SESSION_MAX_BATCH_SIZE must be a positive number');
+  }
+  if (SESSION_MAX_ARCHIVE_BATCH_SIZE <= 0) {
+    errors.push('SESSION_MAX_ARCHIVE_BATCH_SIZE must be a positive number');
+  }
+  if (SESSION_MAX_ARCHIVE_BATCH_SIZE > SESSION_MAX_BATCH_SIZE) {
+    warnings.push(`SESSION_MAX_ARCHIVE_BATCH_SIZE (${SESSION_MAX_ARCHIVE_BATCH_SIZE}) should not exceed SESSION_MAX_BATCH_SIZE (${SESSION_MAX_BATCH_SIZE})`);
+  }
+  if (DATALOADER_MAX_BATCH_SIZE <= 0) {
+    errors.push('DATALOADER_MAX_BATCH_SIZE must be a positive number');
+  }
+  if (SEARCH_GAMES_LIMIT <= 0) {
+    errors.push('SEARCH_GAMES_LIMIT must be a positive number');
+  }
+  if (SEARCH_USERS_LIMIT <= 0) {
+    errors.push('SEARCH_USERS_LIMIT must be a positive number');
+  }
+  if (SEARCH_SESSIONS_LIMIT <= 0) {
+    errors.push('SEARCH_SESSIONS_LIMIT must be a positive number');
+  }
+  if (SEARCH_POSTS_LIMIT <= 0) {
+    errors.push('SEARCH_POSTS_LIMIT must be a positive number');
+  }
+  if (SEARCH_DEFAULT_LIMIT <= 0) {
+    errors.push('SEARCH_DEFAULT_LIMIT must be a positive number');
+  }
+  if (SEARCH_MAX_LIMIT <= 0) {
+    errors.push('SEARCH_MAX_LIMIT must be a positive number');
+  }
+  if (SEARCH_DEFAULT_LIMIT > SEARCH_MAX_LIMIT) {
+    warnings.push(`SEARCH_DEFAULT_LIMIT (${SEARCH_DEFAULT_LIMIT}) should not exceed SEARCH_MAX_LIMIT (${SEARCH_MAX_LIMIT})`);
+  }
+  if (SEARCH_SUGGESTIONS_DEFAULT_LIMIT > SEARCH_SUGGESTIONS_MAX_LIMIT) {
+    warnings.push(`SEARCH_SUGGESTIONS_DEFAULT_LIMIT (${SEARCH_SUGGESTIONS_DEFAULT_LIMIT}) should not exceed SEARCH_SUGGESTIONS_MAX_LIMIT (${SEARCH_SUGGESTIONS_MAX_LIMIT})`);
+  }
+  if (LIVE_CHAT_MESSAGES_DEFAULT_LIMIT <= 0) {
+    errors.push('LIVE_CHAT_MESSAGES_DEFAULT_LIMIT must be a positive number');
+  }
+  if (LIVE_CHAT_HISTORY_LIMIT <= 0) {
+    errors.push('LIVE_CHAT_HISTORY_LIMIT must be a positive number');
+  }
+  if (LIVE_CHAT_CONTEXT_MESSAGES <= 0) {
+    errors.push('LIVE_CHAT_CONTEXT_MESSAGES must be a positive number');
+  }
+  if (BATCH_DEFAULT_CONCURRENCY <= 0) {
+    errors.push('BATCH_DEFAULT_CONCURRENCY must be a positive number');
+  }
+  if (BATCH_MAX_BATCH_SIZE <= 0) {
+    errors.push('BATCH_MAX_BATCH_SIZE must be a positive number');
+  }
+
+  // Operational limits validation - upper bounds (prevent unreasonable values)
+  if (SESSION_CONCURRENCY_LIMIT > 50) {
+    warnings.push(`SESSION_CONCURRENCY_LIMIT (${SESSION_CONCURRENCY_LIMIT}) exceeds recommended maximum of 50`);
+  }
+  if (SESSION_MAX_BATCH_SIZE > 1000) {
+    warnings.push(`SESSION_MAX_BATCH_SIZE (${SESSION_MAX_BATCH_SIZE}) exceeds recommended maximum of 1000`);
+  }
+  if (DATALOADER_MAX_BATCH_SIZE > 1000) {
+    warnings.push(`DATALOADER_MAX_BATCH_SIZE (${DATALOADER_MAX_BATCH_SIZE}) exceeds recommended maximum of 1000`);
+  }
+  if (SEARCH_MAX_LIMIT > 500) {
+    warnings.push(`SEARCH_MAX_LIMIT (${SEARCH_MAX_LIMIT}) exceeds recommended maximum of 500`);
+  }
+  if (LIVE_CHAT_MESSAGES_DEFAULT_LIMIT > 500) {
+    warnings.push(`LIVE_CHAT_MESSAGES_DEFAULT_LIMIT (${LIVE_CHAT_MESSAGES_DEFAULT_LIMIT}) exceeds recommended maximum of 500`);
+  }
+  if (BATCH_DEFAULT_CONCURRENCY > 50) {
+    warnings.push(`BATCH_DEFAULT_CONCURRENCY (${BATCH_DEFAULT_CONCURRENCY}) exceeds recommended maximum of 50`);
+  }
+  if (BATCH_MAX_BATCH_SIZE > 1000) {
+    warnings.push(`BATCH_MAX_BATCH_SIZE (${BATCH_MAX_BATCH_SIZE}) exceeds recommended maximum of 1000`);
   }
 
   return {

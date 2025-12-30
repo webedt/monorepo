@@ -22,6 +22,7 @@ import {
   requestDeduplicatorRegistry,
   generateRequestKey,
   simpleHash,
+  LIMITS,
 } from '@webedt/shared';
 import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 
@@ -221,7 +222,7 @@ function buildPromptWithContext(
   repo: string,
   branch: string
 ): string {
-  const contextMessages = history.slice(-10); // Last 10 messages for context
+  const contextMessages = history.slice(-LIMITS.LIVE_CHAT.CONTEXT_MESSAGES);
 
   let prompt = `You are helping with the codebase at https://github.com/${owner}/${repo} on branch "${branch}".
 
@@ -256,7 +257,7 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
   try {
     const { owner, repo, branch } = req.params;
     const userId = req.user?.id;
-    const limit = parseInt(req.query.limit as string) || 100;
+    const limit = parseInt(req.query.limit as string) || LIMITS.LIVE_CHAT.MESSAGES_DEFAULT;
 
     if (!userId) {
       sendUnauthorized(res);
@@ -467,7 +468,7 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
         )
       )
       .orderBy(desc(liveChatMessages.createdAt))
-      .limit(50);
+      .limit(LIMITS.LIVE_CHAT.HISTORY);
 
     history.reverse();
 

@@ -42,6 +42,24 @@ import {
   CRDT_MAX_BATCH_SIZE,
   MAX_CONCURRENT_API_CALLS,
   LRU_EVICTION_RATE,
+  // Operational limits
+  SESSION_CONCURRENCY_LIMIT,
+  SESSION_MAX_BATCH_SIZE,
+  SESSION_MAX_ARCHIVE_BATCH_SIZE,
+  DATALOADER_MAX_BATCH_SIZE,
+  SEARCH_GAMES_LIMIT,
+  SEARCH_USERS_LIMIT,
+  SEARCH_SESSIONS_LIMIT,
+  SEARCH_POSTS_LIMIT,
+  SEARCH_DEFAULT_LIMIT,
+  SEARCH_MAX_LIMIT,
+  SEARCH_SUGGESTIONS_DEFAULT_LIMIT,
+  SEARCH_SUGGESTIONS_MAX_LIMIT,
+  LIVE_CHAT_MESSAGES_DEFAULT_LIMIT,
+  LIVE_CHAT_HISTORY_LIMIT,
+  LIVE_CHAT_CONTEXT_MESSAGES,
+  BATCH_DEFAULT_CONCURRENCY,
+  BATCH_MAX_BATCH_SIZE,
   // Retry
   RETRY_MAX_ATTEMPTS,
   RETRY_BASE_DELAY_MS,
@@ -233,6 +251,109 @@ export const LIMITS = {
   EVICTION: {
     /** Percentage of LRU entries to evict when at capacity (default: 0.2 = 20%) */
     LRU_RATE: LRU_EVICTION_RATE,
+  },
+
+  /**
+   * Session operation limits
+   *
+   * Controls concurrency and batch sizes for bulk session operations.
+   * Adjust based on API rate limits and server capacity.
+   *
+   * Environment overrides:
+   * - SESSION_CONCURRENCY_LIMIT: Parallel operations per bulk request
+   * - SESSION_MAX_BATCH_SIZE: Maximum sessions per bulk operation
+   * - SESSION_MAX_ARCHIVE_BATCH_SIZE: Maximum sessions per archive batch
+   */
+  SESSION: {
+    /** Default concurrency for session operations (default: 3) */
+    CONCURRENCY: SESSION_CONCURRENCY_LIMIT,
+    /** Maximum sessions per bulk operation (default: 100) */
+    MAX_BATCH_SIZE: SESSION_MAX_BATCH_SIZE,
+    /** Maximum sessions per archive batch (default: 50) */
+    MAX_ARCHIVE_BATCH_SIZE: SESSION_MAX_ARCHIVE_BATCH_SIZE,
+  },
+
+  /**
+   * DataLoader limits
+   *
+   * Controls batch sizes for DataLoader-style query batching.
+   * Larger batches reduce N+1 queries but increase memory usage.
+   *
+   * Environment overrides:
+   * - DATALOADER_MAX_BATCH_SIZE: Maximum items per batch
+   */
+  DATALOADER: {
+    /** Maximum items per DataLoader batch (default: 100) */
+    MAX_BATCH_SIZE: DATALOADER_MAX_BATCH_SIZE,
+  },
+
+  /**
+   * Search and query limits
+   *
+   * Controls result limits for search operations across different entity types.
+   * Larger limits improve user experience but increase query time and memory.
+   *
+   * Environment overrides:
+   * - SEARCH_GAMES_LIMIT: Maximum game results
+   * - SEARCH_USERS_LIMIT: Maximum user results
+   * - SEARCH_SESSIONS_LIMIT: Maximum session results
+   * - SEARCH_POSTS_LIMIT: Maximum post results
+   * - SEARCH_DEFAULT_LIMIT: Default result limit
+   * - SEARCH_MAX_LIMIT: Maximum allowed limit
+   */
+  SEARCH: {
+    /** Maximum games returned from search (default: 50) */
+    GAMES: SEARCH_GAMES_LIMIT,
+    /** Maximum users returned from search (default: 20) */
+    USERS: SEARCH_USERS_LIMIT,
+    /** Maximum sessions returned from search (default: 30) */
+    SESSIONS: SEARCH_SESSIONS_LIMIT,
+    /** Maximum posts returned from search (default: 30) */
+    POSTS: SEARCH_POSTS_LIMIT,
+    /** Default search results limit (default: 10) */
+    DEFAULT: SEARCH_DEFAULT_LIMIT,
+    /** Maximum allowed search results limit (default: 50) */
+    MAX: SEARCH_MAX_LIMIT,
+    /** Default suggestions limit (default: 5) */
+    SUGGESTIONS_DEFAULT: SEARCH_SUGGESTIONS_DEFAULT_LIMIT,
+    /** Maximum suggestions limit (default: 10) */
+    SUGGESTIONS_MAX: SEARCH_SUGGESTIONS_MAX_LIMIT,
+  },
+
+  /**
+   * Live chat limits
+   *
+   * Controls message history and context sizes for live chat features.
+   * Larger values provide more context but increase memory and API costs.
+   *
+   * Environment overrides:
+   * - LIVE_CHAT_MESSAGES_DEFAULT_LIMIT: Default messages to fetch
+   * - LIVE_CHAT_HISTORY_LIMIT: Messages for execution context
+   * - LIVE_CHAT_CONTEXT_MESSAGES: Messages for conversation context
+   */
+  LIVE_CHAT: {
+    /** Default messages to fetch (default: 100) */
+    MESSAGES_DEFAULT: LIVE_CHAT_MESSAGES_DEFAULT_LIMIT,
+    /** Messages for execution context (default: 50) */
+    HISTORY: LIVE_CHAT_HISTORY_LIMIT,
+    /** Messages for conversation context (default: 10) */
+    CONTEXT_MESSAGES: LIVE_CHAT_CONTEXT_MESSAGES,
+  },
+
+  /**
+   * Generic batch operation limits
+   *
+   * Default concurrency and batch sizes for batch operations not specific to a domain.
+   *
+   * Environment overrides:
+   * - BATCH_DEFAULT_CONCURRENCY: Default parallel operations
+   * - BATCH_MAX_BATCH_SIZE: Maximum items per batch operation
+   */
+  BATCH_OPERATIONS: {
+    /** Default concurrency for batch operations (default: 5) */
+    DEFAULT_CONCURRENCY: BATCH_DEFAULT_CONCURRENCY,
+    /** Maximum items per generic batch operation (default: 100) */
+    MAX_BATCH_SIZE: BATCH_MAX_BATCH_SIZE,
   },
 } as const;
 

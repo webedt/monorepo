@@ -25,6 +25,7 @@ import {
   executeBatch,
   executeBulkWrite,
   sessionSoftDeleteService,
+  LIMITS,
 } from '@webedt/shared';
 import type { Request, Response } from 'express';
 import type { ClaudeAuth, BatchOperationConfig } from '@webedt/shared';
@@ -66,10 +67,8 @@ interface BulkOperationItemResult {
 
 const router = Router();
 
-// Default concurrency for session operations
-const DEFAULT_SESSION_CONCURRENCY = 3;
-const MAX_BATCH_SIZE = 100;
-const MAX_ARCHIVE_BATCH_SIZE = 50;
+// Session operation limits from centralized config
+const { CONCURRENCY: DEFAULT_SESSION_CONCURRENCY, MAX_BATCH_SIZE, MAX_ARCHIVE_BATCH_SIZE } = LIMITS.SESSION;
 const DEFAULT_MAX_RETRIES = 3;
 
 /**

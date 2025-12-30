@@ -4,6 +4,7 @@
  */
 
 import { logger } from '../logging/logger.js';
+import { LIMITS } from '../../config/constants.js';
 
 import type {
   ABatchOperationHandler,
@@ -13,8 +14,9 @@ import type {
   BatchProgress,
 } from './ABatchOperationHandler.js';
 
-const DEFAULT_CONCURRENCY = 5;
-const DEFAULT_MAX_BATCH_SIZE = 100;
+// Use centralized config for batch operation defaults
+const DEFAULT_CONCURRENCY = LIMITS.BATCH_OPERATIONS.DEFAULT_CONCURRENCY;
+const DEFAULT_MAX_BATCH_SIZE = LIMITS.BATCH_OPERATIONS.MAX_BATCH_SIZE;
 const DEFAULT_FAILURE_THRESHOLD = 0;
 const DEFAULT_ROLLBACK_THRESHOLD_PERCENT = 50;
 const DEFAULT_PROGRESS_THROTTLE_MS = 100;
