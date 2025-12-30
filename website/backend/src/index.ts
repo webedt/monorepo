@@ -107,8 +107,12 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
     const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
 
     // Find sessions stuck in 'running' or 'pending' for too long
+    // Only select the columns we need to avoid failures if DB schema is out of sync
     const stuckSessions = await db
-      .select()
+      .select({
+        id: chatSessions.id,
+        status: chatSessions.status,
+      })
       .from(chatSessions)
       .where(
         and(
