@@ -4,13 +4,98 @@
  */
 
 import { Router } from 'express';
+import { z } from 'zod';
 import { db, users, sessions, eq, sql, logger } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
+import {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendInternalError,
+  validateRequest,
+  ApiErrorCode,
+} from '@webedt/shared';
+
+// Validation schemas
+const createUserSchema = {
+  body: z.object({
+    email: z.string().email('Invalid email address'),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+    displayName: z.string().optional(),
+    isAdmin: z.boolean().optional().default(false),
+  }),
+};
+
+const updateUserSchema = {
+  body: z.object({
+    email: z.string().email().optional(),
+    displayName: z.string().optional(),
+    isAdmin: z.boolean().optional(),
+    password: z.string().min(8).optional(),
+  }),
+};
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Admin
+ *     description: Administrative operations (admin only)
+ */
+
+/**
+ * @openapi
+ * /admin/users:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: List all users
+ *     description: Returns a list of all users in the system. Admin access required.
+ *     responses:
+ *       200:
+ *         description: List of users retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       email:
+ *                         type: string
+ *                         format: email
+ *                       displayName:
+ *                         type: string
+ *                         nullable: true
+ *                       githubId:
+ *                         type: string
+ *                         nullable: true
+ *                       isAdmin:
+ *                         type: boolean
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // GET /api/admin/users - List all users
 router.get('/users', requireAdmin, async (req, res) => {
   try {
@@ -23,13 +108,53 @@ router.get('/users', requireAdmin, async (req, res) => {
       createdAt: users.createdAt,
     }).from(users).orderBy(users.createdAt);
 
-    res.json({ success: true, data: allUsers });
+    sendSuccess(res, allUsers);
   } catch (error) {
     logger.error('Error fetching users', error, { component: 'admin', operation: 'listUsers' });
-    res.status(500).json({ success: false, error: 'Failed to fetch users' });
+    sendInternalError(res, 'Failed to fetch users');
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get user details
+ *     description: Returns detailed information about a specific user. Admin access required.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/User'
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // GET /api/admin/users/:id - Get user details
 router.get('/users/:id', requireAdmin, async (req, res) => {
   try {
@@ -49,31 +174,103 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
     }).from(users).where(eq(users.id, id)).limit(1);
 
     if (!user || user.length === 0) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
-    res.json({ success: true, data: user[0] });
+    sendSuccess(res, user[0]);
   } catch (error) {
     logger.error('Error fetching user', error, { component: 'admin', operation: 'getUser' });
-    res.status(500).json({ success: false, error: 'Failed to fetch user' });
+    sendInternalError(res, 'Failed to fetch user');
   }
 });
 
+/**
+ * @openapi
+ * /admin/users:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Create a new user
+ *     description: Creates a new user account. Admin access required.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *                 description: Password (minimum 8 characters)
+ *               displayName:
+ *                 type: string
+ *                 description: User's display name
+ *               isAdmin:
+ *                 type: boolean
+ *                 default: false
+ *                 description: Whether the user is an admin
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     displayName:
+ *                       type: string
+ *                       nullable: true
+ *                     isAdmin:
+ *                       type: boolean
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: User with this email already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // POST /api/admin/users - Create a new user
-router.post('/users', requireAdmin, async (req, res) => {
+router.post('/users', requireAdmin, validateRequest(createUserSchema), async (req, res) => {
   try {
     const { email, displayName, password, isAdmin } = req.body;
-
-    if (!email || !password) {
-      res.status(400).json({ success: false, error: 'Email and password are required' });
-      return;
-    }
 
     // Check if user already exists
     const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (existingUser.length > 0) {
-      res.status(400).json({ success: false, error: 'User with this email already exists' });
+      sendError(res, 'User with this email already exists', 400, ApiErrorCode.CONFLICT);
       return;
     }
 
@@ -98,15 +295,93 @@ router.post('/users', requireAdmin, async (req, res) => {
       createdAt: users.createdAt,
     });
 
-    res.json({ success: true, data: newUser[0] });
+    sendSuccess(res, newUser[0], 201);
   } catch (error) {
     logger.error('Error creating user', error, { component: 'admin', operation: 'createUser' });
-    res.status(500).json({ success: false, error: 'Failed to create user' });
+    sendInternalError(res, 'Failed to create user');
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}:
+ *   patch:
+ *     tags:
+ *       - Admin
+ *     summary: Update user
+ *     description: Updates an existing user's information. Admin access required. Admins cannot remove their own admin status.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               displayName:
+ *                 type: string
+ *               isAdmin:
+ *                 type: boolean
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *     responses:
+ *       200:
+ *         description: User updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     displayName:
+ *                       type: string
+ *                       nullable: true
+ *                     isAdmin:
+ *                       type: boolean
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Cannot remove own admin status or no fields to update
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // PATCH /api/admin/users/:id - Update user
-router.patch('/users/:id', requireAdmin, async (req, res) => {
+router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), async (req, res) => {
   try {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -114,7 +389,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
 
     // Prevent user from removing their own admin status
     if (authReq.user?.id === id && isAdmin === false) {
-      res.status(400).json({ success: false, error: 'Cannot remove your own admin status' });
+      sendError(res, 'Cannot remove your own admin status', 400, ApiErrorCode.FORBIDDEN);
       return;
     }
 
@@ -128,7 +403,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     }
 
     if (Object.keys(updateData).length === 0) {
-      res.status(400).json({ success: false, error: 'No fields to update' });
+      sendError(res, 'No fields to update', 400, ApiErrorCode.VALIDATION_ERROR);
       return;
     }
 
@@ -144,17 +419,66 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       });
 
     if (!updatedUser || updatedUser.length === 0) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
-    res.json({ success: true, data: updatedUser[0] });
+    sendSuccess(res, updatedUser[0]);
   } catch (error) {
     logger.error('Error updating user', error, { component: 'admin', operation: 'updateUser' });
-    res.status(500).json({ success: false, error: 'Failed to update user' });
+    sendInternalError(res, 'Failed to update user');
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}:
+ *   delete:
+ *     tags:
+ *       - Admin
+ *     summary: Delete user
+ *     description: Permanently deletes a user account. Admin access required. Admins cannot delete their own account.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Cannot delete own account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // DELETE /api/admin/users/:id - Delete user
 router.delete('/users/:id', requireAdmin, async (req, res) => {
   try {
@@ -163,24 +487,81 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
 
     // Prevent user from deleting themselves
     if (authReq.user?.id === id) {
-      res.status(400).json({ success: false, error: 'Cannot delete your own account' });
+      sendError(res, 'Cannot delete your own account', 400, ApiErrorCode.FORBIDDEN);
       return;
     }
 
     const deletedUser = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id });
 
     if (!deletedUser || deletedUser.length === 0) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
-    res.json({ success: true, data: { id: deletedUser[0].id } });
+    sendSuccess(res, { id: deletedUser[0].id });
   } catch (error) {
     logger.error('Error deleting user', error, { component: 'admin', operation: 'deleteUser' });
-    res.status(500).json({ success: false, error: 'Failed to delete user' });
+    sendInternalError(res, 'Failed to delete user');
   }
 });
 
+/**
+ * @openapi
+ * /admin/users/{id}/impersonate:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Impersonate user
+ *     description: Start a session as another user. Admin access required. Cannot impersonate yourself.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: User ID to impersonate
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Impersonation started successfully
+ *         headers:
+ *           Set-Cookie:
+ *             description: New session cookie for impersonated user
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Now impersonating user
+ *                     userId:
+ *                       type: string
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Cannot impersonate yourself
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // POST /api/admin/users/:id/impersonate - Impersonate user
 router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
   try {
@@ -189,14 +570,14 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
 
     // Cannot impersonate yourself
     if (authReq.user?.id === id) {
-      res.status(400).json({ success: false, error: 'Cannot impersonate yourself' });
+      sendError(res, 'Cannot impersonate yourself', 400, ApiErrorCode.FORBIDDEN);
       return;
     }
 
     // Check if target user exists
     const targetUser = await db.select().from(users).where(eq(users.id, id)).limit(1);
     if (!targetUser || targetUser.length === 0) {
-      res.status(404).json({ success: false, error: 'User not found' });
+      sendNotFound(res, 'User not found');
       return;
     }
 
@@ -210,12 +591,9 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
     const sessionCookie = lucia.createSessionCookie(session.id);
 
     res.setHeader('Set-Cookie', sessionCookie.serialize());
-    res.json({
-      success: true,
-      data: {
-        message: 'Now impersonating user',
-        userId: id
-      }
+    sendSuccess(res, {
+      message: 'Now impersonating user',
+      userId: id
     });
   } catch (error) {
     logger.error('Error impersonating user', error, {
@@ -223,10 +601,51 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
       operation: 'impersonate',
       targetUserId: req.params.id
     });
-    res.status(500).json({ success: false, error: 'Failed to impersonate user' });
+    sendInternalError(res, 'Failed to impersonate user');
   }
 });
 
+/**
+ * @openapi
+ * /admin/stats:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get admin statistics
+ *     description: Returns platform-wide statistics including total users, admins, and active sessions. Admin access required.
+ *     responses:
+ *       200:
+ *         description: Statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalUsers:
+ *                       type: integer
+ *                       description: Total number of registered users
+ *                     totalAdmins:
+ *                       type: integer
+ *                       description: Total number of admin users
+ *                     activeSessions:
+ *                       type: integer
+ *                       description: Number of active login sessions
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // GET /api/admin/stats - Get admin statistics
 router.get('/stats', requireAdmin, async (req, res) => {
   try {
@@ -234,17 +653,147 @@ router.get('/stats', requireAdmin, async (req, res) => {
     const totalAdmins = await db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.isAdmin, true));
     const activeSessions = await db.select({ count: sql<number>`count(*)` }).from(sessions);
 
-    res.json({
-      success: true,
-      data: {
-        totalUsers: Number(totalUsers[0].count),
-        totalAdmins: Number(totalAdmins[0].count),
-        activeSessions: Number(activeSessions[0].count),
-      }
+    sendSuccess(res, {
+      totalUsers: Number(totalUsers[0].count),
+      totalAdmins: Number(totalAdmins[0].count),
+      activeSessions: Number(activeSessions[0].count),
     });
   } catch (error) {
     logger.error('Error fetching stats', error, { component: 'admin', operation: 'getStats' });
-    res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
+    sendInternalError(res, 'Failed to fetch statistics');
+  }
+});
+
+/**
+ * @openapi
+ * /admin/rate-limits:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get rate limit dashboard
+ *     description: Returns comprehensive rate limiting metrics, configuration, and circuit breaker status. Admin access required.
+ *     responses:
+ *       200:
+ *         description: Rate limit dashboard data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     metrics:
+ *                       type: object
+ *                       properties:
+ *                         totalRequests:
+ *                           type: integer
+ *                           description: Total requests processed
+ *                         totalBlocked:
+ *                           type: integer
+ *                           description: Total requests blocked by rate limiting
+ *                         hitsByTier:
+ *                           type: object
+ *                           description: Blocked requests by rate limit tier
+ *                         hitsByPath:
+ *                           type: object
+ *                           description: Blocked requests by API path
+ *                         hitsByUser:
+ *                           type: object
+ *                           description: Blocked requests by user ID
+ *                         adminBypass:
+ *                           type: integer
+ *                           description: Requests bypassed due to admin status
+ *                         circuitBreakerDegraded:
+ *                           type: integer
+ *                           description: Requests with degraded limits due to circuit breaker
+ *                         lastReset:
+ *                           type: string
+ *                           format: date-time
+ *                     config:
+ *                       type: object
+ *                       description: Rate limit configuration per tier
+ *                     storeStats:
+ *                       type: object
+ *                       description: Per-tier store statistics (keys, hits, blocked)
+ *                     circuitBreakers:
+ *                       type: object
+ *                       description: Circuit breaker states and failure counts
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// GET /api/admin/rate-limits - Get rate limit dashboard
+router.get('/rate-limits', requireAdmin, async (req, res) => {
+  try {
+    const { getRateLimitDashboard } = await import('../middleware/rateLimit.js');
+    const dashboard = getRateLimitDashboard();
+    sendSuccess(res, dashboard);
+  } catch (error) {
+    logger.error('Error fetching rate limit dashboard', error, { component: 'admin', operation: 'getRateLimits' });
+    sendInternalError(res, 'Failed to fetch rate limit dashboard');
+  }
+});
+
+/**
+ * @openapi
+ * /admin/rate-limits/reset:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Reset rate limit metrics
+ *     description: Resets all rate limit metrics counters. Admin access required. This does not reset active rate limit windows.
+ *     responses:
+ *       200:
+ *         description: Rate limit metrics reset successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Rate limit metrics reset successfully
+ *                     resetAt:
+ *                       type: string
+ *                       format: date-time
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// POST /api/admin/rate-limits/reset - Reset rate limit metrics
+router.post('/rate-limits/reset', requireAdmin, async (req, res) => {
+  try {
+    const { resetRateLimitMetrics } = await import('../middleware/rateLimit.js');
+    resetRateLimitMetrics();
+    sendSuccess(res, {
+      message: 'Rate limit metrics reset successfully',
+      resetAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error('Error resetting rate limit metrics', error, { component: 'admin', operation: 'resetRateLimits' });
+    sendInternalError(res, 'Failed to reset rate limit metrics');
   }
 });
 

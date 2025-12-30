@@ -5,6 +5,9 @@
 
 /// <reference types="vite/client" />
 
+import {
+  extractApiErrorMessage,
+} from '../types';
 import type {
   User,
   Session,
@@ -38,6 +41,32 @@ import type {
 
 // Cached API base URL - computed once on first access
 let cachedApiBaseUrl: string | null = null;
+
+// CSRF token constants (must match backend)
+const CSRF_COOKIE_NAME = 'csrf_token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+// HTTP methods that require CSRF protection
+const CSRF_PROTECTED_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+/**
+ * Get CSRF token from cookie
+ * The backend sets this cookie automatically on first request
+ */
+function getCsrfTokenFromCookie(): string | null {
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME) {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Detect API base URL for path-based routing
@@ -117,14 +146,30 @@ interface FetchApiOptions extends Omit<RequestInit, 'body'> {
 // Core fetch wrapper
 async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions = {}): Promise<T> {
   const { body, ...restOptions } = options;
+  const method = (restOptions.method || 'GET').toUpperCase();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(restOptions.headers as Record<string, string>),
+  };
+
+  // Add CSRF token for state-changing requests
+  if (CSRF_PROTECTED_METHODS.has(method)) {
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      // Log warning - token should be set by server on first response
+      // If missing, the request may fail with 403 unless it's an exempt endpoint
+      console.warn(`[API] CSRF token missing for ${method} request to ${endpoint}. Request may fail.`);
+    }
+  }
 
   const config: RequestInit = {
     ...restOptions,
+    method,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...restOptions.headers,
-    },
+    headers,
   };
 
   if (body) {
@@ -132,14 +177,14 @@ async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions 
   }
 
   const fullUrl = `${getApiBaseUrl()}${endpoint}`;
-  console.log(`[API] ${config.method || 'GET'} ${fullUrl}`);
+  console.log(`[API] ${method} ${fullUrl}`);
 
   const response = await fetch(fullUrl, config);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    console.error(`[API] Error:`, error);
-    throw new Error(error.error || error.message || 'Request failed');
+    const errorBody = await response.json().catch(() => ({ error: 'Request failed' }));
+    console.error(`[API] Error:`, errorBody);
+    throw new Error(extractApiErrorMessage(errorBody));
   }
 
   return response.json();
@@ -166,6 +211,15 @@ export const authApi = {
 
   getSession: () =>
     fetchApi<ApiResponse<{ user: User | null }>>('/api/auth/session').then(r => r.data),
+
+  /**
+   * Fetch CSRF token from server
+   * This is called automatically on first API request, but can be called
+   * manually to ensure a token is available before making requests
+   */
+  getCsrfToken: () =>
+    fetchApi<ApiResponse<{ csrfToken: string; headerName: string }>>('/api/auth/csrf-token')
+      .then(r => r.data),
 };
 
 // ============================================================================
@@ -847,12 +901,20 @@ export const storageWorkerApi = {
   },
 
   writeFile: async (sessionPath: string, filePath: string, content: string): Promise<void> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/plain',
+    };
+    // Add CSRF token for state-changing request
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      console.warn('[API] CSRF token missing for PUT request to storage. Request may fail.');
+    }
     const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
       method: 'PUT',
       credentials: 'include',
-      headers: {
-        'Content-Type': 'text/plain',
-      },
+      headers,
       body: content,
     });
     if (!response.ok) {
@@ -861,9 +923,18 @@ export const storageWorkerApi = {
   },
 
   deleteFile: async (sessionPath: string, filePath: string): Promise<void> => {
+    const headers: Record<string, string> = {};
+    // Add CSRF token for state-changing request
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers[CSRF_HEADER_NAME] = csrfToken;
+    } else {
+      console.warn('[API] CSRF token missing for DELETE request to storage. Request may fail.');
+    }
     const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
       method: 'DELETE',
       credentials: 'include',
+      headers,
     });
     if (!response.ok) {
       throw new Error(`Failed to delete file: ${response.status}`);

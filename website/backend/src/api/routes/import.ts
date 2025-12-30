@@ -1,6 +1,11 @@
 /**
  * Import Routes
  * Handles importing files from external URLs into workspaces
+ *
+ * @openapi
+ * tags:
+ *   - name: Import
+ *     description: File import operations from external URLs
  */
 
 import { Router, Request, Response } from 'express';
@@ -45,8 +50,33 @@ function safeResolvePath(baseDir: string, filePath: string): string | null {
 }
 
 /**
- * Validate a URL before importing
- * POST /api/import/validate
+ * @openapi
+ * /api/import/validate:
+ *   post:
+ *     tags: [Import]
+ *     summary: Validate URL
+ *     description: Check if URL is valid and accessible before import
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - url
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *     responses:
+ *       200:
+ *         description: URL validated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/validate', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -73,8 +103,40 @@ router.post('/validate', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * Import a file from URL into workspace
- * POST /api/import/url
+ * @openapi
+ * /api/import/url:
+ *   post:
+ *     tags: [Import]
+ *     summary: Import from URL
+ *     description: Download file from URL and save to workspace
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - url
+ *               - sessionPath
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *               sessionPath:
+ *                 type: string
+ *               targetPath:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: File imported successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       403:
+ *         description: Access denied to session
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/url', requireAuth, async (req: Request, res: Response) => {
   try {

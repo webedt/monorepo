@@ -1,10 +1,254 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc } from '@webedt/shared';
+import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
+import { collaborationRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 
+/**
+ * Create an SSEWriter for a response with automatic heartbeat management.
+ */
+function createSSEWriter(res: Response): SSEWriter {
+  const sseHelper = ServiceProvider.get(ASseHelper);
+  return SSEWriter.create(res, sseHelper);
+}
+
 const router = Router();
+
+/**
+ * @openapi
+ * tags:
+ *   - name: Workspace
+ *     description: Real-time collaboration presence and events
+ */
+
+/**
+ * @openapi
+ * /workspace/presence:
+ *   put:
+ *     tags:
+ *       - Workspace
+ *     summary: Update presence
+ *     description: Updates user presence on a branch. Rate limited to 60/min.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - owner
+ *               - repo
+ *               - branch
+ *             properties:
+ *               owner:
+ *                 type: string
+ *               repo:
+ *                 type: string
+ *               branch:
+ *                 type: string
+ *               page:
+ *                 type: string
+ *               cursorX:
+ *                 type: number
+ *               cursorY:
+ *                 type: number
+ *               selection:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Presence updated
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/presence/{owner}/{repo}/{branch}:
+ *   get:
+ *     tags:
+ *       - Workspace
+ *     summary: Get active users
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Active users retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   delete:
+ *     tags:
+ *       - Workspace
+ *     summary: Remove presence
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Presence removed
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/events:
+ *   post:
+ *     tags:
+ *       - Workspace
+ *     summary: Log workspace event
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - owner
+ *               - repo
+ *               - branch
+ *               - eventType
+ *             properties:
+ *               owner:
+ *                 type: string
+ *               repo:
+ *                 type: string
+ *               branch:
+ *                 type: string
+ *               eventType:
+ *                 type: string
+ *               page:
+ *                 type: string
+ *               path:
+ *                 type: string
+ *               payload:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Event logged
+ *       400:
+ *         description: Missing fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/events/{owner}/{repo}/{branch}:
+ *   get:
+ *     tags:
+ *       - Workspace
+ *     summary: Get recent events
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - name: since
+ *         in: query
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *     responses:
+ *       200:
+ *         description: Events retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /workspace/events/{owner}/{repo}/{branch}/stream:
+ *   get:
+ *     tags:
+ *       - Workspace
+ *     summary: SSE event stream
+ *     description: Real-time SSE stream of workspace events and presence.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 
 // All routes require authentication
 router.use(requireAuth);
@@ -15,8 +259,9 @@ const OFFLINE_THRESHOLD_MS = 30 * 1000;
 /**
  * PUT /api/workspace/presence
  * Update presence for the current user on a branch
+ * Rate limited to prevent presence spam (60/min per user)
  */
-router.put('/presence', async (req: Request, res: Response) => {
+router.put('/presence', collaborationRateLimiter, async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { owner, repo, branch, page, cursorX, cursorY, selection } = req.body;
@@ -158,8 +403,9 @@ router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Respon
 /**
  * POST /api/workspace/events
  * Log a workspace event
+ * Rate limited to prevent event spam (60/min per user)
  */
-router.post('/events', async (req: Request, res: Response) => {
+router.post('/events', collaborationRateLimiter, async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { owner, repo, branch, eventType, page, path, payload } = req.body;
@@ -276,19 +522,23 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
 
   const decodedBranch = decodeURIComponent(branch);
 
-  // Set up SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  // Set up SSE with automatic heartbeats
+  const writer = createSSEWriter(res);
+  writer.setup();
 
   // Send initial connected event
-  res.write(`event: connected\ndata: ${JSON.stringify({ branch: decodedBranch, owner, repo })}\n\n`);
+  writer.writeNamedEvent('connected', { branch: decodedBranch, owner, repo });
 
   // Poll for new events every 2 seconds
   // In production, this would use PostgreSQL LISTEN/NOTIFY
   let lastEventTime = new Date();
   const pollInterval = setInterval(async () => {
     try {
+      if (!writer.isWritable()) {
+        clearInterval(pollInterval);
+        return;
+      }
+
       const newEvents = await db
         .select({
           id: workspaceEvents.id,
@@ -314,10 +564,10 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
         .orderBy(workspaceEvents.createdAt);
 
       for (const event of newEvents) {
-        res.write(`event: workspace_event\ndata: ${JSON.stringify({
+        writer.writeNamedEvent('workspace_event', {
           ...event,
           userName: event.displayName || event.email?.split('@')[0] || 'Anonymous',
-        })}\n\n`);
+        });
         lastEventTime = event.createdAt;
       }
 
@@ -344,7 +594,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
           )
         );
 
-      res.write(`event: presence_update\ndata: ${JSON.stringify({
+      writer.writeNamedEvent('presence_update', {
         users: activeUsers.map((u) => ({
           userId: u.userId,
           displayName: u.displayName || u.email?.split('@')[0] || 'Anonymous',
@@ -354,7 +604,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
           selection: u.selection,
           isCurrentUser: u.userId === userId,
         })),
-      })}\n\n`);
+      });
     } catch (error) {
       logger.error('workspace', 'Error in event stream', { error });
     }
@@ -363,6 +613,7 @@ router.get('/events/:owner/:repo/:branch/stream', async (req: Request, res: Resp
   // Cleanup on close
   req.on('close', () => {
     clearInterval(pollInterval);
+    writer.end();
   });
 });
 

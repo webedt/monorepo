@@ -1,5 +1,10 @@
 /**
  * Organization/Studio routes for group account management
+ *
+ * @openapi
+ * tags:
+ *   - name: Organizations
+ *     description: Organization and team management operations
  */
 
 import { Router } from 'express';
@@ -31,7 +36,21 @@ function isUniqueConstraintError(error: unknown): boolean {
   return false;
 }
 
-// GET /api/organizations - List user's organizations
+/**
+ * @openapi
+ * /api/organizations:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: List user's organizations
+ *     description: Get all organizations the user is a member of
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Organizations retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -53,7 +72,49 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/organizations - Create a new organization
+/**
+ * @openapi
+ * /api/organizations:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Create organization
+ *     description: Create a new organization with the creator as owner
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - slug
+ *             properties:
+ *               name:
+ *                 type: string
+ *               slug:
+ *                 type: string
+ *               displayName:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               avatarUrl:
+ *                 type: string
+ *               websiteUrl:
+ *                 type: string
+ *               githubOrg:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Organization created successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       409:
+ *         description: Slug already taken
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -110,7 +171,27 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
 // NOTE: Static path routes must come BEFORE /:id routes to avoid matching issues
 
-// GET /api/organizations/slug-available/:slug - Check if slug is available
+/**
+ * @openapi
+ * /api/organizations/slug-available/{slug}:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Check slug availability
+ *     description: Verify if an organization slug is available
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Slug availability checked
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/slug-available/:slug', requireAuth, async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
@@ -128,7 +209,31 @@ router.get('/slug-available/:slug', requireAuth, async (req: Request, res: Respo
   }
 });
 
-// GET /api/organizations/slug/:slug - Get organization by slug
+/**
+ * @openapi
+ * /api/organizations/slug/{slug}:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get organization by slug
+ *     description: Retrieve organization details by slug
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Organization retrieved successfully
+ *       403:
+ *         description: Not a member of this organization
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/slug/:slug', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -160,7 +265,31 @@ router.get('/slug/:slug', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/organizations/invitations/:token/accept - Accept invitation
+/**
+ * @openapi
+ * /api/organizations/invitations/{token}/accept:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Accept invitation
+ *     description: Accept an organization invitation using token
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Invitation accepted successfully
+ *       403:
+ *         description: Email mismatch
+ *       404:
+ *         description: Invitation not found or expired
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/invitations/:token/accept', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -205,7 +334,31 @@ router.post('/invitations/:token/accept', requireAuth, async (req: Request, res:
   }
 });
 
-// GET /api/organizations/:id - Get organization details
+/**
+ * @openapi
+ * /api/organizations/{id}:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get organization details
+ *     description: Get organization with members and repositories
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Organization retrieved successfully
+ *       403:
+ *         description: Not a member of this organization
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -242,7 +395,39 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/organizations/:id - Update organization
+/**
+ * @openapi
+ * /api/organizations/{id}:
+ *   patch:
+ *     tags: [Organizations]
+ *     summary: Update organization
+ *     description: Update organization properties (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Organization updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -289,7 +474,31 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/organizations/:id - Delete organization
+/**
+ * @openapi
+ * /api/organizations/{id}:
+ *   delete:
+ *     tags: [Organizations]
+ *     summary: Delete organization
+ *     description: Delete organization (owner only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Organization deleted successfully
+ *       403:
+ *         description: Owner access required
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -315,7 +524,29 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/organizations/:id/members - List organization members
+/**
+ * @openapi
+ * /api/organizations/{id}/members:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: List members
+ *     description: Get all organization members
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Members retrieved successfully
+ *       403:
+ *         description: Not a member of this organization
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -336,7 +567,48 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/organizations/:id/members - Add a member directly (admin only)
+/**
+ * @openapi
+ * /api/organizations/{id}/members:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Add member
+ *     description: Add a member directly (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - role
+ *             properties:
+ *               userId:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *                 enum: [admin, member]
+ *     responses:
+ *       201:
+ *         description: Member added successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       403:
+ *         description: Admin access required
+ *       409:
+ *         description: User already a member
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/members', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -374,7 +646,50 @@ router.post('/:id/members', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
-// PATCH /api/organizations/:id/members/:userId - Update member role
+/**
+ * @openapi
+ * /api/organizations/{id}/members/{userId}:
+ *   patch:
+ *     tags: [Organizations]
+ *     summary: Update member role
+ *     description: Change member role (owner only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - role
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 enum: [owner, admin, member]
+ *     responses:
+ *       200:
+ *         description: Member role updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       403:
+ *         description: Owner access required
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.patch('/:id/members/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -411,7 +726,38 @@ router.patch('/:id/members/:userId', requireAuth, async (req: Request, res: Resp
   }
 });
 
-// DELETE /api/organizations/:id/members/:userId - Remove member
+/**
+ * @openapi
+ * /api/organizations/{id}/members/{userId}:
+ *   delete:
+ *     tags: [Organizations]
+ *     summary: Remove member
+ *     description: Remove a member (admin only, cannot remove owner)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Member removed successfully
+ *       400:
+ *         description: Use leave endpoint to leave organization
+ *       403:
+ *         description: Admin access required or cannot remove owner
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id/members/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -448,7 +794,31 @@ router.delete('/:id/members/:userId', requireAuth, async (req: Request, res: Res
   }
 });
 
-// POST /api/organizations/:id/leave - Leave organization
+/**
+ * @openapi
+ * /api/organizations/{id}/leave:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Leave organization
+ *     description: Leave organization (owner must transfer ownership first)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Left organization successfully
+ *       400:
+ *         description: Cannot leave as sole owner
+ *       404:
+ *         description: Not a member of this organization
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/leave', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -481,7 +851,29 @@ router.post('/:id/leave', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/organizations/:id/repositories - List organization repositories
+/**
+ * @openapi
+ * /api/organizations/{id}/repositories:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: List repositories
+ *     description: Get all organization repositories
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Repositories retrieved successfully
+ *       403:
+ *         description: Not a member of this organization
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id/repositories', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -502,7 +894,49 @@ router.get('/:id/repositories', requireAuth, async (req: Request, res: Response)
   }
 });
 
-// POST /api/organizations/:id/repositories - Add repository to organization
+/**
+ * @openapi
+ * /api/organizations/{id}/repositories:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Add repository
+ *     description: Add repository to organization (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - repositoryOwner
+ *               - repositoryName
+ *             properties:
+ *               repositoryOwner:
+ *                 type: string
+ *               repositoryName:
+ *                 type: string
+ *               isDefault:
+ *                 type: boolean
+ *     responses:
+ *       201:
+ *         description: Repository added successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       403:
+ *         description: Admin access required
+ *       409:
+ *         description: Repository already added
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/repositories', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -540,7 +974,41 @@ router.post('/:id/repositories', requireAuth, async (req: Request, res: Response
   }
 });
 
-// DELETE /api/organizations/:id/repositories/:owner/:repo - Remove repository
+/**
+ * @openapi
+ * /api/organizations/{id}/repositories/{owner}/{repo}:
+ *   delete:
+ *     tags: [Organizations]
+ *     summary: Remove repository
+ *     description: Remove repository from organization (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: owner
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: repo
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Repository removed successfully
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id/repositories/:owner/:repo', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -566,7 +1034,41 @@ router.delete('/:id/repositories/:owner/:repo', requireAuth, async (req: Request
   }
 });
 
-// POST /api/organizations/:id/repositories/:owner/:repo/default - Set default repository
+/**
+ * @openapi
+ * /api/organizations/{id}/repositories/{owner}/{repo}/default:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Set default repository
+ *     description: Set as default repository (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: owner
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: repo
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Default repository set successfully
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/repositories/:owner/:repo/default', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -592,7 +1094,48 @@ router.post('/:id/repositories/:owner/:repo/default', requireAuth, async (req: R
   }
 });
 
-// POST /api/organizations/:id/invitations - Create invitation
+/**
+ * @openapi
+ * /api/organizations/{id}/invitations:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Create invitation
+ *     description: Invite user by email (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               role:
+ *                 type: string
+ *                 enum: [admin, member]
+ *     responses:
+ *       201:
+ *         description: Invitation created successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       403:
+ *         description: Admin access required
+ *       409:
+ *         description: Invitation already exists
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:id/invitations', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -640,7 +1183,29 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
   }
 });
 
-// GET /api/organizations/:id/invitations - List pending invitations
+/**
+ * @openapi
+ * /api/organizations/{id}/invitations:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: List invitations
+ *     description: Get pending invitations (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Invitations retrieved successfully
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id/invitations', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -661,7 +1226,36 @@ router.get('/:id/invitations', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-// DELETE /api/organizations/:id/invitations/:invitationId - Revoke invitation
+/**
+ * @openapi
+ * /api/organizations/{id}/invitations/{invitationId}:
+ *   delete:
+ *     tags: [Organizations]
+ *     summary: Revoke invitation
+ *     description: Cancel pending invitation (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: invitationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Invitation revoked successfully
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id/invitations/:invitationId', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;

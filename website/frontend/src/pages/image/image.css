@@ -97,6 +97,34 @@
   color: #fff;
 }
 
+/* Export Controls */
+.export-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.format-selector {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.format-selector:hover {
+  border-color: var(--color-primary);
+}
+
+.format-selector:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 74, 144, 217), 0.2);
+}
+
 /* Layout */
 .image-layout {
   display: flex;

@@ -11,6 +11,13 @@ import type { AutocompleteRequest } from '@webedt/shared';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Autocomplete
+ *     description: AI-powered code completion suggestions
+ */
+
 // Singleton instance
 let autocompleteService: AutocompleteService | null = null;
 
@@ -22,8 +29,80 @@ function getAutocompleteService(): AutocompleteService {
 }
 
 /**
- * POST /api/autocomplete
- * Get code completion suggestions
+ * @openapi
+ * /autocomplete:
+ *   post:
+ *     tags:
+ *       - Autocomplete
+ *     summary: Get code completion suggestions
+ *     description: Returns AI-powered code completion suggestions based on the provided context.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prefix
+ *               - suffix
+ *               - language
+ *             properties:
+ *               prefix:
+ *                 type: string
+ *                 description: Code before the cursor position (max 4000 chars)
+ *               suffix:
+ *                 type: string
+ *                 description: Code after the cursor position (max 1000 chars)
+ *               language:
+ *                 type: string
+ *                 description: Programming language identifier
+ *                 example: typescript
+ *               filePath:
+ *                 type: string
+ *                 description: Path to the file being edited
+ *               maxSuggestions:
+ *                 type: integer
+ *                 description: Maximum number of suggestions (default 3, max 5)
+ *                 default: 3
+ *                 maximum: 5
+ *               additionalContext:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Additional context from other files (max 3)
+ *     responses:
+ *       200:
+ *         description: Completion suggestions returned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     suggestions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           text:
+ *                             type: string
+ *                           confidence:
+ *                             type: number
+ *       400:
+ *         description: Validation error - missing or invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -91,8 +170,48 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/autocomplete/languages
- * Get list of supported languages
+ * @openapi
+ * /autocomplete/languages:
+ *   get:
+ *     tags:
+ *       - Autocomplete
+ *     summary: Get supported languages
+ *     description: Returns the list of programming languages supported by the autocomplete service.
+ *     responses:
+ *       200:
+ *         description: Languages list retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     languages:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             description: Language identifier
+ *                             example: typescript
+ *                           name:
+ *                             type: string
+ *                             description: Display name
+ *                             example: TypeScript
+ *                           extensions:
+ *                             type: array
+ *                             items:
+ *                               type: string
+ *                             description: File extensions
+ *                             example: [".ts", ".tsx"]
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/languages', requireAuth, async (req: Request, res: Response) => {
   const languages = [

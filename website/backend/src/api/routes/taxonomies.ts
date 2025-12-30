@@ -1,6 +1,11 @@
 /**
  * Taxonomy routes for admin-configurable categories, tags, and genres
  * Provides CRUD operations for taxonomies, terms, and item assignments
+ *
+ * @openapi
+ * tags:
+ *   - name: Taxonomies
+ *     description: Admin-configurable categories, tags, and classification systems
  */
 
 import { Router } from 'express';
@@ -15,6 +20,7 @@ import {
   desc,
   inArray,
   logger,
+  isValidHexColor,
 } from '@webedt/shared';
 import type {
   Taxonomy,
@@ -41,16 +47,25 @@ function isValidStatus(status: string): boolean {
   return VALID_STATUSES.includes(status as typeof VALID_STATUSES[number]);
 }
 
-// Helper to validate hex color (prevents CSS injection)
-function isValidHexColor(color: string): boolean {
-  return /^#[0-9A-Fa-f]{6}$/.test(color);
-}
-
 // ============================================================================
 // TAXONOMY CRUD (Admin only)
 // ============================================================================
 
-// GET /api/taxonomies - List all taxonomies
+/**
+ * @openapi
+ * /api/taxonomies:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: List taxonomies
+ *     description: Get all taxonomies ordered by sort order
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Taxonomies retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/', requireAuth, async (req, res) => {
   try {
     const allTaxonomies = await db
@@ -65,7 +80,29 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/taxonomies/by-slug/:slug - Get taxonomy by slug
+/**
+ * @openapi
+ * /api/taxonomies/by-slug/{slug}:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: Get taxonomy by slug
+ *     description: Retrieve taxonomy with all terms by slug
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Taxonomy retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // NOTE: This route MUST be defined BEFORE /:id to avoid being caught by the parameterized route
 router.get('/by-slug/:slug', requireAuth, async (req, res) => {
   try {
@@ -96,7 +133,29 @@ router.get('/by-slug/:slug', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/taxonomies/:id - Get taxonomy details with terms
+/**
+ * @openapi
+ * /api/taxonomies/{id}:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: Get taxonomy details
+ *     description: Retrieve taxonomy with all terms by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Taxonomy retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -126,7 +185,49 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/taxonomies - Create new taxonomy
+/**
+ * @openapi
+ * /api/taxonomies:
+ *   post:
+ *     tags: [Taxonomies]
+ *     summary: Create taxonomy
+ *     description: Create new taxonomy (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - displayName
+ *             properties:
+ *               name:
+ *                 type: string
+ *               displayName:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               allowMultiple:
+ *                 type: boolean
+ *               isRequired:
+ *                 type: boolean
+ *               itemTypes:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               sortOrder:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Taxonomy created successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/', requireAdmin, async (req, res) => {
   try {
     const { name, displayName, description, allowMultiple, isRequired, itemTypes, sortOrder } = req.body;
@@ -173,7 +274,37 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /api/taxonomies/:id - Update taxonomy
+/**
+ * @openapi
+ * /api/taxonomies/{id}:
+ *   patch:
+ *     tags: [Taxonomies]
+ *     summary: Update taxonomy
+ *     description: Update taxonomy properties (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Taxonomy updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.patch('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -217,7 +348,29 @@ router.patch('/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/taxonomies/:id - Delete taxonomy (cascades to terms and item assignments)
+/**
+ * @openapi
+ * /api/taxonomies/{id}:
+ *   delete:
+ *     tags: [Taxonomies]
+ *     summary: Delete taxonomy
+ *     description: Delete taxonomy and cascade to terms (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Taxonomy deleted successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -246,7 +399,29 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 // NOTE: Static routes (/terms/:termId) MUST be defined BEFORE parameterized routes (/:taxonomyId/terms)
 // to avoid being incorrectly matched
 
-// GET /api/taxonomies/terms/:termId - Get term details
+/**
+ * @openapi
+ * /api/taxonomies/terms/{termId}:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: Get term details
+ *     description: Retrieve taxonomy term by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: termId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Term retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/terms/:termId', requireAuth, async (req, res) => {
   try {
     const { termId } = req.params;
@@ -269,7 +444,37 @@ router.get('/terms/:termId', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/taxonomies/terms/:termId - Update term
+/**
+ * @openapi
+ * /api/taxonomies/terms/{termId}:
+ *   patch:
+ *     tags: [Taxonomies]
+ *     summary: Update term
+ *     description: Update taxonomy term (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: termId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Term updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.patch('/terms/:termId', requireAdmin, async (req, res) => {
   try {
     const { termId } = req.params;
@@ -319,7 +524,29 @@ router.patch('/terms/:termId', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/taxonomies/terms/:termId - Delete term
+/**
+ * @openapi
+ * /api/taxonomies/terms/{termId}:
+ *   delete:
+ *     tags: [Taxonomies]
+ *     summary: Delete term
+ *     description: Delete taxonomy term (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: termId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Term deleted successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/terms/:termId', requireAdmin, async (req, res) => {
   try {
     const { termId } = req.params;
@@ -341,7 +568,27 @@ router.delete('/terms/:termId', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/taxonomies/:taxonomyId/terms - List terms for a taxonomy
+/**
+ * @openapi
+ * /api/taxonomies/{taxonomyId}/terms:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: List terms
+ *     description: Get all terms for a taxonomy
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: taxonomyId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Terms retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:taxonomyId/terms', requireAuth, async (req, res) => {
   try {
     const { taxonomyId } = req.params;
@@ -359,7 +606,54 @@ router.get('/:taxonomyId/terms', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/taxonomies/:taxonomyId/terms - Create new term
+/**
+ * @openapi
+ * /api/taxonomies/{taxonomyId}/terms:
+ *   post:
+ *     tags: [Taxonomies]
+ *     summary: Create term
+ *     description: Add new term to taxonomy (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: taxonomyId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               parentId:
+ *                 type: string
+ *               color:
+ *                 type: string
+ *               icon:
+ *                 type: string
+ *               metadata:
+ *                 type: object
+ *               sortOrder:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Term created successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         description: Taxonomy not found
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
   try {
     const { taxonomyId } = req.params;
@@ -433,7 +727,31 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
 // NOTE: Static routes (/items/by-term/:termId) MUST be defined BEFORE parameterized routes (/items/:itemType/:itemId)
 // to avoid being incorrectly matched
 
-// GET /api/taxonomies/items/by-term/:termId - Get all items with a specific term
+/**
+ * @openapi
+ * /api/taxonomies/items/by-term/{termId}:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: Get items by term
+ *     description: Find all items tagged with a specific term
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: termId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: itemType
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Items retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/items/by-term/:termId', requireAuth, async (req, res) => {
   try {
     const { termId } = req.params;
@@ -460,7 +778,32 @@ router.get('/items/by-term/:termId', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/taxonomies/items/:itemType/:itemId - Get terms assigned to an item
+/**
+ * @openapi
+ * /api/taxonomies/items/{itemType}/{itemId}:
+ *   get:
+ *     tags: [Taxonomies]
+ *     summary: Get item taxonomies
+ *     description: Get all taxonomy terms assigned to an item
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: itemType
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Item taxonomies retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/items/:itemType/:itemId', requireAuth, async (req, res) => {
   try {
     const { itemType, itemId } = req.params;
@@ -493,7 +836,41 @@ router.get('/items/:itemType/:itemId', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/taxonomies/items/:itemType/:itemId/terms/:termId - Assign term to item
+/**
+ * @openapi
+ * /api/taxonomies/items/{itemType}/{itemId}/terms/{termId}:
+ *   post:
+ *     tags: [Taxonomies]
+ *     summary: Assign term to item
+ *     description: Tag an item with a taxonomy term (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: itemType
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: termId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Term assigned successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, res) => {
   try {
     const { itemType, itemId, termId } = req.params;
@@ -587,7 +964,39 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
   }
 });
 
-// DELETE /api/taxonomies/items/:itemType/:itemId/terms/:termId - Remove term from item
+/**
+ * @openapi
+ * /api/taxonomies/items/{itemType}/{itemId}/terms/{termId}:
+ *   delete:
+ *     tags: [Taxonomies]
+ *     summary: Remove term from item
+ *     description: Remove taxonomy term from item (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: itemType
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: termId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Term removed successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.delete('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, res) => {
   try {
     const { itemType, itemId, termId } = req.params;
@@ -615,7 +1024,47 @@ router.delete('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req
   }
 });
 
-// PUT /api/taxonomies/items/:itemType/:itemId - Bulk update terms for an item
+/**
+ * @openapi
+ * /api/taxonomies/items/{itemType}/{itemId}:
+ *   put:
+ *     tags: [Taxonomies]
+ *     summary: Bulk update item terms
+ *     description: Replace all terms for an item (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: itemType
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - termIds
+ *             properties:
+ *               termIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Terms updated successfully
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
   try {
     const { itemType, itemId } = req.params;

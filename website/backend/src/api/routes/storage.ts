@@ -3,17 +3,36 @@
  * Handles user storage quota management and statistics
  */
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Storage
+ *     description: File storage quota management and statistics
+ */
+
 import { Router, Request, Response } from 'express';
 import { StorageService, STORAGE_TIERS, logger } from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
-import { requireAuth } from '../middleware/auth.js';
-import { requireAdmin } from '../middleware/requireAdmin.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
 /**
- * Get current user's storage statistics
+ * @openapi
+ * /api/storage:
+ *   get:
+ *     tags: [Storage]
+ *     summary: Get current user's storage statistics
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Storage statistics returned successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -47,7 +66,20 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * Get storage breakdown by category
+ * @openapi
+ * /api/storage/breakdown:
+ *   get:
+ *     tags: [Storage]
+ *     summary: Get storage breakdown by category
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Storage breakdown returned successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/breakdown', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -90,7 +122,20 @@ router.get('/breakdown', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * Recalculate and sync storage usage from actual data
+ * @openapi
+ * /api/storage/recalculate:
+ *   post:
+ *     tags: [Storage]
+ *     summary: Recalculate and sync storage usage from actual data
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Storage usage recalculated successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/recalculate', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -112,7 +157,34 @@ router.post('/recalculate', requireAuth, async (req: Request, res: Response) => 
 });
 
 /**
- * Check if additional bytes can be added (quota check)
+ * @openapi
+ * /api/storage/check:
+ *   post:
+ *     tags: [Storage]
+ *     summary: Check if additional bytes can be added (quota check)
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - bytes
+ *             properties:
+ *               bytes:
+ *                 type: number
+ *                 minimum: 0
+ *     responses:
+ *       200:
+ *         description: Quota check completed successfully
+ *       400:
+ *         description: Invalid bytes value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/check', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -150,7 +222,20 @@ router.post('/check', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * Get available storage tiers
+ * @openapi
+ * /api/storage/tiers:
+ *   get:
+ *     tags: [Storage]
+ *     summary: Get available storage tiers
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Storage tiers returned successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/tiers', requireAuth, async (_req: Request, res: Response) => {
   try {
@@ -175,7 +260,30 @@ router.get('/tiers', requireAuth, async (_req: Request, res: Response) => {
 // ============================================================================
 
 /**
- * Get storage stats for a specific user (admin only)
+ * @openapi
+ * /api/storage/admin/{userId}:
+ *   get:
+ *     tags: [Storage]
+ *     summary: Get storage stats for a specific user (admin only)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: userId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User storage statistics returned successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -210,7 +318,43 @@ router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res
 });
 
 /**
- * Set storage quota for a user (admin only)
+ * @openapi
+ * /api/storage/admin/{userId}/quota:
+ *   post:
+ *     tags: [Storage]
+ *     summary: Set storage quota for a user (admin only)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: userId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - quotaBytes
+ *             properties:
+ *               quotaBytes:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Storage quota updated successfully
+ *       400:
+ *         description: Invalid quota value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -258,7 +402,43 @@ router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Reque
 });
 
 /**
- * Set storage tier for a user (admin only)
+ * @openapi
+ * /api/storage/admin/{userId}/tier:
+ *   post:
+ *     tags: [Storage]
+ *     summary: Set storage tier for a user (admin only)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: userId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - tier
+ *             properties:
+ *               tier:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Storage tier updated successfully
+ *       400:
+ *         description: Invalid tier value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -301,7 +481,30 @@ router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Reques
 });
 
 /**
- * Recalculate storage usage for a user (admin only)
+ * @openapi
+ * /api/storage/admin/{userId}/recalculate:
+ *   post:
+ *     tags: [Storage]
+ *     summary: Recalculate storage usage for a user (admin only)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: userId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Storage usage recalculated successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/admin/:userId/recalculate', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {

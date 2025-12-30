@@ -23,6 +23,54 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Channels
+ *     description: Real-time community messaging channels
+ */
+
+/**
+ * @openapi
+ * /channels:
+ *   get:
+ *     tags:
+ *       - Channels
+ *     summary: Get all active channels
+ *     description: Returns a list of all active community channels. Public endpoint.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Channels retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     channels:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           slug:
+ *                             type: string
+ *                           description:
+ *                             type: string
+ *                           game:
+ *                             type: object
+ *                             nullable: true
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get all active channels
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -51,6 +99,29 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /channels/by-slug/{slug}:
+ *   get:
+ *     tags:
+ *       - Channels
+ *     summary: Get channel by slug
+ *     description: Returns a channel by its URL-friendly slug.
+ *     security: []
+ *     parameters:
+ *       - name: slug
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Channel retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get channel by slug
 router.get('/by-slug/:slug', async (req: Request, res: Response) => {
   try {
@@ -89,6 +160,28 @@ router.get('/by-slug/:slug', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /channels/activity/recent:
+ *   get:
+ *     tags:
+ *       - Channels
+ *     summary: Get recent activity
+ *     description: Returns recent messages across all channels for the activity feed.
+ *     security: []
+ *     parameters:
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 50
+ *     responses:
+ *       200:
+ *         description: Recent messages retrieved successfully
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get recent messages across all channels (for activity feed)
 // NOTE: This route MUST be defined before /:id to avoid being caught by the param route
 router.get('/activity/recent', async (req: Request, res: Response) => {
@@ -141,6 +234,28 @@ router.get('/activity/recent', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /channels/{id}:
+ *   get:
+ *     tags:
+ *       - Channels
+ *     summary: Get channel by ID
+ *     security: []
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Channel retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get channel by ID
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -174,6 +289,40 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /channels/{id}/messages:
+ *   get:
+ *     tags:
+ *       - Channels
+ *     summary: Get channel messages
+ *     description: Returns paginated messages for a channel.
+ *     security: []
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Messages retrieved successfully
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get messages for a channel
 router.get('/:id/messages', async (req: Request, res: Response) => {
   try {
@@ -253,6 +402,52 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /channels/{id}/messages:
+ *   post:
+ *     tags:
+ *       - Channels
+ *     summary: Post a message
+ *     description: Posts a new message to a channel. Cannot post to read-only channels unless admin.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - content
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 maxLength: 4000
+ *               replyToId:
+ *                 type: string
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Message posted successfully
+ *       400:
+ *         description: Content required or exceeds length
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: Channel is read-only
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Post a message to a channel (requires auth)
 router.post('/:id/messages', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -359,6 +554,46 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
+/**
+ * @openapi
+ * /channels/messages/{id}:
+ *   patch:
+ *     tags:
+ *       - Channels
+ *     summary: Edit a message
+ *     description: Edits an existing message. Only the message author can edit.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - content
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 maxLength: 4000
+ *     responses:
+ *       200:
+ *         description: Message edited successfully
+ *       400:
+ *         description: Content required
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Edit a message
 router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -420,6 +655,32 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
   }
 });
 
+/**
+ * @openapi
+ * /channels/messages/{id}:
+ *   delete:
+ *     tags:
+ *       - Channels
+ *     summary: Delete a message
+ *     description: Soft-deletes a message. Author or admin can delete.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Message deleted
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a message
 router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -460,6 +721,52 @@ router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) 
   }
 });
 
+/**
+ * @openapi
+ * /channels:
+ *   post:
+ *     tags:
+ *       - Channels
+ *     summary: Create a channel
+ *     description: Creates a new community channel. Admin access required.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - slug
+ *             properties:
+ *               name:
+ *                 type: string
+ *               slug:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               gameId:
+ *                 type: string
+ *               isDefault:
+ *                 type: boolean
+ *               isReadOnly:
+ *                 type: boolean
+ *               sortOrder:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Channel created successfully
+ *       400:
+ *         description: Invalid input or slug exists
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         description: Game not found
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Admin: Create a new channel
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -534,6 +841,51 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /channels/{id}:
+ *   patch:
+ *     tags:
+ *       - Channels
+ *     summary: Update a channel
+ *     description: Updates a channel's settings. Admin access required.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               isDefault:
+ *                 type: boolean
+ *               isReadOnly:
+ *                 type: boolean
+ *               sortOrder:
+ *                 type: integer
+ *               status:
+ *                 type: string
+ *                 enum: [active, archived]
+ *     responses:
+ *       200:
+ *         description: Channel updated successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Admin: Update a channel
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {

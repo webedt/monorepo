@@ -3,7 +3,11 @@
  * Manages selected repository state
  */
 
+import { z } from 'zod';
+
 import { Store } from '../lib/store';
+import { STORE_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
 
 interface RepoState {
   selectedRepo: string; // Format: "owner/repo"
@@ -12,44 +16,43 @@ interface RepoState {
   recentRepos: string[];
 }
 
-const STORAGE_KEY = 'repoStore';
+const RepoStateSchema = z.object({
+  selectedRepo: z.string().default(''),
+  selectedBranch: z.string().default(''),
+  isLocked: z.boolean().default(false),
+  recentRepos: z.array(z.string()).default([]),
+});
+
 const MAX_RECENT_REPOS = 10;
 
-class RepoStore extends Store<RepoState> {
+const DEFAULT_STATE: RepoState = {
+  selectedRepo: '',
+  selectedBranch: '',
+  isLocked: false,
+  recentRepos: [],
+};
+
+const repoStorage = new TypedStorage({
+  key: STORE_KEYS.REPO,
+  schema: RepoStateSchema,
+  defaultValue: DEFAULT_STATE,
+  version: 1,
+});
+
+export class RepoStore extends Store<RepoState> {
   constructor() {
-    super({
-      selectedRepo: '',
-      selectedBranch: '',
-      isLocked: false,
-      recentRepos: [],
-    });
+    super(DEFAULT_STATE);
 
     this.loadFromStorage();
   }
 
   private loadFromStorage(): void {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        this.setState({
-          selectedRepo: parsed.selectedRepo || '',
-          selectedBranch: parsed.selectedBranch || '',
-          isLocked: parsed.isLocked || false,
-          recentRepos: parsed.recentRepos || [],
-        });
-      }
-    } catch {
-      // Ignore parse errors
-    }
+    const stored = repoStorage.get();
+    this.setState(stored);
 
     // Save on changes
     this.subscribe((state) => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch {
-        // Ignore storage errors
-      }
+      repoStorage.set(state);
     });
   }
 

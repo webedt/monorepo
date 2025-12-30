@@ -5,6 +5,12 @@
 
 import { APaymentProvider } from './APaymentProvider.js';
 import { logger } from '../utils/logging/logger.js';
+import {
+  PAYPAL_CLIENT_ID,
+  PAYPAL_CLIENT_SECRET,
+  PAYPAL_WEBHOOK_ID,
+  PAYPAL_SANDBOX,
+} from '../config/env.js';
 
 import type { CheckoutSession } from './types.js';
 import type { CreateCheckoutRequest } from './types.js';
@@ -644,10 +650,10 @@ export class PayPalProvider extends APaymentProvider {
  * Create PayPal provider from environment variables
  */
 export function createPayPalProvider(): PayPalProvider | null {
-  const clientId = process.env.PAYPAL_CLIENT_ID;
-  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
-  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
-  const sandbox = process.env.PAYPAL_SANDBOX === 'true';
+  const clientId = PAYPAL_CLIENT_ID;
+  const clientSecret = PAYPAL_CLIENT_SECRET;
+  const webhookId = PAYPAL_WEBHOOK_ID;
+  const sandbox = PAYPAL_SANDBOX;
 
   if (!clientId || !clientSecret || !webhookId) {
     logger.warn('PayPal provider not configured: missing environment variables', {

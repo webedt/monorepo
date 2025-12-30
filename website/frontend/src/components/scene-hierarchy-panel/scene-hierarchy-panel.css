@@ -1,0 +1,124 @@
+/* Scene Hierarchy Panel Component Styles */
+
+.hierarchy-panel {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-surface, #fff);
+  border-right: 1px solid var(--color-border, #e5e7eb);
+  min-width: 200px;
+  max-width: 280px;
+}
+
+.hierarchy-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--color-surface-secondary, #f9fafb);
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.hierarchy-panel .panel-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text, #111827);
+}
+
+.hierarchy-panel .add-object-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 4px;
+  color: var(--color-text-secondary, #6b7280);
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.15s ease;
+}
+
+.hierarchy-panel .add-object-btn:hover {
+  background-color: var(--color-surface-hover, #f3f4f6);
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-primary, #3b82f6);
+}
+
+.hierarchy-panel .hierarchy-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.hierarchy-panel .hierarchy-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.hierarchy-panel .hierarchy-empty p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.hierarchy-panel .hierarchy-empty .hint {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.hierarchy-panel .hierarchy-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  font-size: 13px;
+}
+
+.hierarchy-panel .hierarchy-item:hover {
+  background-color: var(--color-surface-hover, #f3f4f6);
+}
+
+.hierarchy-panel .hierarchy-item.selected {
+  background-color: var(--color-primary-light, #eff6ff);
+  color: var(--color-primary, #3b82f6);
+}
+
+.hierarchy-panel .hierarchy-visibility {
+  flex-shrink: 0;
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.hierarchy-panel .hierarchy-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.hierarchy-panel .hierarchy-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hierarchy-panel .hierarchy-z-index {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-tertiary, #9ca3af);
+  font-family: monospace;
+}
+
+.hierarchy-panel .hierarchy-locked {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.7;
+}

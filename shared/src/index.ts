@@ -61,6 +61,21 @@ export type {
   TitleGenerationCallback,
 } from './claudeWeb/index.js';
 
+// Gemini AI API
+export { GeminiClient, AGeminiClient, GeminiError } from './gemini/index.js';
+export type {
+  GeminiClientConfig,
+  GenerateContentParams,
+  GeminiSessionEvent,
+  GeminiSessionResult,
+  Content as GeminiContent,
+  Part as GeminiPart,
+  TextPart as GeminiTextPart,
+  InlineDataPart as GeminiInlineDataPart,
+  StreamOptions as GeminiStreamOptions,
+  GeminiEventCallback,
+} from './gemini/index.js';
+
 // Codex/OpenAI API
 // Provides integration with OpenAI's Responses API for code generation
 export { CodexClient, ACodexClient, CodexError } from './codex/index.js';
@@ -128,3 +143,8 @@ export * from './geometry/index.js';
 // SERVICES - Dependency injection and service registry
 // =============================================================================
 export * from './services/index.js';
+
+// =============================================================================
+// LIFECYCLE - Startup and shutdown management
+// =============================================================================
+export * from './lifecycle/index.js';

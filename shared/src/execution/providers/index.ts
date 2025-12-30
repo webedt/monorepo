@@ -6,6 +6,7 @@
 
 export { ClaudeRemoteProvider } from './claudeRemoteProvider.js';
 export { SelfHostedWorkerProvider } from './selfHostedWorkerProvider.js';
+export { GeminiProvider } from './geminiProvider.js';
 export { CodexRemoteProvider } from './codexRemoteProvider.js';
 export type {
   ExecutionProvider,
@@ -15,12 +16,44 @@ export type {
   ExecutionEvent,
   ExecutionEventType,
   ExecutionEventCallback,
+  ProviderCapabilities,
+  // Discriminated union types for type-safe event handling
+  TypedExecutionEvent,
+  ConnectedEvent,
+  MessageEvent,
+  AssistantMessageEvent,
+  SessionNameEvent,
+  SessionCreatedEvent,
+  TitleGenerationEvent,
+  CompletedEvent,
+  ErrorEvent,
+  InputPreviewEvent,
+  InterruptedEvent,
+  UserEvent,
+  AssistantEvent,
+  ToolUseEvent,
+  ToolResultEvent,
+  ResultEvent,
+  EnvManagerLogEvent,
+  SystemEvent,
+  TextEvent,
+  MessageStartEvent,
+  MessageDeltaEvent,
+  MessageCompleteEvent,
 } from './types.js';
+
+// Export abstract base class for providers
+export { AExecutionProvider } from './types.js';
+
+// Export type guard and exhaustive check helpers
+export { isEventType, assertNeverEventType } from './types.js';
 export type { SelfHostedWorkerConfig } from './selfHostedWorkerProvider.js';
+export type { GeminiResumeParams } from './geminiProvider.js';
 export type { CodexExecuteParams, CodexResumeParams } from './codexRemoteProvider.js';
 
 import { ClaudeRemoteProvider } from './claudeRemoteProvider.js';
 import { SelfHostedWorkerProvider } from './selfHostedWorkerProvider.js';
+import { GeminiProvider } from './geminiProvider.js';
 import { CodexRemoteProvider } from './codexRemoteProvider.js';
 import type { ExecutionProvider } from './types.js';
 import { AI_WORKER_ENABLED, AI_WORKER_URL, CODEX_ENABLED } from '../../config/env.js';
@@ -29,7 +62,7 @@ import { logger } from '../../utils/logging/logger.js';
 /**
  * Provider type for explicit selection
  */
-export type ProviderType = 'claude-remote' | 'self-hosted' | 'codex' | 'auto';
+export type ProviderType = 'claude-remote' | 'self-hosted' | 'gemini' | 'codex' | 'auto';
 
 /**
  * Get the execution provider based on configuration
@@ -56,6 +89,13 @@ export function getExecutionProvider(providerType: ProviderType = 'auto'): Execu
       component: 'ExecutionProviders',
     });
     return new ClaudeRemoteProvider();
+  }
+
+  if (providerType === 'gemini') {
+    logger.info('Using GeminiProvider (explicit)', {
+      component: 'ExecutionProviders',
+    });
+    return new GeminiProvider();
   }
 
   if (providerType === 'codex') {
