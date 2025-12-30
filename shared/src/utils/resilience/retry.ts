@@ -1,6 +1,9 @@
 import { logger } from '../logging/logger.js';
 import { getErrorCode, getStatusCode, asNetworkError } from '../errorTypes.js';
 import { RETRY } from '../../config/constants.js';
+import { sleep, calculateBackoffDelay as calculateBackoff } from '../timing.js';
+
+import type { BackoffConfig } from '../timing.js';
 
 export interface RetryConfig {
   maxRetries: number;
@@ -60,24 +63,15 @@ function defaultIsRetryable(error: Error): boolean {
   return false;
 }
 
+/**
+ * Calculate exponential backoff delay with optional jitter.
+ * Delegates to the centralized timing module.
+ */
 export function calculateBackoffDelay(
   attempt: number,
   config: Pick<RetryConfig, 'baseDelayMs' | 'maxDelayMs' | 'backoffMultiplier' | 'useJitter' | 'jitterFactor'>
 ): number {
-  const exponentialDelay = config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt - 1);
-  let delay = Math.min(exponentialDelay, config.maxDelayMs);
-
-  if (config.useJitter) {
-    const jitter = Math.random() * config.jitterFactor * delay;
-    delay = Math.random() > 0.5 ? delay + jitter : delay - jitter;
-    delay = Math.max(delay, config.baseDelayMs * 0.5);
-  }
-
-  return Math.floor(delay);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return calculateBackoff(attempt, config);
 }
 
 export async function retryWithBackoff<T>(

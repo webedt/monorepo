@@ -10,6 +10,7 @@
 
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { logger } from '../utils/logging/logger.js';
+import { sleepWithJitter, calculateBackoffDelay } from '../utils/timing.js';
 import * as schema from './schema.js';
 
 import type { ExtractTablesWithRelations } from 'drizzle-orm';
@@ -75,13 +76,6 @@ function isTransientError(error: unknown): boolean {
   return transientPatterns.some(pattern => message.includes(pattern));
 }
 
-/**
- * Sleep for the specified duration with jitter.
- */
-function sleep(ms: number): Promise<void> {
-  const jitter = Math.random() * 0.3 * ms;
-  return new Promise(resolve => setTimeout(resolve, ms + jitter));
-}
 
 /**
  * Execute a database operation within a transaction.
@@ -135,13 +129,16 @@ export async function withTransaction<T>(
       };
 
       if (attempt < maxRetries && isTransientError(lastError)) {
-        const delay = retryDelayMs * Math.pow(2, attempt);
+        const delay = calculateBackoffDelay(attempt + 1, {
+          baseDelayMs: retryDelayMs,
+          useJitter: false,
+        });
         logger.warn(`Transaction failed with transient error, retrying in ${delay}ms`, {
           ...logContext,
           error: lastError.message,
           retryDelay: delay,
         });
-        await sleep(delay);
+        await sleepWithJitter(delay);
       } else {
         logger.error('Transaction failed', lastError, logContext);
         break;
