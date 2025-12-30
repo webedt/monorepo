@@ -123,10 +123,12 @@ export class UndoRedoManager {
     tabPath: string,
     subscriber: (state: UndoRedoState<TabContentState>) => void
   ): () => void {
-    if (!this.subscribers.has(tabPath)) {
-      this.subscribers.set(tabPath, new Set());
+    let tabSubscribers = this.subscribers.get(tabPath);
+    if (!tabSubscribers) {
+      tabSubscribers = new Set();
+      this.subscribers.set(tabPath, tabSubscribers);
     }
-    this.subscribers.get(tabPath)!.add(subscriber);
+    tabSubscribers.add(subscriber);
 
     // Immediately notify with current state
     subscriber(this.getState(tabPath));
