@@ -63,7 +63,7 @@ export type {
   ProjectItem,
   AddItemResult,
 } from './github/index.js';
-export type { RateLimitState, RateLimiterConfig as GitHubRateLimiterConfig } from './github/index.js';
+export type { RateLimitState, GitHubRateLimiterConfig } from './github/index.js';
 export type { DiffLine, DiffHunk, FileDiff, ParsedDiff } from './github/index.js';
 
 // Claude Web Sessions API
