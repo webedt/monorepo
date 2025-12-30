@@ -221,3 +221,15 @@ export type { WaveformEditorOptions, AudioSelection } from './waveform-editor';
 // SynthesizerPanel
 export { SynthesizerPanel } from './synthesizer-panel';
 export type { SynthesizerPanelOptions } from './synthesizer-panel';
+
+// MidiImportDialog
+export { MidiImportDialog } from './midi-import-dialog';
+export type { MidiImportDialogOptions } from './midi-import-dialog';
+
+// MidiPlayer
+export { MidiPlayer } from './midi-player';
+export type { MidiPlayerOptions } from './midi-player';
+
+// MidiPianoRoll
+export { MidiPianoRoll } from './midi-piano-roll';
+export type { MidiPianoRollOptions } from './midi-piano-roll';
