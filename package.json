@@ -15,10 +15,13 @@
     "dev": "concurrently -n shared,frontend,backend -c magenta,blue,green \"npm run dev -w shared\" \"npm run dev -w website/frontend\" \"npm run dev -w website/backend\"",
     "start": "concurrently -n frontend,backend -c blue,green \"npm run preview -w website/frontend\" \"npm run start -w website/backend\"",
     "clean": "npm run clean --workspaces --if-present",
-    "cli": "npm run dev -w cli --"
+    "cli": "npm run dev -w cli --",
+    "lint": "eslint --ext .ts,.tsx shared/src cli/src website/frontend/src website/backend/src",
+    "lint:catch": "eslint --ext .ts,.tsx --rule 'no-empty: [error, {allowEmptyCatch: false}]' shared/src cli/src website/frontend/src website/backend/src"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "eslint": "^9.17.0"
   },
   "overrides": {
     "drizzle-orm": "^0.44.2",

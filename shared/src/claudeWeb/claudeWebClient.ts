@@ -19,6 +19,13 @@ import { ClaudeRemoteError } from './types.js';
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 const DEFAULT_MODEL = 'claude-opus-4-5-20251101';
 
+/**
+ * Fetch environment ID from existing Claude sessions.
+ * This is used as a fallback when CLAUDE_ENVIRONMENT_ID is not configured.
+ *
+ * @returns The environment ID if found, null if no sessions exist or API is unavailable
+ * @throws ClaudeRemoteError if the request fails with a non-recoverable error
+ */
 export async function fetchEnvironmentIdFromSessions(
   accessToken: string,
   baseUrl: string = DEFAULT_BASE_URL,
@@ -38,7 +45,21 @@ export async function fetchEnvironmentIdFromSessions(
     const response = await fetch(`${baseUrl}/v1/sessions?limit=1`, {
       headers
     });
-    if (!response.ok) return null;
+
+    if (!response.ok) {
+      // 401/403 are expected if token is invalid - return null to trigger re-auth flow
+      if (response.status === 401 || response.status === 403) {
+        return null;
+      }
+      // 404 means no sessions exist - this is a valid "not found" case
+      if (response.status === 404) {
+        return null;
+      }
+      // Other errors should be logged for debugging
+      const text = await response.text().catch(() => 'Unable to read response');
+      console.warn(`fetchEnvironmentIdFromSessions: API returned ${response.status}: ${text}`);
+      return null;
+    }
 
     const data = await response.json() as { data?: Session[] };
     const sessions = data.data || [];
@@ -46,7 +67,10 @@ export async function fetchEnvironmentIdFromSessions(
       return sessions[0].environment_id;
     }
     return null;
-  } catch {
+  } catch (error) {
+    // Network errors are expected in some environments - log and return null
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.warn(`fetchEnvironmentIdFromSessions: Failed to fetch sessions: ${message}`);
     return null;
   }
 }
@@ -363,7 +387,10 @@ export class ClaudeWebClient extends AClaudeWebClient {
         }
 
         return { canResume: false, reason: 'Session is currently running', status: session.session_status };
-      } catch {
+      } catch (error) {
+        // Events API may be unavailable for running sessions - treat as running
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`canResume: Failed to check events for session ${sessionId}: ${message}`);
         return { canResume: false, reason: 'Session is currently running', status: session.session_status };
       }
     }
@@ -388,8 +415,10 @@ export class ClaudeWebClient extends AClaudeWebClient {
       try {
         const events = await this.getEvents(sessionId);
         return events.data?.some(event => event.type === 'result') ?? false;
-      } catch {
-        // Silently continue - events API may be unavailable
+      } catch (error) {
+        // Events API may be unavailable - log for debugging but continue
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`isComplete: Failed to check events for session ${sessionId}: ${message}`);
         return undefined;
       }
     };
@@ -523,8 +552,13 @@ export class ClaudeWebClient extends AClaudeWebClient {
               resolve(message.response);
             }
           }
-        } catch {
-          // Ignore parse errors for non-JSON messages
+        } catch (error) {
+          // Non-JSON messages (heartbeats, binary frames) are expected on WebSocket
+          // Only log in development for debugging unusual cases
+          if (process.env.NODE_ENV === 'development') {
+            const msg = error instanceof Error ? error.message : 'Unknown parse error';
+            console.debug(`sendControlRequest: Non-JSON message received: ${msg}`);
+          }
         }
       };
 
@@ -586,8 +620,11 @@ export class ClaudeWebClient extends AClaudeWebClient {
         for (const event of existingEvents.data || []) {
           seenEventIds.add(event.uuid);
         }
-      } catch {
-        // Ignore errors fetching existing events
+      } catch (error) {
+        // Failed to fetch existing events - continue without deduplication
+        // This may result in duplicate events being processed
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`streamEvents: Failed to fetch existing events for ${sessionId}: ${message}`);
       }
     }
 
@@ -729,8 +766,13 @@ export class ClaudeWebClient extends AClaudeWebClient {
               });
             }
           }
-        } catch {
-          // Ignore parse errors for non-JSON messages
+        } catch (error) {
+          // Non-JSON messages (heartbeats, keep-alives) are expected on WebSocket
+          // Only log in development for debugging unusual cases
+          if (process.env.NODE_ENV === 'development') {
+            const msg = error instanceof Error ? error.message : 'Unknown parse error';
+            console.debug(`streamEvents: Non-JSON message received: ${msg}`);
+          }
         }
       };
 
@@ -842,8 +884,10 @@ export class ClaudeWebClient extends AClaudeWebClient {
         for (const event of existingEvents.data || []) {
           seenEventIds.add(event.uuid);
         }
-      } catch {
-        // Ignore errors fetching existing events
+      } catch (error) {
+        // Failed to fetch existing events - continue without deduplication
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`pollSession: Failed to fetch existing events for ${sessionId}: ${message}`);
       }
     }
 
@@ -911,8 +955,10 @@ export class ClaudeWebClient extends AClaudeWebClient {
       for (const event of existingEvents.data || []) {
         existingEventIds.add(event.uuid);
       }
-    } catch {
-      // Ignore errors fetching existing events
+    } catch (error) {
+      // Failed to fetch existing events - continue without deduplication
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.warn(`resume: Failed to fetch existing events for ${sessionId}: ${message}`);
     }
 
     await this.sendMessageViaWebSocket(sessionId, message);

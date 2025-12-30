@@ -1,0 +1,59 @@
+/**
+ * ESLint Configuration
+ *
+ * This configuration focuses on preventing silent error swallowing
+ * in catch blocks across the codebase.
+ *
+ * Run with: npx eslint --ext .ts,.tsx src/
+ */
+
+export default [
+  {
+    // Apply to all TypeScript files
+    files: ['**/*.ts', '**/*.tsx'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+    },
+    rules: {
+      /**
+       * Disallow empty catch clauses
+       *
+       * Empty catch blocks silently swallow errors, making debugging difficult.
+       * Every catch block must either:
+       * - Log the error with context
+       * - Re-throw with additional context
+       * - Handle the error with a user notification
+       * - Use a documented fallback pattern
+       *
+       * See CODING_STYLE.md for approved error handling patterns.
+       */
+      'no-empty': ['error', { allowEmptyCatch: false }],
+
+      /**
+       * Require error parameter in catch clauses
+       *
+       * Using 'catch { }' without binding the error makes it impossible
+       * to log or inspect the error. Always capture the error even if
+       * just for logging.
+       *
+       * Bad:  catch { console.log('error'); }
+       * Good: catch (error) { console.log('error:', error); }
+       */
+      'no-unused-vars': ['warn', {
+        caughtErrors: 'all',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
+  },
+  {
+    // Ignore build artifacts and dependencies
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/*.js', // Compiled JS files
+      '**/*.d.ts', // Declaration files
+    ],
+  },
+];

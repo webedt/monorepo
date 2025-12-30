@@ -160,7 +160,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     if (typeof github === 'string') {
       try {
         github = JSON.parse(github);
-      } catch {
+      } catch (error) {
+        // Log parse error for debugging, then treat as if no github config was provided
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        logger.warn('Failed to parse github parameter as JSON:', { error: message, rawValue: github.slice(0, 100) });
         github = undefined;
       }
     }
@@ -593,7 +596,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       if (!clientDisconnected) {
         try {
           res.write(': heartbeat\n\n');
-        } catch {
+        } catch (error) {
+          // Client likely disconnected - stop sending heartbeats
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          logger.debug('Heartbeat write failed, stopping interval:', { chatSessionId, error: message });
           clearInterval(heartbeatInterval);
         }
       } else {

@@ -76,8 +76,9 @@ abstract methodName(
 
 ### Error Handling
 
-- Create custom error classes extending `Error`
-- Include relevant context (status codes, response text)
+#### Custom Error Classes
+
+Create custom error classes extending `Error` with relevant context:
 
 ```typescript
 export class ClaudeRemoteError extends Error {
@@ -91,6 +92,131 @@ export class ClaudeRemoteError extends Error {
   }
 }
 ```
+
+#### Catch Block Patterns
+
+**NEVER** use empty catch blocks or swallow errors silently. Every catch block must do ONE of the following:
+
+##### Pattern 1: Re-throw (for critical errors)
+Use when the caller needs to handle the error:
+```typescript
+try {
+  await criticalOperation();
+} catch (error) {
+  // Add context and re-throw
+  throw new AppError(`Failed to perform critical operation: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
+}
+```
+
+##### Pattern 2: Wrap and Throw (for API boundaries)
+Use at API boundaries to provide consistent error responses:
+```typescript
+try {
+  const data = await fetchData();
+  return data;
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+  logger.error('Data fetch failed', error, { component: 'DataService' });
+  throw new ServiceError(`Data fetch failed: ${message}`, { statusCode: 500, cause: error });
+}
+```
+
+##### Pattern 3: Recover with Fallback (for non-critical operations)
+Use when a sensible fallback exists AND the caller doesn't need to know about the failure:
+```typescript
+try {
+  const cached = await cache.get(key);
+  return cached;
+} catch (error) {
+  // Log the failure for debugging, then use fallback
+  logger.warn('Cache read failed, using fallback', { key, error: error instanceof Error ? error.message : 'Unknown' });
+  return defaultValue;
+}
+```
+
+##### Pattern 4: User Notification (for frontend)
+Use in UI code when the user should be informed:
+```typescript
+try {
+  await saveDocument();
+  toast.success('Document saved');
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'Failed to save document';
+  logger.error('Document save failed', error);
+  toast.error(message);
+  // Optionally re-throw if parent component needs to handle
+}
+```
+
+##### Pattern 5: Fire-and-Forget with Logging (for telemetry/analytics)
+Use ONLY for truly optional background operations:
+```typescript
+try {
+  await analytics.track('page_view', { page: 'home' });
+} catch (error) {
+  // Log but don't propagate - analytics failure shouldn't break the app
+  logger.warn('Analytics tracking failed', { error: error instanceof Error ? error.message : 'Unknown' });
+}
+```
+
+#### Anti-Patterns to AVOID
+
+```typescript
+// ❌ NEVER: Empty catch block
+try { await operation(); } catch { }
+
+// ❌ NEVER: Silent catch with comment
+try { await operation(); } catch { /* ignore */ }
+
+// ❌ NEVER: Return null without logging
+try { return await fetchData(); } catch { return null; }
+
+// ❌ NEVER: console.log only (use logger)
+try { await operation(); } catch (e) { console.log(e); }
+
+// ❌ NEVER: Catch without error type check
+try { await operation(); } catch (e) {
+  // What if e is not an Error? Always check!
+  throw new Error(e.message); // Could crash if e is not an Error
+}
+```
+
+#### Error Type Guards
+
+Always check error types before accessing properties:
+
+```typescript
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return 'Unknown error occurred';
+}
+
+// Usage
+try {
+  await operation();
+} catch (error) {
+  logger.error('Operation failed', { error: getErrorMessage(error) });
+  throw new AppError(`Operation failed: ${getErrorMessage(error)}`, { cause: error });
+}
+```
+
+#### When to Use Each Pattern
+
+| Scenario | Pattern | Example |
+|----------|---------|---------|
+| Database operations | Re-throw | Query failures should propagate |
+| API calls | Wrap and Throw | Add HTTP status context |
+| Cache reads | Recover with Fallback | Missing cache isn't critical |
+| User actions | User Notification | Show toast/alert |
+| Background sync | Fire-and-Forget | Log only, don't block UI |
+| Authentication | Re-throw | Auth errors must propagate |
+| File parsing | Wrap and Throw | Add file path context |
+| Optional features | Recover with Fallback | Feature flag checks |
 
 ## Reference Examples
 

@@ -37,16 +37,22 @@ export class WorkerStore extends Store<WorkerState> {
           this.setState(parsed);
         }
       }
-    } catch {
-      // Ignore parse errors
+    } catch (error) {
+      // Storage parsing failed - continue with default state
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.debug('WorkerStore: Failed to restore from sessionStorage:', message);
     }
 
     // Save on changes
     this.subscribe((state) => {
       try {
         sessionStorage.setItem('workerStore', JSON.stringify(state));
-      } catch {
-        // Ignore storage errors
+      } catch (error) {
+        // Storage save failed - log in development only
+        if (process.env.NODE_ENV === 'development') {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          console.warn('WorkerStore: Failed to save to sessionStorage:', message);
+        }
       }
     });
   }
