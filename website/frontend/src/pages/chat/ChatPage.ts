@@ -341,7 +341,9 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Load event filters (only used in detailed mode)
       this.eventFilters = chatEventFiltersStorage.get();
     } catch (error) {
-      console.warn('Failed to load chat settings:', error);
+      // Settings load failure is non-critical - use defaults
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('Failed to load chat settings, using defaults:', { error: message });
     }
   }
 
@@ -666,7 +668,10 @@ export class ChatPage extends Page<ChatPageOptions> {
           const data = JSON.parse(event.data);
           this.handleStreamEvent({ ...data, type: eventType });
         } catch (error) {
-          console.error(`Failed to parse ${eventType} event:`, error);
+          // Log stream parsing errors with context for debugging
+          // Note: Don't log rawData to avoid exposing potentially sensitive information
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          console.error('Failed to parse SSE event:', { eventType, error: message });
         }
       });
     }
@@ -737,7 +742,15 @@ export class ChatPage extends Page<ChatPageOptions> {
 
       this.renderContent();
     } catch (error) {
-      console.error('Failed to load messages:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to load messages:', { error: message, sessionId: this.session?.id });
+      // Show error message to user
+      this.addMessage({
+        id: `error-${Date.now()}`,
+        type: 'error',
+        content: `Failed to load messages: ${message}`,
+        timestamp: new Date(),
+      });
     }
   }
 
@@ -1175,7 +1188,10 @@ export class ChatPage extends Page<ChatPageOptions> {
           const data = JSON.parse(event.data);
           this.handleStreamEvent({ ...data, type: eventType });
         } catch (error) {
-          console.error(`Failed to parse ${eventType} event:`, error);
+          // Log stream parsing errors with context for debugging
+          // Note: Don't log rawData to avoid exposing potentially sensitive information
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          console.error('Failed to parse resume SSE event:', { eventType, error: message });
         }
       });
     }
@@ -1724,8 +1740,9 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.updateSendButton();
       toast.success('Image attached');
     } catch (error) {
-      console.error('Failed to process image:', error);
-      toast.error('Failed to process image');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to process image:', { error: message, fileName: file.name, fileSize: file.size });
+      toast.error(`Failed to process image: ${message}`);
     }
   }
 
