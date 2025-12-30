@@ -11,6 +11,13 @@ import {
   type RecoveryAction,
 } from '../utils/errors.js';
 import {
+  getZodIssueMinimum,
+  getZodIssueMaximum,
+  getZodIssueInclusive,
+  getZodIssueOptions,
+  getZodIssueValidation,
+} from '../utils/typeGuards.js';
+import {
   migrateConfig,
   needsMigration,
   checkDeprecatedFields,
@@ -331,9 +338,9 @@ function getValidationSuggestion(issue: ZodIssue): string {
         }
       }
       break;
-    case 'too_small':
-      const minimum = (issue as any).minimum;
-      const inclusiveMin = (issue as any).inclusive;
+    case 'too_small': {
+      const minimum = getZodIssueMinimum(issue);
+      const inclusiveMin = getZodIssueInclusive(issue);
       suggestion += `\n    ❌ Value is too small. Minimum: ${minimum}${inclusiveMin ? ' (inclusive)' : ' (exclusive)'}`;
       if (examples?.correct) {
         suggestion += `\n    ✓ Valid range: ${examples.correct}`;
@@ -342,16 +349,18 @@ function getValidationSuggestion(issue: ZodIssue): string {
         suggestion += `\n    ✗ Invalid: ${examples.incorrect}`;
       }
       break;
-    case 'too_big':
-      const maximum = (issue as any).maximum;
-      const inclusiveMax = (issue as any).inclusive;
+    }
+    case 'too_big': {
+      const maximum = getZodIssueMaximum(issue);
+      const inclusiveMax = getZodIssueInclusive(issue);
       suggestion += `\n    ❌ Value is too large. Maximum: ${maximum}${inclusiveMax ? ' (inclusive)' : ' (exclusive)'}`;
       if (examples?.correct) {
         suggestion += `\n    ✓ Valid range: ${examples.correct}`;
       }
       break;
-    case 'invalid_enum_value':
-      const options = (issue as any).options || [];
+    }
+    case 'invalid_enum_value': {
+      const options = getZodIssueOptions(issue) || [];
       suggestion += `\n    ❌ Invalid value. Valid options are: ${options.map((o: string) => `"${o}"`).join(', ')}`;
       if (examples?.correct) {
         suggestion += `\n    ✓ Example: ${examples.correct}`;
@@ -363,17 +372,20 @@ function getValidationSuggestion(issue: ZodIssue): string {
         suggestion += `\n    ✓ Config example: ${examples.jsonExample}`;
       }
       break;
-    case 'invalid_string':
-      if ((issue as any).validation === 'email') {
+    }
+    case 'invalid_string': {
+      const validation = getZodIssueValidation(issue);
+      if (validation === 'email') {
         suggestion += '\n    ❌ Please provide a valid email address.';
         suggestion += '\n    ✓ Example: "user@example.com"';
         suggestion += '\n    ✗ Invalid: "not-an-email" or "user@" or "@domain.com"';
-      } else if ((issue as any).validation === 'url') {
+      } else if (validation === 'url') {
         suggestion += '\n    ❌ Please provide a valid URL.';
         suggestion += '\n    ✓ Example: "https://example.com/webhook"';
         suggestion += '\n    ✗ Invalid: "not-a-url" or "example.com" (missing protocol)';
       }
       break;
+    }
     case 'custom':
       // Handle custom refinement errors (like credential detection)
       if (issue.message.includes('credential')) {

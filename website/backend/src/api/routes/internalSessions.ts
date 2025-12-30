@@ -26,7 +26,7 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, chatSessions, events, users, eq, asc, and, isNull } from '@webedt/shared';
+import { db, chatSessions, events, users, eq, asc, and, isNull, sessionSoftDeleteService } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
@@ -45,6 +45,7 @@ import {
   CLAUDE_ORG_UUID,
   CLAUDE_COOKIES,
   OPENROUTER_API_KEY,
+  getEventType,
 } from '@webedt/shared';
 import {
   registerActiveStream,
@@ -85,7 +86,7 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
       claudeAuth = refreshedAuth;
     }
   } catch (error) {
-    logger.error('Failed to refresh Claude token', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to refresh Claude token', error, { component: 'InternalSessions' });
     return null;
   }
 
@@ -135,7 +136,7 @@ async function storeEvent(chatSessionId: string, eventData: Record<string, unkno
       eventData,
     });
   } catch (error) {
-    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: (eventData as { type?: string } | null)?.type });
+    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: getEventType(eventData) });
   }
 }
 
@@ -202,7 +203,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       lastId: response.last_id,
     });
   } catch (error) {
-    logger.error('Failed to list sessions', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to list sessions', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to list sessions' });
   }
 });
@@ -414,7 +415,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Failed to create session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to create session', error, { component: 'InternalSessions' });
 
     if (chatSessionId) {
       await db.update(chatSessions)
@@ -509,7 +510,7 @@ router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Failed to get session status', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to get session status', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: 'Failed to get session status' });
   }
 });
@@ -564,11 +565,14 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Get all events for this session
+    // Get all non-deleted events for this session
     const sessionEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, id))
+      .where(and(
+        eq(events.chatSessionId, id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     // eventData contains the raw event with type field inside
@@ -581,7 +585,7 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    logger.error('Failed to get session events', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to get session events', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: 'Failed to get session events' });
   }
 });
@@ -651,11 +655,14 @@ const streamHandler = async (req: Request, res: Response) => {
     // Send replay start marker
     sendSSE(res, { type: 'replay_start', sessionId: id, timestamp: new Date().toISOString() });
 
-    // Get all stored events and replay them
+    // Get all stored non-deleted events and replay them
     const storedEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, id))
+      .where(and(
+        eq(events.chatSessionId, id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     for (const event of storedEvents) {
@@ -731,7 +738,7 @@ const streamHandler = async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Failed to stream session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to stream session', error, { component: 'InternalSessions' });
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: 'Failed to stream session' });
     } else {
@@ -924,7 +931,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Failed to resume session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to resume session', error, { component: 'InternalSessions' });
 
     await db.update(chatSessions)
       .set({ status: 'error' })
@@ -1041,7 +1048,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Failed to rename session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to rename session', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to rename session' });
   }
 });
@@ -1118,7 +1125,7 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
       },
     });
   } catch (error) {
-    logger.error('Failed to archive session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to archive session', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to archive session' });
   }
 });
@@ -1173,20 +1180,25 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Soft delete - set deletedAt timestamp
-    await db.update(chatSessions)
-      .set({ deletedAt: new Date() })
-      .where(eq(chatSessions.id, id));
+    // Soft delete with cascading to messages and events
+    const softDeleteResult = await sessionSoftDeleteService.softDeleteSession(id);
+
+    if (!softDeleteResult.success) {
+      res.status(500).json({ success: false, error: softDeleteResult.error });
+      return;
+    }
 
     res.json({
       success: true,
       data: {
         sessionId: id,
         deleted: true,
+        messagesDeleted: softDeleteResult.messagesDeleted,
+        eventsDeleted: softDeleteResult.eventsDeleted,
       },
     });
   } catch (error) {
-    logger.error('Failed to delete session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to delete session', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: 'Failed to delete session' });
   }
 });
@@ -1284,7 +1296,7 @@ router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) =
       },
     });
   } catch (error) {
-    logger.error('Failed to interrupt session', error as Error, { component: 'InternalSessions' });
+    logger.error('Failed to interrupt session', error, { component: 'InternalSessions' });
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to interrupt session' });
   }
 });

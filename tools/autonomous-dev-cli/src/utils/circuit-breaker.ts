@@ -11,6 +11,7 @@
 import { logger } from './logger.js';
 import { metrics } from './metrics.js';
 import { ClaudeError, ErrorCode, type ErrorContext } from './errors.js';
+import { getIsRetryable, getHttpStatusCode } from './typeGuards.js';
 
 /**
  * Circuit breaker states
@@ -388,9 +389,10 @@ export class CircuitBreaker {
    * Check if an error is retryable
    */
   private isRetryableError(error: Error): boolean {
-    // Check for structured error
-    if ('isRetryable' in error && typeof (error as any).isRetryable === 'boolean') {
-      return (error as any).isRetryable;
+    // Check for explicit retryable flag
+    const isRetryable = getIsRetryable(error);
+    if (typeof isRetryable === 'boolean') {
+      return isRetryable;
     }
 
     // Check error message for common retryable patterns
@@ -411,8 +413,8 @@ export class CircuitBreaker {
     }
 
     // Check for HTTP status codes
-    if ('status' in error || 'statusCode' in error) {
-      const status = (error as any).status ?? (error as any).statusCode;
+    const status = getHttpStatusCode(error);
+    if (status !== undefined) {
       if (status === 429 || status === 502 || status === 503 || status === 504 || status >= 500) {
         return true;
       }

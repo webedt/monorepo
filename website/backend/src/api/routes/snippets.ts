@@ -28,7 +28,6 @@ import {
   isValidLanguage,
   isValidCategory,
 } from '@webedt/shared';
-// Type imports removed as types are validated at runtime via isValidLanguage/isValidCategory
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isUniqueConstraintError } from '@webedt/shared';

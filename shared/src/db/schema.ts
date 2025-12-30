@@ -95,6 +95,8 @@ export const chatSessions = pgTable('chat_sessions', {
   // Sharing fields - "public but unlisted" (shareable if you know the link)
   shareToken: text('share_token').unique(), // UUID-based token for sharing
   shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
+  // Optimistic locking - version counter for concurrent update detection
+  version: integer('version').default(1).notNull(), // Increments on each update
 });
 
 export const messages = pgTable('messages', {
@@ -111,6 +113,7 @@ export const messages = pgTable('messages', {
     fileName: string;
   }>>(),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 });
 
 // Raw SSE events table - stores events exactly as received for replay
@@ -122,6 +125,7 @@ export const events = pgTable('events', {
   uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 }, (table) => [
   // Index for efficient UUID-based deduplication queries
   uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),

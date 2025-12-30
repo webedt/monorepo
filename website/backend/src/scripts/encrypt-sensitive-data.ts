@@ -24,7 +24,7 @@
  */
 
 import 'dotenv/config';
-import { db, users, sql } from '@webedt/shared';
+import { db, users, sql, type User } from '@webedt/shared';
 import {
   isEncryptionEnabled,
   validateEncryptionConfig,
@@ -177,8 +177,7 @@ async function migrateUsers(): Promise<MigrationStats> {
           const encryptedFields = encryptUserFields(fieldsToEncrypt);
           await db
             .update(users)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .set(encryptedFields as any)
+            .set(encryptedFields as Partial<User>)
             .where(eq(users.id, user.id));
         }
 

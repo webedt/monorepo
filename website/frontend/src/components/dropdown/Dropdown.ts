@@ -1,5 +1,6 @@
 import { Component, ComponentOptions } from '../base';
 import { Button } from '../button';
+import { sanitizeHtmlPermissive } from '../../lib/sanitize';
 import './dropdown.css';
 
 export type DropdownPosition = 'bottom' | 'bottom-end' | 'top' | 'top-end';
@@ -104,7 +105,8 @@ export class Dropdown extends Component<HTMLDivElement> {
       if (item.icon) {
         const iconSpan = document.createElement('span');
         iconSpan.className = 'dropdown-item-icon';
-        iconSpan.innerHTML = item.icon;
+        // Sanitize icon HTML to prevent XSS from user-provided content
+        iconSpan.innerHTML = sanitizeHtmlPermissive(item.icon);
         button.appendChild(iconSpan);
       }
 

@@ -43,10 +43,7 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
       data: { message: 'Preferred provider updated successfully' },
     });
   } catch (error) {
-    logger.error('Update preferred provider error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updatePreferredProvider',
-    });
+    logger.error('Update preferred provider error', error, { component: 'user', operation: 'updatePreferredProvider' });
     res.status(500).json({ success: false, error: 'Failed to update preferred provider' });
   }
 });
@@ -82,10 +79,7 @@ router.post('/image-resize-setting', requireAuth, async (req: Request, res: Resp
       data: { message: 'Image resize setting updated successfully' },
     });
   } catch (error) {
-    logger.error('Update image resize setting error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateImageResizeSetting',
-    });
+    logger.error('Update image resize setting error', error, { component: 'user', operation: 'updateImageResizeSetting' });
     res.status(500).json({ success: false, error: 'Failed to update image resize setting' });
   }
 });
@@ -132,10 +126,7 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
       data: { message: 'Display name updated successfully' },
     });
   } catch (error) {
-    logger.error('Update display name error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateDisplayName',
-    });
+    logger.error('Update display name error', error, { component: 'user', operation: 'updateDisplayName' });
     res.status(500).json({ success: false, error: 'Failed to update display name' });
   }
 });
@@ -184,10 +175,7 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
       data: { message: 'Voice command keywords updated successfully', keywords: uniqueKeywords },
     });
   } catch (error) {
-    logger.error('Update voice command keywords error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateVoiceCommandKeywords',
-    });
+    logger.error('Update voice command keywords error', error, { component: 'user', operation: 'updateVoiceCommandKeywords' });
     res.status(500).json({ success: false, error: 'Failed to update voice command keywords' });
   }
 });
@@ -222,10 +210,7 @@ router.post('/stop-listening-after-submit', requireAuth, async (req: Request, re
       data: { message: 'Stop listening after submit preference updated successfully' },
     });
   } catch (error) {
-    logger.error('Update stop listening after submit error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateStopListeningAfterSubmit',
-    });
+    logger.error('Update stop listening after submit error', error, { component: 'user', operation: 'updateStopListeningAfterSubmit' });
     res.status(500).json({ success: false, error: 'Failed to update stop listening after submit preference' });
   }
 });
@@ -261,10 +246,7 @@ router.post('/default-landing-page', requireAuth, async (req: Request, res: Resp
       data: { message: 'Default landing page updated successfully' },
     });
   } catch (error) {
-    logger.error('Update default landing page error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateDefaultLandingPage',
-    });
+    logger.error('Update default landing page error', error, { component: 'user', operation: 'updateDefaultLandingPage' });
     res.status(500).json({ success: false, error: 'Failed to update default landing page' });
   }
 });
@@ -302,10 +284,7 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
       data: { message: 'Preferred model updated successfully' },
     });
   } catch (error) {
-    logger.error('Update preferred model error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updatePreferredModel',
-    });
+    logger.error('Update preferred model error', error, { component: 'user', operation: 'updatePreferredModel' });
     res.status(500).json({ success: false, error: 'Failed to update preferred model' });
   }
 });
@@ -341,10 +320,7 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
       data: { message: 'Chat verbosity level updated successfully' },
     });
   } catch (error) {
-    logger.error('Update chat verbosity level error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateChatVerbosityLevel',
-    });
+    logger.error('Update chat verbosity level error', error, { component: 'user', operation: 'updateChatVerbosity' });
     res.status(500).json({ success: false, error: 'Failed to update chat verbosity level' });
   }
 });
@@ -388,10 +364,7 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
       data: { message: 'OpenRouter API key updated successfully' },
     });
   } catch (error) {
-    logger.error('Update OpenRouter API key error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateOpenRouterApiKey',
-    });
+    logger.error('Update OpenRouter API key error', error, { component: 'user', operation: 'updateOpenRouterApiKey' });
     res.status(500).json({ success: false, error: 'Failed to update OpenRouter API key' });
   }
 });
@@ -417,10 +390,7 @@ router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Resp
       data: { message: 'OpenRouter API key removed' },
     });
   } catch (error) {
-    logger.error('Remove OpenRouter API key error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'removeOpenRouterApiKey',
-    });
+    logger.error('Remove OpenRouter API key error', error, { component: 'user', operation: 'removeOpenRouterApiKey' });
     res.status(500).json({ success: false, error: 'Failed to remove OpenRouter API key' });
   }
 });
@@ -478,10 +448,7 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
       data: { message: 'Autocomplete settings updated successfully' },
     });
   } catch (error) {
-    logger.error('Update autocomplete settings error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateAutocompleteSettings',
-    });
+    logger.error('Update autocomplete settings error', error, { component: 'user', operation: 'updateAutocompleteSettings' });
     res.status(500).json({ success: false, error: 'Failed to update autocomplete settings' });
   }
 });
@@ -525,10 +492,7 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Image AI keys updated successfully' },
     });
   } catch (error) {
-    logger.error('Update image AI keys error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateImageAiKeys',
-    });
+    logger.error('Update image AI keys error', error, { component: 'user', operation: 'updateImageAiKeys' });
     res.status(500).json({ success: false, error: 'Failed to update image AI keys' });
   }
 });
@@ -564,10 +528,7 @@ router.post('/image-ai-provider', requireAuth, async (req: Request, res: Respons
       data: { message: 'Image AI provider updated successfully' },
     });
   } catch (error) {
-    logger.error('Update image AI provider error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateImageAiProvider',
-    });
+    logger.error('Update image AI provider error', error, { component: 'user', operation: 'updateImageAiProvider' });
     res.status(500).json({ success: false, error: 'Failed to update image AI provider' });
   }
 });
@@ -603,10 +564,7 @@ router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) 
       data: { message: 'Image AI model updated successfully' },
     });
   } catch (error) {
-    logger.error('Update image AI model error', error as Error, {
-      component: 'UserPreferencesRoutes',
-      operation: 'updateImageAiModel',
-    });
+    logger.error('Update image AI model error', error, { component: 'user', operation: 'updateImageAiModel' });
     res.status(500).json({ success: false, error: 'Failed to update image AI model' });
   }
 });

@@ -26,6 +26,20 @@ export { SessionCleanupService, sessionCleanupService } from './SessionCleanupSe
 export { ATrashCleanupService, type TrashCleanupResult, type TrashCleanupSession } from './ATrashCleanupService.js';
 export { TrashCleanupService, trashCleanupService } from './TrashCleanupService.js';
 
+// Soft delete service (cascading soft deletes for sessions and related data)
+export {
+  ASessionSoftDeleteService,
+  type SoftDeleteResult,
+  type RestoreResult,
+  type BulkSoftDeleteResult,
+  type BulkRestoreResult,
+} from './ASessionSoftDeleteService.js';
+export { SessionSoftDeleteService, sessionSoftDeleteService } from './SessionSoftDeleteService.js';
+
+// Invitation cleanup service (automatic cleanup of expired organization invitations)
+export { AInvitationCleanupService, type InvitationCleanupResult, type ExpiredInvitation } from './AInvitationCleanupService.js';
+export { InvitationCleanupService, invitationCleanupService } from './InvitationCleanupService.js';
+
 // Event storage service
 export { AEventStorageService, type StoredEvent, type StoreEventResult } from './AEventStorageService.js';
 export { EventStorageService, eventStorageService } from './EventStorageService.js';
@@ -53,3 +67,25 @@ export { SessionAuthorizationService, sessionAuthorizationService } from './Sess
 export * from './claudeSessionSync.js';
 export * from './sessionEventBroadcaster.js';
 export * from './sessionListBroadcaster.js';
+
+// Session locking (optimistic and pessimistic locking for concurrent updates)
+export {
+  updateSessionWithOptimisticLock,
+  lockSessionForUpdate,
+  updateSessionStatusWithLock,
+  getSessionWithVersion,
+  isValidStatusTransition,
+  isVersionConflict,
+  isSessionNotFound,
+  isInvalidStatusTransition,
+  isSessionLocked,
+  VersionConflictError,
+  SessionNotFoundError,
+  InvalidStatusTransitionError,
+  SessionLockedError,
+} from './sessionLocking.js';
+export type {
+  SessionStatus,
+  SessionStatusUpdate,
+  OptimisticUpdateResult,
+} from './sessionLocking.js';

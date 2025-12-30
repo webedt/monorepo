@@ -24,7 +24,7 @@
  * - File Operations: File read/write operations - prevents abuse
  */
 
-import rateLimit, { type Options } from 'express-rate-limit';
+import rateLimit, { type Options, type Store } from 'express-rate-limit';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import {
   logger,
@@ -193,12 +193,9 @@ export function getRateLimitDashboard(): {
   storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
   circuitBreakers: Record<string, { state: string; failures: number }>;
 } {
-  // Initialize empty store stats object, will be populated below
-  const storeStats = {} as Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
-
-  for (const [tier, store] of Object.entries(stores)) {
-    storeStats[tier as RateLimitTier] = store.getStats();
-  }
+  const storeStats = Object.fromEntries(
+    Object.entries(stores).map(([tier, store]) => [tier, store.getStats()])
+  ) as Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
 
   const circuitBreakers: Record<string, { state: string; failures: number }> = {};
   const allStats = circuitBreakerRegistry.getAllStats();
@@ -280,9 +277,7 @@ function recordRateLimitHit(tier: RateLimitTier, path: string, ip: string, userI
 
 /**
  * Record a request (for metrics)
- * @param _tier - Rate limit tier (reserved for future per-tier metrics)
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function recordRequest(_tier: RateLimitTier): void {
   rateLimitMetrics.totalRequests++;
 }
@@ -430,14 +425,12 @@ function createEnhancedRateLimiter(
 
   const options: Partial<Options> = {
     windowMs,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     max: (_req: Request) => getEffectiveMaxRequests(tier, maxRequests),
     standardHeaders: true, // Return rate limit info in headers
     legacyHeaders: false, // Disable X-RateLimit-* headers
     skip: createSkipFunction(tier),
     handler: createRateLimitHandler(tier, store),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    store: store as any, // express-rate-limit store interface compatibility
+    store: store as unknown as Store, // SlidingWindowStore implements Store interface
     message: {
       success: false,
       error: 'Too many requests. Please try again later.',

@@ -100,7 +100,6 @@ function truncateContent(content: unknown, maxLength: number = 500): string {
   return str.substring(0, maxLength) + `... (truncated, total length: ${str.length})`;
 }
 
-
 /**
  * Extract image attachments from userRequest for storage
  */
@@ -220,7 +219,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         // Use centralized token refresh service for Gemini tokens
         geminiAuth = await tokenRefreshService.ensureValidGeminiTokenForUser(user.id, geminiAuth);
       } catch (error) {
-        logger.error('Failed to refresh Gemini token', error as Error, { component: 'ExecuteRemoteRoute' });
+        logger.error('Failed to refresh Gemini token', error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Gemini token expired. Please reconnect your Gemini account.' });
         return;
       }
@@ -243,7 +242,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         // Use centralized token refresh service for Claude tokens
         claudeAuth = await tokenRefreshService.ensureValidTokenForUser(user.id, claudeAuth);
       } catch (error) {
-        logger.error('Failed to refresh Claude token', error as Error, { component: 'ExecuteRemoteRoute' });
+        logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
         return;
       }
@@ -279,6 +278,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // Create or load chat session
     const chatSessionId = websiteSessionId || uuidv4();
     // Keep original userRequest (string or content blocks) for API calls
+    // Extract text-only version for serialization (title generation is done elsewhere)
     const serializedRequest = serializeUserRequest(userRequest);
 
     if (websiteSessionId) {
@@ -768,7 +768,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           message: 'Request interrupted by user',
         });
       } else {
-        logger.error('Execute Remote failed', error as Error, {
+        logger.error('Execute Remote failed', error, {
           component: 'ExecuteRemoteRoute',
           chatSessionId,
         });
@@ -802,7 +802,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Execute Remote handler error', error as Error, { component: 'ExecuteRemoteRoute' });
+    logger.error('Execute Remote handler error', error, { component: 'ExecuteRemoteRoute' });
 
     if (!res.headersSent) {
       res.status(500).json({
