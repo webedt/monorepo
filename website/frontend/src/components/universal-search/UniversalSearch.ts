@@ -143,13 +143,15 @@ export class UniversalSearch extends Component<HTMLDivElement> {
     if (!normalizedQuery) return;
 
     // Remove duplicates (case-insensitive) and add to front
+    // ArrayStorage.set() handles maxItems trimming internally
     this.recentSearches = this.recentSearches.filter(
       s => s.toLowerCase() !== normalizedQuery.toLowerCase()
     );
     this.recentSearches.unshift(normalizedQuery);
-    this.recentSearches = this.recentSearches.slice(0, this.options.maxRecentSearches);
 
     this.recentSearchesStorage.set(this.recentSearches);
+    // Update local cache from storage (trimmed)
+    this.recentSearches = this.recentSearchesStorage.get();
   }
 
   private clearRecentSearches(): void {

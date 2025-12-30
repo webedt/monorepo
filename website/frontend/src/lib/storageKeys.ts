@@ -29,7 +29,11 @@ export const STORE_KEYS = {
  * Storage keys for UI preferences
  */
 export const UI_KEYS = {
-  /** Theme preference (light, dark, system, etc.) */
+  /**
+   * Theme preference (light, dark, system, etc.).
+   * Note: Uses ':' separator for legacy compatibility with existing stored themes.
+   * Do not change without migrating existing user data.
+   */
   THEME: `${PREFIX}:theme`,
   /** Chat page view mode (normal, detailed, raw) */
   CHAT_VIEW_MODE: `${PREFIX}_chat_view_mode`,
@@ -56,19 +60,12 @@ export const COMPONENT_KEYS = {
 } as const;
 
 /**
- * Legacy storage keys (for migration purposes)
+ * Legacy storage keys (for migration purposes).
+ * These are old key names that need migration to new prefixed format.
  */
 export const LEGACY_KEYS = {
-  /** Old chat raw JSON toggle */
+  /** Old chat raw JSON toggle - migrated in ChatPage.ts */
   CHAT_SHOW_RAW_JSON: 'chat_showRawJson',
-  /** Old chat view mode */
-  CHAT_VIEW_MODE: 'chat_viewMode',
-  /** Old chat timestamps */
-  CHAT_SHOW_TIMESTAMPS: 'chat_showTimestamps',
-  /** Old chat widescreen */
-  CHAT_WIDESCREEN: 'chat_widescreen',
-  /** Old chat event filters */
-  CHAT_EVENT_FILTERS: 'chat_eventFilters',
 } as const;
 
 /**
