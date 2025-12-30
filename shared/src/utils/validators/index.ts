@@ -8,6 +8,9 @@ import { SNIPPET_LANGUAGES, SNIPPET_CATEGORIES } from '../../db/index.js';
 import { logger } from '../logging/index.js';
 import type { SnippetLanguage, SnippetCategory } from '../../db/index.js';
 
+// Re-export path validation utilities
+export * from './pathValidation.js';
+
 // =============================================================================
 // REGEX PATTERNS
 // =============================================================================
