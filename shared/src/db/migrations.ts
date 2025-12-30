@@ -112,6 +112,18 @@ const EXPECTED_TABLES = [
       'id', 'cycle_id', 'job_id', 'task_number', 'description',
       'can_run_parallel', 'status', 'retry_count'
     ]
+  },
+  {
+    name: 'collections',
+    requiredColumns: [
+      'id', 'user_id', 'name', 'sort_order', 'is_default', 'created_at', 'updated_at'
+    ]
+  },
+  {
+    name: 'session_collections',
+    requiredColumns: [
+      'id', 'session_id', 'collection_id', 'added_at'
+    ]
   }
 ];
 
@@ -566,7 +578,8 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_messages_chat_session_id ON messages(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>'uuid')::text)) WHERE event_data->>'uuid' IS NOT NULL;
+    -- Note: Unique index idx_events_session_uuid is created by ensureSchemaUpToDate()
+    -- which deduplicates events first to avoid constraint violations
 
     -- Live Chat messages table (branch-based chat)
     CREATE TABLE IF NOT EXISTS live_chat_messages (
@@ -692,6 +705,36 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_orchestrator_tasks_cycle ON orchestrator_tasks(cycle_id);
     CREATE INDEX IF NOT EXISTS idx_orchestrator_tasks_job ON orchestrator_tasks(job_id);
     CREATE INDEX IF NOT EXISTS idx_orchestrator_tasks_status ON orchestrator_tasks(status);
+
+    -- Collections table - user-created folders for organizing sessions
+    CREATE TABLE IF NOT EXISTS collections (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      color TEXT,
+      icon TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_default BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Session-Collection junction table (many-to-many)
+    CREATE TABLE IF NOT EXISTS session_collections (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+      added_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Indexes for collections
+    CREATE UNIQUE INDEX IF NOT EXISTS collection_user_name_idx ON collections(user_id, name);
+    CREATE INDEX IF NOT EXISTS idx_collections_user ON collections(user_id);
+    CREATE INDEX IF NOT EXISTS idx_collections_sort ON collections(sort_order);
+    CREATE UNIQUE INDEX IF NOT EXISTS session_collection_unique_idx ON session_collections(session_id, collection_id);
+    CREATE INDEX IF NOT EXISTS idx_session_collections_session ON session_collections(session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_collections_collection ON session_collections(collection_id);
   `);
 }
 
