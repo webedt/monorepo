@@ -414,11 +414,12 @@ export class GameAchievementService extends AGameAchievementService {
     userId: string,
     callback: GamePlatformEventCallback
   ): () => void {
-    if (!this.eventSubscribers.has(userId)) {
-      this.eventSubscribers.set(userId, new Set());
+    let subscribers = this.eventSubscribers.get(userId);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.eventSubscribers.set(userId, subscribers);
     }
-    const subscribers = this.eventSubscribers.get(userId);
-    subscribers?.add(callback);
+    subscribers.add(callback);
 
     return () => {
       this.eventSubscribers.get(userId)?.delete(callback);
