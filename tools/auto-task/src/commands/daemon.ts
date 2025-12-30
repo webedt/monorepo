@@ -469,6 +469,13 @@ async function discoverTasksWithClaude(
     return;
   }
 
+  const claudeClient = new ClaudeWebClient({
+    accessToken: claudeAuth.accessToken,
+    environmentId,
+  });
+
+  let sessionId: string | undefined;
+
   try {
     const gitUrl = `https://github.com/${owner}/${repo}`;
 
@@ -500,19 +507,15 @@ Format your response as a JSON array:
 Note: Existing tasks are: ${Array.from(existingTitles).slice(0, 20).join(', ')}
 Do NOT suggest tasks that duplicate these existing ones.`;
 
-    const claudeClient = new ClaudeWebClient({
-      accessToken: claudeAuth.accessToken,
-      environmentId,
-    });
-
     console.log('   Starting AI task discovery session...');
-    const { sessionId, webUrl } = await claudeClient.createSession({
+    const result = await claudeClient.createSession({
       prompt,
       gitUrl,
       title: 'Auto-task discovery',
     });
+    sessionId = result.sessionId;
 
-    console.log(`   Discovery session: ${webUrl}`);
+    console.log(`   Discovery session: ${result.webUrl}`);
 
     // Wait for the session to complete (with timeout)
     const maxWaitMs = 5 * 60 * 1000; // 5 minutes
@@ -609,15 +612,18 @@ Do NOT suggest tasks that duplicate these existing ones.`;
     }
 
     console.log(`   Created ${created} AI-discovered issues`);
-
-    // Archive the discovery session
-    try {
-      await claudeClient.archiveSession(sessionId);
-    } catch {
-      // Ignore archive errors
-    }
   } catch (error) {
     console.error(`   AI discovery failed: ${error}`);
+  } finally {
+    // Always archive the discovery session when finished (success, failure, or timeout)
+    if (sessionId) {
+      try {
+        await claudeClient.archiveSession(sessionId);
+        console.log(`   Discovery session archived`);
+      } catch {
+        // Ignore archive errors
+      }
+    }
   }
 }
 
