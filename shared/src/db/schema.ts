@@ -17,10 +17,18 @@ export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin
 
 /**
  * Check if a role has at least the required permission level
+ * Returns false for unknown roles to ensure security
  */
 export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
   const userLevel = ROLE_HIERARCHY.indexOf(userRole);
   const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+
+  // Return false if either role is unknown (indexOf returns -1)
+  // This ensures unknown roles never grant access
+  if (userLevel === -1 || requiredLevel === -1) {
+    return false;
+  }
+
   return userLevel >= requiredLevel;
 }
 
