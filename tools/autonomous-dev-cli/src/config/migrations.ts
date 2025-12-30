@@ -11,6 +11,7 @@ import { CURRENT_CONFIG_VERSION, type ConfigVersion, SUPPORTED_CONFIG_VERSIONS }
 // Re-export CURRENT_CONFIG_VERSION for convenience
 export { CURRENT_CONFIG_VERSION, SUPPORTED_CONFIG_VERSIONS } from './schema.js';
 import { logger } from '../utils/logger.js';
+import { hasProperty } from '../utils/typeGuards.js';
 
 /**
  * Result of a migration operation
@@ -233,7 +234,7 @@ migrations.set(1, (config: Record<string, unknown>) => {
   }
 
   // Check for any deprecated fields and warn
-  if ((config as any).debug !== undefined) {
+  if (hasProperty(config, 'debug')) {
     warnings.push(
       'The "debug" field is deprecated. Use "logging.level: debug" instead. ' +
       'Example: { "logging": { "level": "debug" } }'
@@ -242,11 +243,11 @@ migrations.set(1, (config: Record<string, unknown>) => {
       type: 'deprecated',
       path: 'debug',
       description: 'Field deprecated in favor of logging.level',
-      oldValue: (config as any).debug,
+      oldValue: config.debug,
     });
   }
 
-  if ((config as any).verbose !== undefined) {
+  if (hasProperty(config, 'verbose')) {
     warnings.push(
       'The "verbose" field is deprecated. Use "logging.level: debug" instead. ' +
       'Example: { "logging": { "level": "debug" } }'
@@ -255,7 +256,7 @@ migrations.set(1, (config: Record<string, unknown>) => {
       type: 'deprecated',
       path: 'verbose',
       description: 'Field deprecated in favor of logging.level',
-      oldValue: (config as any).verbose,
+      oldValue: config.verbose,
     });
   }
 
