@@ -178,7 +178,8 @@ export class MidiParser {
     let trackName: string | undefined;
 
     // Note tracking for duration calculation
-    const activeNotes: Map<string, { event: MidiEvent; startTime: number }> = new Map();
+    // Use an array to handle overlapping notes of the same pitch (multiple instances)
+    const activeNotes: Map<string, { event: MidiEvent; startTime: number }[]> = new Map();
     const notes: MidiNoteEvent[] = [];
 
     while (this.position < endPosition) {
@@ -198,24 +199,33 @@ export class MidiParser {
         // Track note on/off for duration calculation
         if (event.type === 'noteOn' && event.velocity > 0) {
           const key = `${event.channel}-${event.note}`;
-          activeNotes.set(key, { event, startTime: absoluteTime });
+          const existing = activeNotes.get(key) || [];
+          existing.push({ event, startTime: absoluteTime });
+          activeNotes.set(key, existing);
         } else if (event.type === 'noteOff' || (event.type === 'noteOn' && event.velocity === 0)) {
           const key = `${event.channel}-${event.note}`;
-          const activeNote = activeNotes.get(key);
-          if (activeNote && activeNote.event.type === 'noteOn') {
-            const noteEvent = activeNote.event;
-            const duration = absoluteTime - activeNote.startTime;
-            notes.push({
-              note: noteEvent.note,
-              noteName: this.midiNoteToName(noteEvent.note),
-              velocity: noteEvent.velocity,
-              channel: noteEvent.channel,
-              startTime: activeNote.startTime,
-              duration,
-              startTimeSeconds: 0, // Will be calculated later
-              durationSeconds: 0, // Will be calculated later
-            });
-            activeNotes.delete(key);
+          const activeList = activeNotes.get(key);
+          if (activeList && activeList.length > 0) {
+            // Get the first (oldest) active note for this pitch (FIFO)
+            const activeNote = activeList.shift()!;
+            if (activeNote.event.type === 'noteOn') {
+              const noteEvent = activeNote.event;
+              const duration = absoluteTime - activeNote.startTime;
+              notes.push({
+                note: noteEvent.note,
+                noteName: this.midiNoteToName(noteEvent.note),
+                velocity: noteEvent.velocity,
+                channel: noteEvent.channel,
+                startTime: activeNote.startTime,
+                duration,
+                startTimeSeconds: 0, // Will be calculated later
+                durationSeconds: 0, // Will be calculated later
+              });
+            }
+            // Clean up empty arrays
+            if (activeList.length === 0) {
+              activeNotes.delete(key);
+            }
           }
         }
 
@@ -428,7 +438,14 @@ export class MidiParser {
 
       case 0x51: // Set Tempo
         baseEvent.subtype = 'setTempo';
-        baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        // Tempo requires 3 bytes
+        if (data.length >= 3) {
+          const tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+          // Protect against zero tempo (would cause division by zero in BPM calculation)
+          baseEvent.tempo = tempo > 0 ? tempo : 500000; // Default to 120 BPM
+        } else {
+          baseEvent.tempo = 500000; // Default to 120 BPM
+        }
         break;
 
       case 0x54: // SMPTE Offset
@@ -437,16 +454,30 @@ export class MidiParser {
 
       case 0x58: // Time Signature
         baseEvent.subtype = 'timeSignature';
-        baseEvent.numerator = data[0];
-        baseEvent.denominator = Math.pow(2, data[1]);
-        baseEvent.metronome = data[2];
-        baseEvent.thirtyseconds = data[3];
+        // Time signature requires at least 4 bytes
+        if (data.length >= 4) {
+          baseEvent.numerator = data[0];
+          baseEvent.denominator = Math.pow(2, data[1]);
+          baseEvent.metronome = data[2];
+          baseEvent.thirtyseconds = data[3];
+        } else {
+          // Use defaults for malformed time signature data
+          baseEvent.numerator = 4;
+          baseEvent.denominator = 4;
+        }
         break;
 
       case 0x59: // Key Signature
         baseEvent.subtype = 'keySignature';
-        baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
-        baseEvent.scale = data[1];
+        // Key signature requires 2 bytes
+        if (data.length >= 2) {
+          baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
+          baseEvent.scale = data[1];
+        } else {
+          // Default to C major
+          baseEvent.key = 0;
+          baseEvent.scale = 0;
+        }
         break;
 
       case 0x7f: // Sequencer Specific
