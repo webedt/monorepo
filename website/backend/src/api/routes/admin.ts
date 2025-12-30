@@ -110,7 +110,7 @@ router.get('/users', requireAdmin, async (req, res) => {
 
     sendSuccess(res, allUsers);
   } catch (error) {
-    logger.error('Error fetching users', error, { component: 'admin', operation: 'listUsers' });
+    logger.error('Error fetching users', error as Error, { component: 'admin', operation: 'listUsers' });
     sendInternalError(res, 'Failed to fetch users');
   }
 });
@@ -180,7 +180,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
 
     sendSuccess(res, user[0]);
   } catch (error) {
-    logger.error('Error fetching user', error, { component: 'admin', operation: 'getUser' });
+    logger.error('Error fetching user', error as Error, { component: 'admin', operation: 'getUser', targetUserId: req.params.id });
     sendInternalError(res, 'Failed to fetch user');
   }
 });
@@ -297,7 +297,7 @@ router.post('/users', requireAdmin, validateRequest(createUserSchema), async (re
 
     sendSuccess(res, newUser[0], 201);
   } catch (error) {
-    logger.error('Error creating user', error, { component: 'admin', operation: 'createUser' });
+    logger.error('Error creating user', error as Error, { component: 'admin', operation: 'createUser' });
     sendInternalError(res, 'Failed to create user');
   }
 });
@@ -425,7 +425,7 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
 
     sendSuccess(res, updatedUser[0]);
   } catch (error) {
-    logger.error('Error updating user', error, { component: 'admin', operation: 'updateUser' });
+    logger.error('Error updating user', error as Error, { component: 'admin', operation: 'updateUser', targetUserId: req.params.id });
     sendInternalError(res, 'Failed to update user');
   }
 });
@@ -500,7 +500,7 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
 
     sendSuccess(res, { id: deletedUser[0].id });
   } catch (error) {
-    logger.error('Error deleting user', error, { component: 'admin', operation: 'deleteUser' });
+    logger.error('Error deleting user', error as Error, { component: 'admin', operation: 'deleteUser', targetUserId: req.params.id });
     sendInternalError(res, 'Failed to delete user');
   }
 });
@@ -596,7 +596,7 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
       userId: id
     });
   } catch (error) {
-    logger.error('Error impersonating user', error, {
+    logger.error('Error impersonating user', error as Error, {
       component: 'admin',
       operation: 'impersonate',
       targetUserId: req.params.id
@@ -659,7 +659,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
       activeSessions: Number(activeSessions[0].count),
     });
   } catch (error) {
-    logger.error('Error fetching stats', error, { component: 'admin', operation: 'getStats' });
+    logger.error('Error fetching stats', error as Error, { component: 'admin', operation: 'getStats' });
     sendInternalError(res, 'Failed to fetch statistics');
   }
 });
@@ -739,7 +739,7 @@ router.get('/rate-limits', requireAdmin, async (req, res) => {
     const dashboard = getRateLimitDashboard();
     sendSuccess(res, dashboard);
   } catch (error) {
-    logger.error('Error fetching rate limit dashboard', error, { component: 'admin', operation: 'getRateLimits' });
+    logger.error('Error fetching rate limit dashboard', error as Error, { component: 'admin', operation: 'getRateLimits' });
     sendInternalError(res, 'Failed to fetch rate limit dashboard');
   }
 });
@@ -792,7 +792,7 @@ router.post('/rate-limits/reset', requireAdmin, async (req, res) => {
       resetAt: new Date().toISOString(),
     });
   } catch (error) {
-    logger.error('Error resetting rate limit metrics', error, { component: 'admin', operation: 'resetRateLimits' });
+    logger.error('Error resetting rate limit metrics', error as Error, { component: 'admin', operation: 'resetRateLimits' });
     sendInternalError(res, 'Failed to reset rate limit metrics');
   }
 });
