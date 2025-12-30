@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { db, chatSessions, eq, and, isNull, logger, withGitHubResilience, GitHubOperations } from '@webedt/shared';
+import { db, chatSessions, eq, and, isNull, logger, withGitHubResilience, GitHubOperations, sessionSoftDeleteService } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -440,15 +440,21 @@ router.post('/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: Request
             });
           }
 
-          // Soft-delete the session (move to trash)
-          await db
-            .update(chatSessions)
-            .set({ deletedAt: new Date() })
-            .where(eq(chatSessions.id, sessionId));
+          // Soft-delete the session (move to trash) with cascading to messages and events
+          const softDeleteResult = await sessionSoftDeleteService.softDeleteSession(sessionId);
 
-          logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
-            component: 'GitHub'
-          });
+          if (softDeleteResult.success) {
+            logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
+              component: 'GitHub',
+              messagesDeleted: softDeleteResult.messagesDeleted,
+              eventsDeleted: softDeleteResult.eventsDeleted,
+            });
+          } else {
+            logger.warn(`Failed to soft-delete session ${sessionId} after Auto PR`, {
+              component: 'GitHub',
+              error: softDeleteResult.error,
+            });
+          }
         } else {
           logger.warn('Session not found for cleanup - may have wrong userId or already deleted', {
             component: 'GitHub',
