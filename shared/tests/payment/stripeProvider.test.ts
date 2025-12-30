@@ -1,36 +1,59 @@
 /**
  * Unit Tests for Stripe Payment Provider
  *
- * Tests all Stripe-specific payment processing functionality including:
- * - Status mapping functions (tested via public API)
- * - Currency code validation
- * - Metadata sanitization
- * - Refund reason mapping
- * - Webhook signature verification
+ * Tests Stripe-specific payment processing functionality including:
  * - Checkout session creation and retrieval
  * - Payment intent operations
  * - Refund processing
+ * - Webhook signature verification
  * - Health checks
  * - Error handling
  *
- * Note: These tests use a custom StripeProvider subclass with mocked Stripe SDK
- * to enable testing without actual API calls. The status mapping and utility
- * functions are tested indirectly through the public API.
+ * ## Testing Approach
+ *
+ * These tests use a TestableStripeProvider class that wraps a mock Stripe SDK.
+ * The utility functions (status mapping, currency validation, metadata sanitization)
+ * are imported from the shared utils.ts module, ensuring tests validate the same
+ * logic used in production.
+ *
+ * For direct unit tests of utility functions, see utils.test.ts.
+ *
+ * ## Limitations
+ *
+ * Due to Node.js 22's lack of mock.module() support, we cannot directly mock
+ * the Stripe SDK import. Instead, we use dependency injection to pass a mock
+ * Stripe client to the TestableStripeProvider. This tests the same business
+ * logic patterns as the production StripeProvider class.
  */
 
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert';
 
+// Import actual utility functions from production code
+import {
+  isStripeNotFoundError,
+  mapRefundReason,
+  mapStripeCheckoutStatus,
+  mapStripeEventType,
+  mapStripeStatus,
+  sanitizeMetadata,
+  toCurrencyCode,
+} from '../../src/payment/utils.js';
+
 import type { CurrencyCode } from '../../src/payment/types.js';
 import type { CheckoutSession } from '../../src/payment/types.js';
 import type { PaymentIntent } from '../../src/payment/types.js';
 import type { PaymentMetadata } from '../../src/payment/types.js';
-import type { PaymentStatus } from '../../src/payment/types.js';
 import type { ProviderHealthStatus } from '../../src/payment/types.js';
 import type { RefundResult } from '../../src/payment/types.js';
 import type { WebhookVerification } from '../../src/payment/types.js';
 
-// Create a testable version of StripeProvider with injectable mock
+/**
+ * Testable version of StripeProvider with injectable mock Stripe SDK.
+ *
+ * Uses the actual utility functions from utils.ts to ensure tests validate
+ * the same logic as production code.
+ */
 class TestableStripeProvider {
   readonly provider = 'stripe' as const;
   private stripe: MockStripe;
@@ -41,76 +64,8 @@ class TestableStripeProvider {
     this.webhookSecret = webhookSecret;
   }
 
-  // Re-implement the status mapping functions for testing
-  private mapStripeStatus(status: string): PaymentStatus {
-    switch (status) {
-      case 'succeeded':
-        return 'succeeded';
-      case 'processing':
-        return 'processing';
-      case 'requires_payment_method':
-      case 'requires_confirmation':
-      case 'requires_action':
-        return 'requires_action';
-      case 'canceled':
-        return 'cancelled';
-      default:
-        return 'pending';
-    }
-  }
-
-  private mapStripeCheckoutStatus(
-    status: string | null,
-    paymentStatus: string | null
-  ): PaymentStatus {
-    if (status === 'complete' && paymentStatus === 'paid') {
-      return 'succeeded';
-    }
-    if (status === 'expired') {
-      return 'cancelled';
-    }
-    if (paymentStatus === 'unpaid') {
-      return 'pending';
-    }
-    return 'pending';
-  }
-
-  private mapStripeEventType(type: string): string | null {
-    const mapping: Record<string, string> = {
-      'checkout.session.completed': 'checkout.session.completed',
-      'checkout.session.expired': 'checkout.session.expired',
-      'payment_intent.succeeded': 'payment_intent.succeeded',
-      'payment_intent.payment_failed': 'payment_intent.payment_failed',
-      'payment_intent.canceled': 'payment_intent.cancelled',
-      'charge.refunded': 'charge.refunded',
-      'charge.dispute.created': 'charge.dispute.created',
-    };
-    return mapping[type] || null;
-  }
-
-  private toCurrencyCode(currency: string): CurrencyCode {
-    const validCodes: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
-    const upper = currency.toUpperCase() as CurrencyCode;
-    return validCodes.includes(upper) ? upper : 'USD';
-  }
-
-  private sanitizeMetadata(metadata: PaymentMetadata): Record<string, string> {
-    const sanitized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(metadata)) {
-      if (value !== undefined) {
-        sanitized[key] = String(value);
-      }
-    }
-    return sanitized;
-  }
-
-  private mapRefundReason(reason?: string): 'duplicate' | 'fraudulent' | 'requested_by_customer' | undefined {
-    if (!reason) return 'requested_by_customer';
-    const lowerReason = reason.toLowerCase();
-    if (lowerReason.includes('duplicate')) return 'duplicate';
-    if (lowerReason.includes('fraud')) return 'fraudulent';
-    return 'requested_by_customer';
-  }
+  // Note: Utility functions are imported from utils.ts, not re-implemented here.
+  // This ensures tests validate the actual production logic.
 
   async createCheckoutSession(request: {
     customer: { id: string; email: string };
@@ -143,7 +98,7 @@ class TestableStripeProvider {
         },
         quantity: item.quantity,
       })),
-      metadata: this.sanitizeMetadata(request.metadata),
+      metadata: sanitizeMetadata(request.metadata),
       success_url: request.successUrl,
       cancel_url: request.cancelUrl,
       expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
@@ -153,7 +108,7 @@ class TestableStripeProvider {
       id: session.id,
       provider: 'stripe',
       url: session.url || '',
-      status: this.mapStripeCheckoutStatus(session.status, session.payment_status),
+      status: mapStripeCheckoutStatus(session.status, session.payment_status),
       expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : undefined,
       metadata: request.metadata,
     };
@@ -167,12 +122,12 @@ class TestableStripeProvider {
         id: session.id,
         provider: 'stripe',
         url: session.url || '',
-        status: this.mapStripeCheckoutStatus(session.status, session.payment_status),
+        status: mapStripeCheckoutStatus(session.status, session.payment_status),
         expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : undefined,
         metadata: (session.metadata as PaymentMetadata) || {},
       };
     } catch (error) {
-      if ((error as { code?: string }).code === 'resource_missing') {
+      if (isStripeNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -188,7 +143,7 @@ class TestableStripeProvider {
     const intent = await this.stripe.paymentIntents.create({
       amount: request.amount.amount,
       currency: request.amount.currency.toLowerCase(),
-      metadata: this.sanitizeMetadata(request.metadata),
+      metadata: sanitizeMetadata(request.metadata),
       description: request.description,
       automatic_payment_methods: { enabled: true },
     });
@@ -197,10 +152,10 @@ class TestableStripeProvider {
       id: intent.id,
       provider: 'stripe',
       clientSecret: intent.client_secret || undefined,
-      status: this.mapStripeStatus(intent.status),
+      status: mapStripeStatus(intent.status),
       amount: {
         amount: intent.amount,
-        currency: this.toCurrencyCode(intent.currency),
+        currency: toCurrencyCode(intent.currency),
       },
       metadata: request.metadata,
       createdAt: new Date(intent.created * 1000),
@@ -215,16 +170,16 @@ class TestableStripeProvider {
         id: intent.id,
         provider: 'stripe',
         clientSecret: intent.client_secret || undefined,
-        status: this.mapStripeStatus(intent.status),
+        status: mapStripeStatus(intent.status),
         amount: {
           amount: intent.amount,
-          currency: this.toCurrencyCode(intent.currency),
+          currency: toCurrencyCode(intent.currency),
         },
         metadata: (intent.metadata as PaymentMetadata) || {},
         createdAt: new Date(intent.created * 1000),
       };
     } catch (error) {
-      if ((error as { code?: string }).code === 'resource_missing') {
+      if (isStripeNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -238,10 +193,10 @@ class TestableStripeProvider {
       id: intent.id,
       provider: 'stripe',
       clientSecret: intent.client_secret || undefined,
-      status: this.mapStripeStatus(intent.status),
+      status: mapStripeStatus(intent.status),
       amount: {
         amount: intent.amount,
-        currency: this.toCurrencyCode(intent.currency),
+        currency: toCurrencyCode(intent.currency),
       },
       metadata: (intent.metadata as PaymentMetadata) || {},
       createdAt: new Date(intent.created * 1000),
@@ -257,8 +212,8 @@ class TestableStripeProvider {
     const refund = await this.stripe.refunds.create({
       payment_intent: request.paymentIntentId,
       amount: request.amount,
-      reason: this.mapRefundReason(request.reason),
-      metadata: request.metadata ? this.sanitizeMetadata(request.metadata) : undefined,
+      reason: mapRefundReason(request.reason),
+      metadata: request.metadata ? sanitizeMetadata(request.metadata) : undefined,
     });
 
     return {
@@ -267,7 +222,7 @@ class TestableStripeProvider {
       paymentIntentId: request.paymentIntentId,
       amount: {
         amount: refund.amount || 0,
-        currency: this.toCurrencyCode(refund.currency || 'USD'),
+        currency: toCurrencyCode(refund.currency || 'USD'),
       },
       status: refund.status === 'succeeded' ? 'succeeded' : 'pending',
       reason: request.reason,
@@ -282,7 +237,7 @@ class TestableStripeProvider {
     try {
       const event = this.stripe.webhooks.constructEvent(payload, signature, this.webhookSecret);
 
-      const eventType = this.mapStripeEventType(event.type);
+      const eventType = mapStripeEventType(event.type);
       if (!eventType) {
         return { isValid: true, event: undefined };
       }
@@ -312,22 +267,22 @@ class TestableStripeProvider {
       baseEvent.data = {
         checkoutSessionId: session.id,
         paymentIntentId: session.payment_intent,
-        status: this.mapStripeCheckoutStatus(session.status || null, session.payment_status || null),
+        status: mapStripeCheckoutStatus(session.status || null, session.payment_status || null),
         metadata: session.metadata || {},
         amount: session.amount_total ? {
           amount: session.amount_total,
-          currency: this.toCurrencyCode(session.currency || 'USD'),
+          currency: toCurrencyCode(session.currency || 'USD'),
         } : undefined,
       };
     } else if (event.type.startsWith('payment_intent')) {
       const intent = event.data.object;
       baseEvent.data = {
         paymentIntentId: intent.id,
-        status: this.mapStripeStatus(intent.status || ''),
+        status: mapStripeStatus(intent.status || ''),
         metadata: intent.metadata || {},
         amount: {
           amount: intent.amount || 0,
-          currency: this.toCurrencyCode(intent.currency || 'USD'),
+          currency: toCurrencyCode(intent.currency || 'USD'),
         },
         failureReason: intent.last_payment_error?.message,
       };
@@ -339,7 +294,7 @@ class TestableStripeProvider {
         metadata: charge.metadata || {},
         amount: {
           amount: charge.amount || 0,
-          currency: this.toCurrencyCode(charge.currency || 'USD'),
+          currency: toCurrencyCode(charge.currency || 'USD'),
         },
       };
     }

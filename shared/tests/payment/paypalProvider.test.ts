@@ -1,29 +1,49 @@
 /**
  * Unit Tests for PayPal Payment Provider
  *
- * Tests all PayPal-specific payment processing functionality including:
- * - Status mapping functions (tested via public API)
- * - Currency code validation
- * - Amount conversions (cents <-> dollars)
- * - Webhook signature verification
+ * Tests PayPal-specific payment processing functionality including:
  * - Order creation and retrieval
  * - Order capture
  * - Refund processing
+ * - Webhook signature verification
  * - Health checks
  * - Error handling
  *
- * Note: These tests use a custom PayPalProvider subclass with injectable fetch
- * to enable testing without actual API calls.
+ * ## Testing Approach
+ *
+ * These tests use a TestablePayPalProvider class that wraps a mock fetch function.
+ * The utility functions (status mapping, currency validation, amount conversions)
+ * are imported from the shared utils.ts module, ensuring tests validate the same
+ * logic used in production.
+ *
+ * For direct unit tests of utility functions, see utils.test.ts.
+ *
+ * ## Limitations
+ *
+ * Due to Node.js 22's lack of mock.module() support, we cannot directly mock
+ * the global fetch. Instead, we use dependency injection to pass a mock fetch
+ * function to the TestablePayPalProvider. This tests the same business logic
+ * patterns as the production PayPalProvider class.
  */
 
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert';
 
+// Import actual utility functions from production code
+import {
+  centsToDollars,
+  dollarsToCents,
+  isPayPalNotFoundError,
+  mapPayPalEventType,
+  mapPayPalStatus,
+  PayPalApiError,
+  toCurrencyCode,
+} from '../../src/payment/utils.js';
+
 import type { CurrencyCode } from '../../src/payment/types.js';
 import type { CheckoutSession } from '../../src/payment/types.js';
 import type { PaymentIntent } from '../../src/payment/types.js';
 import type { PaymentMetadata } from '../../src/payment/types.js';
-import type { PaymentStatus } from '../../src/payment/types.js';
 import type { ProviderHealthStatus } from '../../src/payment/types.js';
 import type { RefundResult } from '../../src/payment/types.js';
 import type { WebhookVerification } from '../../src/payment/types.js';
@@ -31,7 +51,12 @@ import type { WebhookVerification } from '../../src/payment/types.js';
 // Type for fetch mock
 type MockFetch = (url: string, options?: RequestInit) => Promise<Response>;
 
-// Create a testable version of PayPalProvider with injectable fetch
+/**
+ * Testable version of PayPalProvider with injectable fetch function.
+ *
+ * Uses the actual utility functions from utils.ts to ensure tests validate
+ * the same logic as production code.
+ */
 class TestablePayPalProvider {
   readonly provider = 'paypal' as const;
   private clientId: string;
@@ -57,39 +82,8 @@ class TestablePayPalProvider {
     this.fetchFn = config.fetchFn;
   }
 
-  private toCurrencyCode(currency: string): CurrencyCode {
-    const validCodes: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
-    const upper = currency.toUpperCase() as CurrencyCode;
-    return validCodes.includes(upper) ? upper : 'USD';
-  }
-
-  private mapPayPalStatus(status: string): PaymentStatus {
-    switch (status.toUpperCase()) {
-      case 'COMPLETED':
-      case 'APPROVED':
-        return 'succeeded';
-      case 'CREATED':
-      case 'SAVED':
-      case 'PAYER_ACTION_REQUIRED':
-        return 'requires_action';
-      case 'VOIDED':
-        return 'cancelled';
-      default:
-        return 'pending';
-    }
-  }
-
-  private mapPayPalEventType(type: string): string | null {
-    const mapping: Record<string, string> = {
-      'CHECKOUT.ORDER.APPROVED': 'checkout.session.completed',
-      'CHECKOUT.ORDER.COMPLETED': 'checkout.session.completed',
-      'PAYMENT.CAPTURE.COMPLETED': 'payment_intent.succeeded',
-      'PAYMENT.CAPTURE.DENIED': 'payment_intent.payment_failed',
-      'PAYMENT.CAPTURE.REFUNDED': 'charge.refunded',
-      'CUSTOMER.DISPUTE.CREATED': 'charge.dispute.created',
-    };
-    return mapping[type] || null;
-  }
+  // Note: Utility functions are imported from utils.ts, not re-implemented here.
+  // This ensures tests validate the actual production logic.
 
   private async getAccessToken(): Promise<string> {
     // Return cached token if still valid
@@ -137,7 +131,7 @@ class TestablePayPalProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`PayPal API error ${response.status}: ${errorText}`);
+      throw new PayPalApiError(response.status, `PayPal API error ${response.status}: ${errorText}`);
     }
 
     return response.json() as T;
@@ -176,11 +170,11 @@ class TestablePayPalProvider {
           custom_id: JSON.stringify(request.metadata),
           amount: {
             currency_code: currency,
-            value: (totalAmount / 100).toFixed(2),
+            value: centsToDollars(totalAmount),
             breakdown: {
               item_total: {
                 currency_code: currency,
-                value: (totalAmount / 100).toFixed(2),
+                value: centsToDollars(totalAmount),
               },
             },
           },
@@ -189,7 +183,7 @@ class TestablePayPalProvider {
             description: item.description?.slice(0, 127),
             unit_amount: {
               currency_code: item.currency,
-              value: (item.amount / 100).toFixed(2),
+              value: centsToDollars(item.amount),
             },
             quantity: String(item.quantity),
             category: 'DIGITAL_GOODS',
@@ -215,7 +209,7 @@ class TestablePayPalProvider {
       id: order.id,
       provider: 'paypal',
       url: approveLink?.href || '',
-      status: this.mapPayPalStatus(order.status),
+      status: mapPayPalStatus(order.status),
       metadata: request.metadata,
     };
   }
@@ -242,11 +236,11 @@ class TestablePayPalProvider {
         id: order.id,
         provider: 'paypal',
         url: '',
-        status: this.mapPayPalStatus(order.status),
+        status: mapPayPalStatus(order.status),
         metadata,
       };
     } catch (error) {
-      if ((error as Error).message.includes('404')) {
+      if (isPayPalNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -277,18 +271,18 @@ class TestablePayPalProvider {
       return {
         id: order.id,
         provider: 'paypal',
-        status: this.mapPayPalStatus(order.status),
+        status: mapPayPalStatus(order.status),
         amount: {
           amount: purchaseUnit
-            ? Math.round(parseFloat(purchaseUnit.amount.value) * 100)
+            ? dollarsToCents(purchaseUnit.amount.value)
             : 0,
-          currency: this.toCurrencyCode(purchaseUnit?.amount.currency_code || 'USD'),
+          currency: toCurrencyCode(purchaseUnit?.amount.currency_code || 'USD'),
         },
         metadata,
         createdAt: new Date(),
       };
     } catch (error) {
-      if ((error as Error).message.includes('404')) {
+      if (isPayPalNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -339,7 +333,7 @@ class TestablePayPalProvider {
     if (request.amount) {
       const capture = order.purchase_units[0].payments.captures[0];
       refundBody.amount = {
-        value: (request.amount / 100).toFixed(2),
+        value: centsToDollars(request.amount),
         currency_code: capture.amount.currency_code,
       };
     }
@@ -356,8 +350,8 @@ class TestablePayPalProvider {
       provider: 'paypal',
       paymentIntentId: request.paymentIntentId,
       amount: {
-        amount: Math.round(parseFloat(refund.amount.value) * 100),
-        currency: this.toCurrencyCode(refund.amount.currency_code),
+        amount: dollarsToCents(refund.amount.value),
+        currency: toCurrencyCode(refund.amount.currency_code),
       },
       status: refund.status === 'COMPLETED' ? 'succeeded' : 'pending',
       reason: request.reason,
@@ -401,7 +395,7 @@ class TestablePayPalProvider {
         return { isValid: false, error: 'Webhook verification failed' };
       }
 
-      const eventType = this.mapPayPalEventType(webhookEvent.event_type);
+      const eventType = mapPayPalEventType(webhookEvent.event_type);
       if (!eventType) {
         return { isValid: true, event: undefined };
       }
@@ -446,12 +440,12 @@ class TestablePayPalProvider {
       data: {
         paymentIntentId:
           resource.supplementary_data?.related_ids?.order_id || resource.id,
-        status: resource.status ? this.mapPayPalStatus(resource.status) : undefined,
+        status: resource.status ? mapPayPalStatus(resource.status) : undefined,
         metadata,
         amount: resource.amount
           ? {
-              amount: Math.round(parseFloat(resource.amount.value) * 100),
-              currency: this.toCurrencyCode(resource.amount.currency_code),
+              amount: dollarsToCents(resource.amount.value),
+              currency: toCurrencyCode(resource.amount.currency_code),
             }
           : undefined,
       },
@@ -490,12 +484,12 @@ class TestablePayPalProvider {
     return {
       id: orderId,
       provider: 'paypal',
-      status: this.mapPayPalStatus(capture.status),
+      status: mapPayPalStatus(capture.status),
       amount: {
         amount: captureDetails
-          ? Math.round(parseFloat(captureDetails.amount.value) * 100)
+          ? dollarsToCents(captureDetails.amount.value)
           : 0,
-        currency: this.toCurrencyCode(captureDetails?.amount.currency_code || 'USD'),
+        currency: toCurrencyCode(captureDetails?.amount.currency_code || 'USD'),
       },
       metadata,
       createdAt: new Date(),
