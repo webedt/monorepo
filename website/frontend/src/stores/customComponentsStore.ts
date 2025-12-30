@@ -31,7 +31,7 @@ const DEFAULT_TRANSFORM: CustomComponentTransform = {
   pivotY: 0.5,
 };
 
-class CustomComponentsStore extends Store<CustomComponentsState> {
+export class CustomComponentsStore extends Store<CustomComponentsState> {
   constructor() {
     super({
       components: [],

@@ -18,6 +18,8 @@
     "test": "node --import tsx --test tests/**/*.test.ts",
     "test:components": "vitest run",
     "test:components:watch": "vitest",
+    "test:frontend": "vitest run --coverage",
+    "test:frontend:watch": "vitest --coverage",
     "lint:security": "node scripts/check-innerhtml.js"
   },
   "devDependencies": {
