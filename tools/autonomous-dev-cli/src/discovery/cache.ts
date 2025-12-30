@@ -810,20 +810,11 @@ export class PersistentAnalysisCache {
 
   /**
    * Delete a persisted cache entry
+   * Throws on failure - callers should handle errors appropriately
    */
   private async deletePersistedEntry(key: string): Promise<void> {
     const filePath = this.getCacheFilePath(key);
-    try {
-      await unlink(filePath);
-    } catch (error) {
-      // File might not exist or be inaccessible - log at debug level
-      // since this is a non-critical cleanup operation
-      logger.debug('Failed to delete cache file', {
-        key,
-        filePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await unlink(filePath);
   }
 
   /**
