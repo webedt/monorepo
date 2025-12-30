@@ -8,6 +8,7 @@ import { Octokit } from '@octokit/rest';
 import { db, chatSessions, eq, and, isNull, logger, withGitHubResilience, GitHubOperations } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
+import { validatePathParam } from '../../middleware/pathValidation.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import { archiveClaudeRemoteSession } from './helpers.js';
 
@@ -341,7 +342,7 @@ router.post('/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (req: R
 /**
  * Auto PR - Automatically create/update PR, merge base, and merge PR
  */
-router.post('/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: Request, res: Response) => {
+router.post('/:owner/:repo/branches/*/auto-pr', requireAuth, validatePathParam({ isBranchName: true }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
