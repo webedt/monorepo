@@ -49,6 +49,8 @@ import {
   RATE_LIMIT_SSE_MAX,
   RATE_LIMIT_FILE_WINDOW_MS,
   RATE_LIMIT_FILE_MAX,
+  RATE_LIMIT_SHARE_TOKEN_WINDOW_MS,
+  RATE_LIMIT_SHARE_TOKEN_MAX,
   SKIP_RATE_LIMITING,
   RATE_LIMIT_SKIP_ADMINS,
   RATE_LIMIT_CB_DEGRADATION,
@@ -120,8 +122,8 @@ const config = {
 
   // Share token validation limits (default: 10 requests per minute - stricter to prevent enumeration)
   // Applies to: share token validation endpoints
-  shareTokenWindowMs: parseInt(process.env.RATE_LIMIT_SHARE_TOKEN_WINDOW_MS || '60000', 10),
-  shareTokenMaxRequests: parseInt(process.env.RATE_LIMIT_SHARE_TOKEN_MAX || '10', 10),
+  shareTokenWindowMs: RATE_LIMIT_SHARE_TOKEN_WINDOW_MS,
+  shareTokenMaxRequests: RATE_LIMIT_SHARE_TOKEN_MAX,
 
   // Whether to skip rate limiting (for testing/development)
   skipRateLimiting: SKIP_RATE_LIMITING,
