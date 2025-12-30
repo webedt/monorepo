@@ -26,14 +26,13 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, chatSessions, events, users, eq, desc, asc, and, isNull } from '@webedt/shared';
+import { db, chatSessions, events, users, eq, asc, and, isNull, sessionSoftDeleteService } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
   logger,
   ServiceProvider,
   AClaudeWebClient,
-  type ClaudeWebClientConfig,
   generateTitle,
   extractEventUuid,
   type ClaudeSessionEvent as SessionEvent,
@@ -46,6 +45,7 @@ import {
   CLAUDE_ORG_UUID,
   CLAUDE_COOKIES,
   OPENROUTER_API_KEY,
+  getEventType,
 } from '@webedt/shared';
 import {
   registerActiveStream,
@@ -136,7 +136,7 @@ async function storeEvent(chatSessionId: string, eventData: Record<string, unkno
       eventData,
     });
   } catch (error) {
-    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: (eventData as any).type });
+    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: getEventType(eventData) });
   }
 }
 
@@ -286,14 +286,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     // Create local session record
     chatSessionId = uuidv4();
-    const [chatSession] = await db.insert(chatSessions).values({
+    await db.insert(chatSessions).values({
       id: chatSessionId,
       userId: user.id,
       userRequest: prompt,
       status: 'running',
       provider: 'claude',
       repositoryUrl: gitUrl,
-    }).returning();
+    });
 
     // Register active stream for interrupt support
     const abortController = registerActiveStream(chatSessionId);
@@ -565,11 +565,14 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Get all events for this session
+    // Get all non-deleted events for this session
     const sessionEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, id))
+      .where(and(
+        eq(events.chatSessionId, id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     // eventData contains the raw event with type field inside
@@ -652,11 +655,14 @@ const streamHandler = async (req: Request, res: Response) => {
     // Send replay start marker
     sendSSE(res, { type: 'replay_start', sessionId: id, timestamp: new Date().toISOString() });
 
-    // Get all stored events and replay them
+    // Get all stored non-deleted events and replay them
     const storedEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, id))
+      .where(and(
+        eq(events.chatSessionId, id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     for (const event of storedEvents) {
@@ -706,7 +712,7 @@ const streamHandler = async (req: Request, res: Response) => {
               },
               { skipExistingEvents: true }
             );
-          } catch (pollError) {
+          } catch {
             // Polling ended (completed, failed, or aborted)
             logger.info('Poll session ended', { component: 'InternalSessions', sessionId: id });
           }
@@ -1174,16 +1180,21 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Soft delete - set deletedAt timestamp
-    await db.update(chatSessions)
-      .set({ deletedAt: new Date() })
-      .where(eq(chatSessions.id, id));
+    // Soft delete with cascading to messages and events
+    const softDeleteResult = await sessionSoftDeleteService.softDeleteSession(id);
+
+    if (!softDeleteResult.success) {
+      res.status(500).json({ success: false, error: softDeleteResult.error });
+      return;
+    }
 
     res.json({
       success: true,
       data: {
         sessionId: id,
         deleted: true,
+        messagesDeleted: softDeleteResult.messagesDeleted,
+        eventsDeleted: softDeleteResult.eventsDeleted,
       },
     });
   } catch (error) {

@@ -15,6 +15,7 @@ import type {
   TaskSortField,
   MenuOption,
   PreviewResult,
+  TaskApprovalStatus,
 } from './types.js';
 import type { DiscoveredTaskPriority, DiscoveredTaskCategory, DiscoveredTaskComplexity } from '../discovery/index.js';
 import { PreviewSessionManager } from './session.js';
@@ -536,10 +537,11 @@ export class InteractivePreview {
 
       case '4':
         const statuses = await this.promptText('Statuses (comma-separated):');
+        const statusOptions: TaskApprovalStatus[] = ['pending', 'approved', 'rejected', 'deferred'];
         const validStatuses = statuses.split(',')
           .map(s => s.trim())
-          .filter(s => ['pending', 'approved', 'rejected', 'deferred'].includes(s));
-        this.session.setFilters({ ...currentFilters, statuses: validStatuses as any[] });
+          .filter((s): s is TaskApprovalStatus => statusOptions.includes(s as TaskApprovalStatus));
+        this.session.setFilters({ ...currentFilters, statuses: validStatuses });
         console.log(chalk.green(`Filter applied: ${validStatuses.join(', ')}`));
         break;
 

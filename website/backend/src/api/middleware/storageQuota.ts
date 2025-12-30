@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { StorageService, calculateBase64Size, calculateJsonSize, logger } from '@webedt/shared';
+import { StorageService, calculateBase64Size, calculateJsonSize, logger, metrics } from '@webedt/shared';
 import type { AuthRequest } from './auth.js';
 
 /**
@@ -91,11 +91,11 @@ export function requireStorageQuota(options: StorageQuotaOptions = {}) {
 
       next();
     } catch (error) {
-      logger.error('Storage quota check error', error, {
-        component: 'storage',
-        operation: 'checkQuota',
-        userId: authReq.user?.id
+      logger.error('Storage quota check failed', error as Error, {
+        component: 'StorageQuota',
+        userId: authReq.user?.id,
       });
+      metrics.recordError('storage_quota_check', 'StorageQuota');
 
       if (blockOnError) {
         // Block request when quota system is unavailable
@@ -206,15 +206,22 @@ export function trackStorageUsage() {
     // Store original send function
     const originalSend = res.send.bind(res);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     res.send = function (body: any): Response {
       // Only track if request was successful and we have size info
       const size = req.storageSize;
       if (res.statusCode >= 200 && res.statusCode < 300 && size && size > 0 && authReq.user) {
-        // Fire-and-forget but log errors for debugging
+        // Fire-and-forget with structured logging for debugging
         StorageService.addUsage(authReq.user.id, size).catch((error) => {
-          logger.error('Failed to track storage usage', error, { component: 'storage', operation: 'trackUsage', userId: authReq.user.id });
           // Storage usage tracking failed - the cached value may drift
           // This will be corrected on next recalculateUsage call
+          logger.warn('Failed to track storage usage', {
+            component: 'StorageQuota',
+            userId: authReq.user?.id,
+            size,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          metrics.recordError('storage_usage_tracking', 'StorageQuota');
         });
       }
       return originalSend(body);

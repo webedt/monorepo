@@ -28,10 +28,9 @@ import {
   isValidLanguage,
   isValidCategory,
 } from '@webedt/shared';
-import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { isDatabaseError, isUniqueConstraintError } from '@webedt/shared';
+import { isUniqueConstraintError } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -224,7 +223,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       .select({ count: sql<number>`count(*)::int` })
       .from(snippets)
       .where(and(...conditions));
-    let total = countResult[0]?.count || 0;
+    const total = countResult[0]?.count || 0;
 
     // Get snippets with pagination
     let userSnippets = await db
@@ -542,6 +541,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Build update object
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updates: Record<string, any> = {
       updatedAt: new Date(),
     };
@@ -1085,6 +1085,7 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
       return;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updates: Record<string, any> = {
       updatedAt: new Date(),
     };

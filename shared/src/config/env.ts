@@ -205,6 +205,14 @@ const envSchema = z.object({
   TRASH_RETENTION_DAYS: integerWithDefault(30),
 
   // -------------------------------------------------------------------------
+  // Invitation Cleanup Configuration
+  // -------------------------------------------------------------------------
+  INVITATION_CLEANUP_ENABLED: optionalBoolean(true),
+  INVITATION_CLEANUP_INTERVAL_MS: integerWithDefault(86400000), // 24 hours
+  INVITATION_CLEANUP_INITIAL_DELAY_MS: integerWithDefault(120000), // 2 minutes
+  INVITATION_RETENTION_DAYS_AFTER_EXPIRY: integerWithDefault(7),
+
+  // -------------------------------------------------------------------------
   // Encryption Configuration
   // -------------------------------------------------------------------------
   ENCRYPTION_KEY: z.string().optional(),
@@ -427,6 +435,12 @@ export const TRASH_CLEANUP_ENABLED = parsedEnv.TRASH_CLEANUP_ENABLED ?? true;
 export const TRASH_CLEANUP_INTERVAL_MS = parsedEnv.TRASH_CLEANUP_INTERVAL_MS ?? 3600000;
 export const TRASH_CLEANUP_INITIAL_DELAY_MS = parsedEnv.TRASH_CLEANUP_INITIAL_DELAY_MS ?? 60000;
 export const TRASH_RETENTION_DAYS = parsedEnv.TRASH_RETENTION_DAYS ?? 30;
+
+// Invitation Cleanup Configuration
+export const INVITATION_CLEANUP_ENABLED = parsedEnv.INVITATION_CLEANUP_ENABLED ?? true;
+export const INVITATION_CLEANUP_INTERVAL_MS = parsedEnv.INVITATION_CLEANUP_INTERVAL_MS ?? 86400000;
+export const INVITATION_CLEANUP_INITIAL_DELAY_MS = parsedEnv.INVITATION_CLEANUP_INITIAL_DELAY_MS ?? 120000;
+export const INVITATION_RETENTION_DAYS_AFTER_EXPIRY = parsedEnv.INVITATION_RETENTION_DAYS_AFTER_EXPIRY ?? 7;
 
 // Encryption Configuration
 export const ENCRYPTION_KEY = parsedEnv.ENCRYPTION_KEY;
@@ -991,6 +1005,12 @@ export const config = {
   TRASH_CLEANUP_INTERVAL_MS,
   TRASH_CLEANUP_INITIAL_DELAY_MS,
   TRASH_RETENTION_DAYS,
+
+  // Invitation Cleanup
+  INVITATION_CLEANUP_ENABLED,
+  INVITATION_CLEANUP_INTERVAL_MS,
+  INVITATION_CLEANUP_INITIAL_DELAY_MS,
+  INVITATION_RETENTION_DAYS_AFTER_EXPIRY,
 
   // Encryption
   ENCRYPTION_KEY,

@@ -476,16 +476,16 @@ export class SnippetsPage extends Page {
     this.on('#close-edit-modal', 'click', () => this.closeEditModal());
     this.on('#cancel-edit', 'click', () => this.closeEditModal());
 
-    // Create form
+    // Create form - using addListener for automatic cleanup
     const createForm = this.$('#create-snippet-form') as HTMLFormElement;
     if (createForm) {
-      createForm.addEventListener('submit', (e) => this.handleCreateSubmit(e));
+      this.addListener(createForm, 'submit', (e) => this.handleCreateSubmit(e as SubmitEvent));
     }
 
     // Edit form
     const editForm = this.$('#edit-snippet-form') as HTMLFormElement;
     if (editForm) {
-      editForm.addEventListener('submit', (e) => this.handleEditSubmit(e));
+      this.addListener(editForm, 'submit', (e) => this.handleEditSubmit(e as SubmitEvent));
     }
 
     // Delete button
@@ -498,7 +498,7 @@ export class SnippetsPage extends Page {
 
     const createCollectionForm = this.$('#create-collection-form') as HTMLFormElement;
     if (createCollectionForm) {
-      createCollectionForm.addEventListener('submit', (e) => this.handleCreateCollectionSubmit(e));
+      this.addListener(createCollectionForm, 'submit', (e) => this.handleCreateCollectionSubmit(e as SubmitEvent));
     }
 
     this.on('#create-collection-modal', 'click', (e) => {
@@ -507,11 +507,11 @@ export class SnippetsPage extends Page {
       }
     });
 
-    // Search
+    // Search - using addListener for automatic cleanup
     const searchInput = this.$('#search-input') as HTMLInputElement;
     if (searchInput) {
       let debounceTimeout: number;
-      searchInput.addEventListener('input', () => {
+      this.addListener(searchInput, 'input', () => {
         clearTimeout(debounceTimeout);
         debounceTimeout = window.setTimeout(() => {
           this.searchQuery = searchInput.value;
@@ -539,10 +539,10 @@ export class SnippetsPage extends Page {
       this.refresh();
     });
 
-    // Collection nav
+    // Collection nav - using addListener for automatic cleanup
     const collectionItems = this.$$('.collection-item');
     collectionItems.forEach(item => {
-      item.addEventListener('click', () => {
+      this.addListener(item, 'click', () => {
         const collectionId = (item as HTMLElement).dataset.collection;
         const filter = (item as HTMLElement).dataset.filter;
 
@@ -562,7 +562,7 @@ export class SnippetsPage extends Page {
     // Language nav
     const languageItems = this.$$('.language-item');
     languageItems.forEach(item => {
-      item.addEventListener('click', () => {
+      this.addListener(item, 'click', () => {
         const language = (item as HTMLElement).dataset.language as SnippetLanguage;
         snippetsStore.setFilters({ language });
         this.refresh();
@@ -572,7 +572,7 @@ export class SnippetsPage extends Page {
     // Snippet card actions
     const actionButtons = this.$$('[data-action]');
     actionButtons.forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      this.addListener(btn, 'click', (e) => {
         e.stopPropagation();
         const action = (btn as HTMLElement).dataset.action;
         const id = (btn as HTMLElement).dataset.id;
@@ -585,7 +585,7 @@ export class SnippetsPage extends Page {
     // Snippet card click to edit
     const snippetCards = this.$$('.snippet-card');
     snippetCards.forEach(card => {
-      card.addEventListener('click', () => {
+      this.addListener(card, 'click', () => {
         const id = (card as HTMLElement).dataset.snippetId;
         if (id) {
           this.openEditModal(id);

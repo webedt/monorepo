@@ -30,7 +30,41 @@ export * from './db/index.js';
 export * from './execution/index.js';
 
 // GitHub operations
-export * from './github/index.js';
+// Note: RateLimiterConfig renamed to GitHubRateLimiterConfig to avoid conflict with utils/resilience
+export {
+  AGitHelper,
+  AGitHubClient,
+  GitHubIssuesService,
+  GitHubProjectsService,
+  GitHubRateLimiter,
+  withRateLimiting,
+  parseDiff,
+  formatDiffStats,
+  getFileStatusLabel,
+} from './github/index.js';
+export * from './github/gitHelper.js';
+export * from './github/githubClient.js';
+export * from './github/operations.js';
+export type { GitHubPullOptions, GitHubPullResult } from './github/index.js';
+export type {
+  Issue,
+  CreateIssueOptions,
+  CreateIssueResult,
+  ListIssuesOptions,
+  UpdateIssueOptions,
+  IssueComment,
+  AutoTaskCommentInfo,
+} from './github/index.js';
+export type {
+  Project,
+  ProjectField,
+  ProjectFieldOption,
+  StatusField,
+  ProjectItem,
+  AddItemResult,
+} from './github/index.js';
+export type { RateLimitState, GitHubRateLimiterConfig } from './github/index.js';
+export type { DiffLine, DiffHunk, FileDiff, ParsedDiff } from './github/index.js';
 
 // Claude Web Sessions API
 // Note: Exports Session type (API session) as ClaudeSession, SessionEvent as ClaudeSessionEvent

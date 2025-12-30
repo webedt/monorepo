@@ -106,7 +106,7 @@ const router = Router();
 // Get community posts (public)
 router.get('/posts', async (req: Request, res: Response) => {
   try {
-    const { type, gameId, sort = 'createdAt', order = 'desc' } = req.query;
+    const { type, gameId, order = 'desc' } = req.query;
 
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const offset = parseInt(req.query.offset as string) || 0;

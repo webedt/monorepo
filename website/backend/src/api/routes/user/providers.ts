@@ -43,7 +43,7 @@ const router = Router();
 router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    let codexAuth = req.body.codexAuth || req.body;
+    const codexAuth = req.body.codexAuth || req.body;
 
     // Validate Codex auth structure - must have either apiKey or accessToken
     if (!codexAuth || (!codexAuth.apiKey && !codexAuth.accessToken)) {
@@ -145,7 +145,7 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
 router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    let geminiAuth = req.body.geminiAuth || req.body;
+    const geminiAuth = req.body.geminiAuth || req.body;
 
     // Support both camelCase (our format) and snake_case (Gemini CLI format)
     const accessToken = geminiAuth.accessToken || geminiAuth.access_token;

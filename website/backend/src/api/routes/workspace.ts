@@ -460,7 +460,7 @@ router.get('/events/:owner/:repo/:branch', async (req: Request, res: Response) =
 
     const decodedBranch = decodeURIComponent(branch);
 
-    let query = db
+    const query = db
       .select({
         id: workspaceEvents.id,
         userId: workspaceEvents.userId,
