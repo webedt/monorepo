@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, users, chatSessions, communityPosts, eq, and, or, desc, sql, ilike } from '@webedt/shared';
+import { db, games, users, chatSessions, communityPosts, eq, and, or, desc, sql, ilike, LIMITS } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { searchRateLimiter } from '../middleware/rateLimit.js';
@@ -57,7 +57,7 @@ async function searchGames(searchTerm: string): Promise<SearchResultItem[]> {
         )
       )
     )
-    .limit(50);
+    .limit(LIMITS.SEARCH.GAMES);
 
   for (const game of matchedGames) {
     const matchedFields: string[] = [];
@@ -116,7 +116,7 @@ async function searchUsers(searchTerm: string): Promise<SearchResultItem[]> {
     })
     .from(users)
     .where(ilike(users.displayName, searchPattern))
-    .limit(20);
+    .limit(LIMITS.SEARCH.USERS);
 
   for (const user of matchedUsers) {
     if (user.displayName) {
@@ -154,7 +154,7 @@ async function searchSessions(searchTerm: string, userId: string): Promise<Searc
       )
     )
     .orderBy(desc(chatSessions.createdAt))
-    .limit(30);
+    .limit(LIMITS.SEARCH.SESSIONS);
 
   const lowerSearchTerm = searchTerm.toLowerCase();
 
@@ -206,7 +206,7 @@ async function searchPosts(searchTerm: string): Promise<SearchResultItem[]> {
       )
     )
     .orderBy(desc(communityPosts.createdAt))
-    .limit(30);
+    .limit(LIMITS.SEARCH.POSTS);
 
   const lowerSearchTerm = searchTerm.toLowerCase();
 
@@ -292,7 +292,7 @@ router.get('/', searchRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const query = (req.query.q as string || '').trim();
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const limit = Math.min(parseInt(req.query.limit as string) || LIMITS.SEARCH.DEFAULT, LIMITS.SEARCH.MAX);
     const types = (req.query.types as string)?.split(',') || ['game', 'user', 'session', 'post'];
 
     if (!query || query.length < 2) {
@@ -396,7 +396,7 @@ router.get('/', searchRateLimiter, async (req: Request, res: Response) => {
 router.get('/suggestions', searchRateLimiter, async (req: Request, res: Response) => {
   try {
     const query = (req.query.q as string || '').trim();
-    const limit = Math.min(parseInt(req.query.limit as string) || 5, 10);
+    const limit = Math.min(parseInt(req.query.limit as string) || LIMITS.SEARCH.SUGGESTIONS_DEFAULT, LIMITS.SEARCH.SUGGESTIONS_MAX);
 
     if (!query || query.length < 1) {
       res.json({

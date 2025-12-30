@@ -12,8 +12,10 @@
  * - Query deduplication
  */
 
+import { LIMITS } from '../config/constants.js';
+
 export interface DataLoaderOptions {
-  /** Maximum batch size before forcing execution (default: 100) */
+  /** Maximum batch size before forcing execution (default: LIMITS.DATALOADER.MAX_BATCH_SIZE) */
   maxBatchSize?: number;
   /** Cache TTL in milliseconds (default: 0 = no caching) */
   cacheTtlMs?: number;
@@ -60,7 +62,7 @@ export class DataLoader<K, V> {
   ) {
     this.batchFn = batchFn;
     this.options = {
-      maxBatchSize: options.maxBatchSize ?? 100,
+      maxBatchSize: options.maxBatchSize ?? LIMITS.DATALOADER.MAX_BATCH_SIZE,
       cacheTtlMs: options.cacheTtlMs ?? 0,
       deduplicate: options.deduplicate ?? true,
     };

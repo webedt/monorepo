@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, eq, and, isNull, isNotNull, inArray, logger, decryptUserFields, executeBatch, sessionSoftDeleteService } from '@webedt/shared';
+import { db, chatSessions, users, eq, and, isNull, isNotNull, inArray, logger, decryptUserFields, executeBatch, sessionSoftDeleteService, LIMITS } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import type { BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
@@ -36,10 +36,8 @@ interface SessionArchiveResult {
 
 const router = Router();
 
-// Default concurrency for session operations
-const DEFAULT_SESSION_CONCURRENCY = 3;
-const MAX_BATCH_SIZE = 100;
-const MAX_ARCHIVE_BATCH_SIZE = 50;
+// Session operation limits from centralized config
+const { CONCURRENCY: DEFAULT_SESSION_CONCURRENCY, MAX_BATCH_SIZE, MAX_ARCHIVE_BATCH_SIZE } = LIMITS.SESSION;
 
 /**
  * Helper to create a session cleanup operation
