@@ -57,3 +57,25 @@ export { SessionAuthorizationService, sessionAuthorizationService } from './Sess
 export * from './claudeSessionSync.js';
 export * from './sessionEventBroadcaster.js';
 export * from './sessionListBroadcaster.js';
+
+// Session locking (optimistic and pessimistic locking for concurrent updates)
+export {
+  updateSessionWithOptimisticLock,
+  lockSessionForUpdate,
+  updateSessionStatusWithLock,
+  getSessionWithVersion,
+  isValidStatusTransition,
+  isVersionConflict,
+  isSessionNotFound,
+  isInvalidStatusTransition,
+  isSessionLocked,
+  VersionConflictError,
+  SessionNotFoundError,
+  InvalidStatusTransitionError,
+  SessionLockedError,
+} from './sessionLocking.js';
+export type {
+  SessionStatus,
+  SessionStatusUpdate,
+  OptimisticUpdateResult,
+} from './sessionLocking.js';

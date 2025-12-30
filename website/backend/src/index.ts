@@ -75,6 +75,7 @@ import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
 import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
+import { versionConflictErrorHandler } from './api/middleware/versionConflict.js';
 
 // Import graceful shutdown
 import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
@@ -87,6 +88,7 @@ import {
   initializeExternalApiResilience,
   getExternalApiCircuitBreakerStatus,
   areExternalApisAvailable,
+  getEventType,
 } from '@webedt/shared';
 
 // Import background sync service
@@ -140,7 +142,7 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
           .from(events)
           .where(eq(events.chatSessionId, session.id));
 
-        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+        const completedEvents = allEvents.filter(e => getEventType(e.eventData) === 'completed');
 
         // Check if session has any events at all (worker started processing)
         const totalEvents = allEvents.length;
@@ -513,6 +515,10 @@ app.use(express.static(frontendDistPath));
 app.get('*', (req, res) => {
   res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
+
+// Version conflict error handler (handles optimistic locking errors)
+// Must be registered before the generic error handler
+app.use(versionConflictErrorHandler);
 
 // Error handler
 app.use(

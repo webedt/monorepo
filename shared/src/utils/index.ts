@@ -15,6 +15,7 @@ export * from './api/index.js';
 export * from './encryption.js';
 export * from './validators/index.js';
 export * from './errorTypes.js';
+export * from './typeGuards.js';
 export * from './lifecycle/index.js';
 export * from './batch/index.js';
 // Timing utilities - note: calculateBackoffDelay is also exported from resilience/retry.ts
