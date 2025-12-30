@@ -39,6 +39,12 @@ export class InvitationCleanupService extends AInvitationCleanupService {
     }));
   }
 
+  /**
+   * Delete a single invitation by ID.
+   * This method is intended for external/API use when deleting individual invitations
+   * (e.g., when an invitation is accepted or manually revoked).
+   * The batch cleanup uses cleanupExpiredInvitations() directly for efficiency.
+   */
   async deleteInvitation(
     invitationId: string
   ): Promise<{ success: boolean; message: string }> {
@@ -76,22 +82,10 @@ export class InvitationCleanupService extends AInvitationCleanupService {
     });
 
     try {
-      const expiredInvitations = await this.getExpiredInvitations(retentionDaysAfterExpiry);
-
-      if (expiredInvitations.length === 0) {
-        logger.info('No expired invitations found', {
-          component: 'InvitationCleanupService',
-        });
-        return result;
-      }
-
-      logger.info(`Found ${expiredInvitations.length} expired invitations to clean up`, {
-        component: 'InvitationCleanupService',
-      });
-
-      // Batch delete for efficiency
+      // Calculate cutoff once: invitations that expired more than retentionDaysAfterExpiry ago
       const cutoffDate = new Date(Date.now() - retentionDaysAfterExpiry * 24 * 60 * 60 * 1000);
 
+      // Single batch delete - using .returning() to get the count without a separate SELECT
       const deleted = await db
         .delete(organizationInvitations)
         .where(lt(organizationInvitations.expiresAt, cutoffDate))
@@ -99,11 +93,16 @@ export class InvitationCleanupService extends AInvitationCleanupService {
 
       result.invitationsDeleted = deleted.length;
 
-      logger.info('Invitation cleanup completed', {
-        component: 'InvitationCleanupService',
-        invitationsDeleted: result.invitationsDeleted,
-        errors: result.errors.length,
-      });
+      if (deleted.length === 0) {
+        logger.info('No expired invitations found', {
+          component: 'InvitationCleanupService',
+        });
+      } else {
+        logger.info('Invitation cleanup completed', {
+          component: 'InvitationCleanupService',
+          invitationsDeleted: result.invitationsDeleted,
+        });
+      }
 
       return result;
     } catch (error) {
