@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { logger } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
+import { validatePathParam, validateBodyPath } from '../../middleware/pathValidation.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 
 const router = Router();
@@ -14,7 +15,7 @@ const router = Router();
 /**
  * Get repository file tree
  */
-router.get('/:owner/:repo/tree/*', requireAuth, async (req: Request, res: Response) => {
+router.get('/:owner/:repo/tree/*', requireAuth, validatePathParam({ isBranchName: true }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -73,7 +74,7 @@ router.get('/:owner/:repo/tree/*', requireAuth, async (req: Request, res: Respon
 /**
  * Get file contents
  */
-router.get('/:owner/:repo/contents/*', requireAuth, async (req: Request, res: Response) => {
+router.get('/:owner/:repo/contents/*', requireAuth, validatePathParam(), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -166,7 +167,7 @@ router.get('/:owner/:repo/contents/*', requireAuth, async (req: Request, res: Re
 /**
  * Update/Create a file
  */
-router.put('/:owner/:repo/contents/*', requireAuth, async (req: Request, res: Response) => {
+router.put('/:owner/:repo/contents/*', requireAuth, validatePathParam(), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -256,7 +257,7 @@ router.put('/:owner/:repo/contents/*', requireAuth, async (req: Request, res: Re
 /**
  * Delete a file
  */
-router.delete('/:owner/:repo/contents/*', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:owner/:repo/contents/*', requireAuth, validatePathParam(), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -332,7 +333,7 @@ router.delete('/:owner/:repo/contents/*', requireAuth, async (req: Request, res:
 /**
  * Rename a file (copy to new path, delete old)
  */
-router.post('/:owner/:repo/rename/*', requireAuth, async (req: Request, res: Response) => {
+router.post('/:owner/:repo/rename/*', requireAuth, validatePathParam(), validateBodyPath('newPath'), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -424,7 +425,7 @@ router.post('/:owner/:repo/rename/*', requireAuth, async (req: Request, res: Res
 /**
  * Delete a folder (delete all files in folder)
  */
-router.delete('/:owner/:repo/folder/*', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:owner/:repo/folder/*', requireAuth, validatePathParam(), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -507,7 +508,7 @@ router.delete('/:owner/:repo/folder/*', requireAuth, async (req: Request, res: R
 /**
  * Rename a folder (copy all files to new path, delete old)
  */
-router.post('/:owner/:repo/rename-folder/*', requireAuth, async (req: Request, res: Response) => {
+router.post('/:owner/:repo/rename-folder/*', requireAuth, validatePathParam(), validateBodyPath('newFolderPath'), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;

@@ -1,14 +1,36 @@
 /**
  * Sessions Bulk Routes
  * Batch operations for managing multiple sessions at once
+ *
+ * All database write operations are wrapped in transactions to prevent partial
+ * failures and ensure data consistency. Database operations use executeBulkWrite
+ * which performs all changes in a single atomic transaction.
+ *
+ * External API calls (Claude Remote archive, GitHub branch delete) are executed
+ * OUTSIDE of database transactions since they cannot be rolled back.
  */
 
-import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, eq, and, isNull, isNotNull, inArray, logger, decryptUserFields, executeBatch, sessionSoftDeleteService } from '@webedt/shared';
-import type { ClaudeAuth } from '@webedt/shared';
-import type { BatchOperationConfig } from '@webedt/shared';
+import { Router } from 'express';
+import {
+  db,
+  chatSessions,
+  users,
+  eq,
+  and,
+  isNull,
+  isNotNull,
+  inArray,
+  logger,
+  decryptUserFields,
+  executeBatch,
+  executeBulkWrite,
+  sessionSoftDeleteService,
+} from '@webedt/shared';
+import type { Request, Response } from 'express';
+import type { ClaudeAuth, BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
+import { idempotencyMiddleware } from '../../middleware/idempotency.js';
 import { sendBadRequest } from '../../middleware/sessionMiddleware.js';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { deleteGitHubBranch, archiveClaudeRemoteSession } from './helpers.js';
@@ -34,15 +56,26 @@ interface SessionArchiveResult {
   message: string;
 }
 
+// Bulk operation item result with ID for API responses
+interface BulkOperationItemResult {
+  id: string;
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 const router = Router();
 
 // Default concurrency for session operations
 const DEFAULT_SESSION_CONCURRENCY = 3;
 const MAX_BATCH_SIZE = 100;
 const MAX_ARCHIVE_BATCH_SIZE = 50;
+const DEFAULT_MAX_RETRIES = 3;
 
 /**
- * Helper to create a session cleanup operation
+ * Helper to create a session cleanup operation (external service calls)
+ * These operations are NOT part of the database transaction since they
+ * involve external services (Claude Remote, GitHub).
  */
 function createCleanupOperation(
   archiveRemote: boolean,
@@ -97,12 +130,22 @@ function createCleanupOperation(
 
 /**
  * POST /api/sessions/bulk-delete
- * Soft delete multiple chat sessions (move to trash)
+ * Soft delete or permanently delete multiple chat sessions
+ *
+ * The database operation is always atomic - all sessions are updated/deleted
+ * in a single transaction. External cleanup operations (archive remote, delete
+ * branch) are performed separately and may partially succeed.
  */
-router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-delete', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-delete' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { sessionIds, permanent = false, archiveRemote = true, deleteGitBranch = false, githubToken } = req.body as {
+    const {
+      sessionIds,
+      permanent = false,
+      archiveRemote = true,
+      deleteGitBranch = false,
+      githubToken,
+    } = req.body as {
       sessionIds: string[];
       permanent?: boolean;
       archiveRemote?: boolean;
@@ -133,7 +176,7 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         )
       );
 
-    // Filter out already deleted if doing permanent delete
+    // Filter based on operation type
     const validSessions = permanent
       ? sessions.filter(s => s.deletedAt !== null) // For permanent, must already be soft-deleted
       : sessions.filter(s => s.deletedAt === null); // For soft delete, must not be deleted
@@ -152,7 +195,7 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
     const decryptedFields = archiveRemote ? decryptUserFields(authReq.user as unknown as Partial<DbUser>) : null;
     const claudeAuth = decryptedFields?.claudeAuth ?? null;
 
-    // Create cleanup operation
+    // Create cleanup operation for external services
     const cleanupOperation = createCleanupOperation(
       archiveRemote,
       deleteGitBranch,
@@ -161,22 +204,21 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       process.env.CLAUDE_ENVIRONMENT_ID
     );
 
-    // Execute batch cleanup operations with controlled concurrency
+    // Execute external cleanup operations with controlled concurrency
     const batchConfig: BatchOperationConfig<ChatSession, SessionCleanupResult> = {
       concurrency: DEFAULT_SESSION_CONCURRENCY,
       maxBatchSize: MAX_BATCH_SIZE,
-      operationName: permanent ? 'bulk-permanent-delete' : 'bulk-soft-delete',
-      continueOnError: true, // Continue processing even if some cleanup fails
+      operationName: permanent ? 'bulk-permanent-delete-cleanup' : 'bulk-soft-delete-cleanup',
+      continueOnError: true,
     };
 
-    const batchResult = await executeBatch(validSessions, cleanupOperation, batchConfig);
+    const cleanupResult = await executeBatch(validSessions, cleanupOperation, batchConfig);
 
-    // Transform batch results to the expected format
-    const results: SessionCleanupResult[] = batchResult.results.map(itemResult => {
+    // Transform cleanup results
+    const cleanupResults: SessionCleanupResult[] = cleanupResult.results.map(itemResult => {
       if (itemResult.success && itemResult.result) {
         return itemResult.result;
       }
-      // If the batch item itself failed, return error info
       return {
         sessionId: itemResult.item.id,
         archived: false,
@@ -185,51 +227,103 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       };
     });
 
-    const deletedIds = validSessions.map(s => s.id);
+    const validIds = validSessions.map(s => s.id);
+
+    // Execute database operations
+    let dbResult: { success: boolean; error?: Error; retriesAttempted: number; durationMs: number };
 
     if (permanent) {
-      // Permanently delete sessions
-      await db
-        .delete(chatSessions)
-        .where(inArray(chatSessions.id, deletedIds));
-
-      logger.info(`Permanently deleted ${deletedIds.length} sessions`, {
-        component: 'Sessions',
-        userId: authReq.user!.id,
-        count: deletedIds.length,
-        batchSuccessCount: batchResult.successCount,
-        batchFailureCount: batchResult.failureCount,
-      });
+      // Permanent delete uses transaction wrapper
+      dbResult = await executeBulkWrite(
+        db,
+        async (tx) => {
+          await tx.delete(chatSessions).where(inArray(chatSessions.id, validIds));
+          return { deletedCount: validIds.length };
+        },
+        {
+          operationName: 'bulk-permanent-delete',
+          maxRetries: DEFAULT_MAX_RETRIES,
+          context: {
+            userId: authReq.user!.id,
+            sessionCount: validIds.length,
+          },
+        }
+      );
     } else {
       // Soft delete with cascading to messages and events
-      const softDeleteResult = await sessionSoftDeleteService.softDeleteSessions(deletedIds);
+      const softDeleteResult = await sessionSoftDeleteService.softDeleteSessions(validIds);
+      dbResult = {
+        success: softDeleteResult.failureCount === 0,
+        retriesAttempted: 0,
+        durationMs: 0,
+      };
+    }
 
-      // Notify session list subscribers
+    if (!dbResult.success) {
+      logger.error('Bulk delete database operation failed', dbResult.error, {
+        component: 'Sessions',
+        userId: authReq.user!.id,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Database operation failed',
+        details: dbResult.error?.message,
+        stats: {
+          retriesAttempted: dbResult.retriesAttempted,
+          durationMs: dbResult.durationMs,
+        },
+      });
+      return;
+    }
+
+    // Notify session list subscribers for soft deletes
+    if (!permanent) {
       for (const session of validSessions) {
         sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, session.id);
       }
-
-      logger.info(`Soft deleted ${softDeleteResult.successCount} sessions with cascading`, {
-        component: 'Sessions',
-        userId: authReq.user!.id,
-        count: deletedIds.length,
-        softDeleteSuccessCount: softDeleteResult.successCount,
-        softDeleteFailureCount: softDeleteResult.failureCount,
-        batchSuccessCount: batchResult.successCount,
-        batchFailureCount: batchResult.failureCount,
-      });
     }
+
+    // Build per-item results
+    const itemResults: BulkOperationItemResult[] = validSessions.map(session => {
+      const cleanup = cleanupResults.find(r => r.sessionId === session.id);
+      const hasCleanupErrors = cleanup && (cleanup.archiveError || cleanup.branchError);
+
+      return {
+        id: session.id,
+        success: true,
+        message: permanent ? 'Permanently deleted' : 'Moved to trash',
+        error: hasCleanupErrors
+          ? [cleanup?.archiveError, cleanup?.branchError].filter(Boolean).join('; ')
+          : undefined,
+      };
+    });
+
+    logger.info(`${permanent ? 'Permanently deleted' : 'Soft deleted'} ${validIds.length} sessions`, {
+      component: 'Sessions',
+      userId: authReq.user!.id,
+      count: validIds.length,
+      cleanupSuccessCount: cleanupResult.successCount,
+      cleanupFailureCount: cleanupResult.failureCount,
+      dbRetries: dbResult.retriesAttempted,
+    });
 
     res.json({
       success: true,
       data: {
-        deleted: deletedIds.length,
-        results,
+        processed: validIds.length,
+        succeeded: validIds.length,
+        failed: 0,
         permanent,
-        batchStats: {
-          successCount: batchResult.successCount,
-          failureCount: batchResult.failureCount,
-          durationMs: batchResult.totalDurationMs,
+        results: itemResults,
+        cleanupResults,
+        stats: {
+          durationMs: dbResult.durationMs,
+          retriesAttempted: dbResult.retriesAttempted,
+          cleanupStats: {
+            successCount: cleanupResult.successCount,
+            failureCount: cleanupResult.failureCount,
+            durationMs: cleanupResult.totalDurationMs,
+          },
         },
       }
     });
@@ -241,12 +335,17 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
 
 /**
  * POST /api/sessions/bulk-restore
- * Restore multiple deleted chat sessions
+ * Restore multiple deleted chat sessions from trash
+ *
+ * The database operation is always atomic - all sessions are restored
+ * in a single transaction, or none are if an error occurs.
  */
-router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-restore', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-restore' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { sessionIds } = req.body as { sessionIds: string[] };
+    const { sessionIds } = req.body as {
+      sessionIds: string[];
+    };
 
     // Validate sessionIds
     if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
@@ -280,15 +379,22 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
       return;
     }
 
-    const restoredIds = sessions.map(s => s.id);
+    const validIds = sessions.map(s => s.id);
 
     // Restore sessions with cascading to messages and events
-    const restoreResult = await sessionSoftDeleteService.restoreSessions(restoredIds);
+    const restoreResult = await sessionSoftDeleteService.restoreSessions(validIds);
+
+    // Build per-item results
+    const itemResults: BulkOperationItemResult[] = sessions.map(session => ({
+      id: session.id,
+      success: true,
+      message: 'Restored from trash',
+    }));
 
     logger.info(`Restored ${restoreResult.successCount} sessions with cascading`, {
       component: 'Sessions',
       userId: authReq.user!.id,
-      count: restoredIds.length,
+      count: validIds.length,
       restoreSuccessCount: restoreResult.successCount,
       restoreFailureCount: restoreResult.failureCount,
     });
@@ -296,9 +402,11 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
     res.json({
       success: true,
       data: {
-        restored: restoreResult.successCount,
-        sessionIds: restoredIds,
-        results: restoreResult.results,
+        processed: validIds.length,
+        succeeded: restoreResult.successCount,
+        failed: restoreResult.failureCount,
+        results: itemResults,
+        restoreResults: restoreResult.results,
       }
     });
   } catch (error) {
@@ -310,8 +418,10 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
 /**
  * DELETE /api/sessions/deleted
  * Empty trash - permanently delete all deleted sessions for a user
+ *
+ * This operation is always atomic - either all sessions are deleted or none.
  */
-router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
+router.delete('/deleted', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/empty-trash' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { archiveRemote = true, deleteGitBranch = false, githubToken } = req.query as {
@@ -337,7 +447,14 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
     if (sessions.length === 0) {
       res.json({
         success: true,
-        data: { deleted: 0, message: 'Trash is already empty' }
+        data: {
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          message: 'Trash is already empty',
+          results: [],
+          stats: { mode: 'atomic', durationMs: 0, retriesAttempted: 0 },
+        }
       });
       return;
     }
@@ -355,17 +472,17 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
       process.env.CLAUDE_ENVIRONMENT_ID
     );
 
-    // Execute batch cleanup with controlled concurrency
+    // Execute external cleanup with controlled concurrency
     const batchConfig: BatchOperationConfig<ChatSession, SessionCleanupResult> = {
       concurrency: DEFAULT_SESSION_CONCURRENCY,
-      operationName: 'empty-trash',
+      operationName: 'empty-trash-cleanup',
       continueOnError: true,
     };
 
-    const batchResult = await executeBatch(sessions, cleanupOperation, batchConfig);
+    const cleanupResult = await executeBatch(sessions, cleanupOperation, batchConfig);
 
-    // Transform results
-    const results: SessionCleanupResult[] = batchResult.results.map(itemResult => {
+    // Transform cleanup results
+    const cleanupResults: SessionCleanupResult[] = cleanupResult.results.map(itemResult => {
       if (itemResult.success && itemResult.result) {
         return itemResult.result;
       }
@@ -377,29 +494,83 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
       };
     });
 
-    // Permanently delete all trashed sessions
-    const deletedIds = sessions.map(s => s.id);
-    await db
-      .delete(chatSessions)
-      .where(inArray(chatSessions.id, deletedIds));
+    const sessionIds = sessions.map(s => s.id);
 
-    logger.info(`Emptied trash - permanently deleted ${deletedIds.length} sessions`, {
+    // Permanently delete all trashed sessions in a single atomic transaction
+    const dbResult = await executeBulkWrite(
+      db,
+      async (tx) => {
+        await tx.delete(chatSessions).where(inArray(chatSessions.id, sessionIds));
+        return { deletedCount: sessionIds.length };
+      },
+      {
+        operationName: 'empty-trash',
+        maxRetries: DEFAULT_MAX_RETRIES,
+        context: {
+          userId: authReq.user!.id,
+          sessionCount: sessionIds.length,
+        },
+      }
+    );
+
+    if (!dbResult.success) {
+      logger.error('Empty trash database operation failed', dbResult.error, {
+        component: 'Sessions',
+        userId: authReq.user!.id,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Database operation failed - trash not emptied',
+        details: dbResult.error?.message,
+        stats: {
+          retriesAttempted: dbResult.retriesAttempted,
+          durationMs: dbResult.durationMs,
+        },
+      });
+      return;
+    }
+
+    // Build per-item results
+    const itemResults: BulkOperationItemResult[] = sessions.map(session => {
+      const cleanup = cleanupResults.find(r => r.sessionId === session.id);
+      const hasCleanupErrors = cleanup && (cleanup.archiveError || cleanup.branchError);
+
+      return {
+        id: session.id,
+        success: true,
+        message: 'Permanently deleted',
+        error: hasCleanupErrors
+          ? [cleanup?.archiveError, cleanup?.branchError].filter(Boolean).join('; ')
+          : undefined,
+      };
+    });
+
+    logger.info(`Emptied trash - permanently deleted ${sessionIds.length} sessions`, {
       component: 'Sessions',
       userId: authReq.user!.id,
-      count: deletedIds.length,
-      batchSuccessCount: batchResult.successCount,
-      batchFailureCount: batchResult.failureCount,
+      count: sessionIds.length,
+      cleanupSuccessCount: cleanupResult.successCount,
+      cleanupFailureCount: cleanupResult.failureCount,
+      dbRetries: dbResult.retriesAttempted,
     });
 
     res.json({
       success: true,
       data: {
-        deleted: deletedIds.length,
-        results,
-        batchStats: {
-          successCount: batchResult.successCount,
-          failureCount: batchResult.failureCount,
-          durationMs: batchResult.totalDurationMs,
+        processed: sessionIds.length,
+        succeeded: sessionIds.length,
+        failed: 0,
+        results: itemResults,
+        cleanupResults,
+        stats: {
+          mode: 'atomic' as const,
+          durationMs: dbResult.durationMs,
+          retriesAttempted: dbResult.retriesAttempted,
+          cleanupStats: {
+            successCount: cleanupResult.successCount,
+            failureCount: cleanupResult.failureCount,
+            durationMs: cleanupResult.totalDurationMs,
+          },
         },
       }
     });
@@ -411,9 +582,17 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
 
 /**
  * POST /api/sessions/bulk-archive-remote
- * Archive Claude Remote sessions (for sessions stored locally but need remote cleanup)
+ * Archive Claude Remote sessions
+ *
+ * This endpoint performs two separate operations:
+ * 1. External API calls to archive remote sessions (cannot be rolled back)
+ * 2. Optional local database soft-delete (wrapped in transaction)
+ *
+ * Note: External API calls are intentionally done OUTSIDE the database transaction
+ * because they cannot be rolled back. The database operations only happen after
+ * successful archive of remote sessions.
  */
-router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-archive-remote', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-archive-remote' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionIds, archiveLocal = false } = req.body as {
@@ -442,7 +621,7 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
       return;
     }
 
-    // Get sessions that belong to this user and have remote session IDs
+    // Get sessions that belong to this user
     const sessions = await db
       .select()
       .from(chatSessions)
@@ -454,77 +633,135 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
         )
       );
 
-    // Create archive operation
+    if (sessions.length === 0) {
+      sendBadRequest(res, 'No valid sessions found');
+      return;
+    }
+
+    const startTime = Date.now();
+
+    // Step 1: Archive remote sessions via external API (outside transaction)
+    // These calls cannot be rolled back, so we do them first
     const archiveOperation = async (session: ChatSession): Promise<SessionArchiveResult> => {
       if (!session.remoteSessionId) {
         return {
           sessionId: session.id,
           success: false,
-          message: 'No remote session ID'
+          message: 'No remote session ID',
         };
       }
 
-      const archiveResult = await archiveClaudeRemoteSession(
-        session.remoteSessionId,
-        claudeAuth as ClaudeAuth,
-        process.env.CLAUDE_ENVIRONMENT_ID
-      );
-
-      // Optionally soft delete the local session too (with cascading)
-      if (archiveResult.success && archiveLocal) {
-        await sessionSoftDeleteService.softDeleteSession(session.id);
-        sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, session.id);
+      try {
+        const archiveResult = await archiveClaudeRemoteSession(
+          session.remoteSessionId,
+          claudeAuth as ClaudeAuth,
+          process.env.CLAUDE_ENVIRONMENT_ID
+        );
+        return {
+          sessionId: session.id,
+          success: archiveResult.success,
+          message: archiveResult.message,
+        };
+      } catch (error) {
+        return {
+          sessionId: session.id,
+          success: false,
+          message: (error as Error).message,
+        };
       }
-
-      return {
-        sessionId: session.id,
-        success: archiveResult.success,
-        message: archiveResult.message
-      };
     };
 
-    // Execute batch archive with controlled concurrency
-    const batchConfig: BatchOperationConfig<ChatSession, SessionArchiveResult> = {
+    // Execute external archive operations with controlled concurrency
+    const archiveBatchConfig: BatchOperationConfig<ChatSession, SessionArchiveResult> = {
       concurrency: DEFAULT_SESSION_CONCURRENCY,
       maxBatchSize: MAX_ARCHIVE_BATCH_SIZE,
-      operationName: 'bulk-archive-remote',
+      operationName: 'bulk-archive-remote-external',
       continueOnError: true,
     };
 
-    const batchResult = await executeBatch(sessions, archiveOperation, batchConfig);
+    const archiveResult = await executeBatch(sessions, archiveOperation, archiveBatchConfig);
 
-    // Transform results
-    const results: SessionArchiveResult[] = batchResult.results.map(itemResult => {
+    // Collect successfully archived session IDs
+    const successfullyArchivedIds: string[] = [];
+    const archiveResults: SessionArchiveResult[] = archiveResult.results.map(itemResult => {
       if (itemResult.success && itemResult.result) {
+        if (itemResult.result.success) {
+          successfullyArchivedIds.push(itemResult.item.id);
+        }
         return itemResult.result;
       }
       return {
         sessionId: itemResult.item.id,
         success: false,
-        message: itemResult.error?.message || 'Unknown error'
+        message: itemResult.error?.message || 'Unknown error',
       };
     });
 
-    const successCount = results.filter(r => r.success).length;
+    // Step 2: Optionally soft-delete local sessions (in transaction)
+    // Only delete sessions that were successfully archived remotely
+    let dbResult: { success: boolean; error?: Error; retriesAttempted: number; durationMs: number } = {
+      success: true,
+      retriesAttempted: 0,
+      durationMs: 0,
+    };
 
-    logger.info(`Archived ${successCount}/${sessions.length} remote sessions`, {
+    if (archiveLocal && successfullyArchivedIds.length > 0) {
+      // Use cascading soft-delete service
+      const softDeleteResult = await sessionSoftDeleteService.softDeleteSessions(successfullyArchivedIds);
+      dbResult = {
+        success: softDeleteResult.failureCount === 0,
+        retriesAttempted: 0,
+        durationMs: 0,
+      };
+
+      // Notify session list subscribers for deleted sessions
+      if (softDeleteResult.successCount > 0) {
+        for (const sessionId of successfullyArchivedIds) {
+          sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
+        }
+      }
+    }
+
+    // Build per-item results
+    const itemResults: BulkOperationItemResult[] = archiveResults.map(result => ({
+      id: result.sessionId,
+      success: result.success,
+      message: result.message,
+      error: !result.success ? result.message : undefined,
+    }));
+
+    const archiveSuccessCount = archiveResults.filter(r => r.success).length;
+    const totalDurationMs = Date.now() - startTime;
+
+    logger.info(`Archived ${archiveSuccessCount}/${sessions.length} remote sessions`, {
       component: 'Sessions',
       userId: authReq.user!.id,
       archiveLocal,
-      batchSuccessCount: batchResult.successCount,
-      batchFailureCount: batchResult.failureCount,
+      archiveSuccessCount,
+      archiveFailureCount: sessions.length - archiveSuccessCount,
+      localDeleteSuccess: dbResult.success,
+      localDeleteRetries: dbResult.retriesAttempted,
     });
 
     res.json({
-      success: true,
+      success: archiveSuccessCount > 0 && dbResult.success,
       data: {
-        archived: successCount,
-        total: sessions.length,
-        results,
-        batchStats: {
-          successCount: batchResult.successCount,
-          failureCount: batchResult.failureCount,
-          durationMs: batchResult.totalDurationMs,
+        processed: sessions.length,
+        succeeded: archiveSuccessCount,
+        failed: sessions.length - archiveSuccessCount,
+        results: itemResults,
+        stats: {
+          durationMs: totalDurationMs,
+          archiveStats: {
+            successCount: archiveResult.successCount,
+            failureCount: archiveResult.failureCount,
+            durationMs: archiveResult.totalDurationMs,
+          },
+          localDeleteStats: archiveLocal ? {
+            success: dbResult.success,
+            retriesAttempted: dbResult.retriesAttempted,
+            durationMs: dbResult.durationMs,
+          } : undefined,
         },
       }
     });
@@ -537,6 +774,8 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
 /**
  * POST /api/sessions/bulk-favorite
  * Set favorite status for multiple sessions
+ *
+ * This is a simple update operation that uses a single transaction.
  */
 router.post('/bulk-favorite', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -577,33 +816,84 @@ router.post('/bulk-favorite', requireAuth, async (req: Request, res: Response) =
 
     const validIds = sessions.map(s => s.id);
 
-    // Update favorite status
-    await db
-      .update(chatSessions)
-      .set({ favorite })
-      .where(inArray(chatSessions.id, validIds));
+    // Execute update within a transaction
+    const dbResult = await executeBulkWrite(
+      db,
+      async (tx) => {
+        await tx
+          .update(chatSessions)
+          .set({ favorite })
+          .where(inArray(chatSessions.id, validIds));
+
+        // Fetch updated sessions for broadcasting
+        const updatedSessions = await tx
+          .select()
+          .from(chatSessions)
+          .where(inArray(chatSessions.id, validIds));
+
+        return { updatedCount: validIds.length, sessions: updatedSessions };
+      },
+      {
+        operationName: 'bulk-favorite',
+        maxRetries: DEFAULT_MAX_RETRIES,
+        context: {
+          userId: authReq.user!.id,
+          sessionCount: validIds.length,
+          favorite,
+        },
+      }
+    );
+
+    if (!dbResult.success) {
+      logger.error('Bulk favorite database operation failed', dbResult.error, {
+        component: 'Sessions',
+        userId: authReq.user!.id,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Database operation failed',
+        details: dbResult.error?.message,
+        stats: {
+          retriesAttempted: dbResult.retriesAttempted,
+          durationMs: dbResult.durationMs,
+        },
+      });
+      return;
+    }
 
     // Notify session list subscribers
-    const updatedSessions = await db
-      .select()
-      .from(chatSessions)
-      .where(inArray(chatSessions.id, validIds));
-
+    const updatedSessions = dbResult.result?.sessions || [];
     for (const session of updatedSessions) {
       sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, session);
     }
+
+    // Build per-item results
+    const itemResults: BulkOperationItemResult[] = sessions.map(session => ({
+      id: session.id,
+      success: true,
+      message: favorite ? 'Added to favorites' : 'Removed from favorites',
+    }));
 
     logger.info(`Set favorite=${favorite} for ${validIds.length} sessions`, {
       component: 'Sessions',
       userId: authReq.user!.id,
       count: validIds.length,
+      retriesAttempted: dbResult.retriesAttempted,
     });
 
     res.json({
       success: true,
       data: {
-        updated: validIds.length,
+        processed: validIds.length,
+        succeeded: validIds.length,
+        failed: 0,
         favorite,
+        results: itemResults,
+        stats: {
+          mode: 'atomic' as const,
+          durationMs: dbResult.durationMs,
+          retriesAttempted: dbResult.retriesAttempted,
+        },
       }
     });
   } catch (error) {

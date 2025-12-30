@@ -539,6 +539,9 @@ export type {
   // Share token access log types
   ShareTokenAccessLog,
   NewShareTokenAccessLog,
+  // Idempotency types
+  IdempotencyKey,
+  NewIdempotencyKey,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -599,6 +602,8 @@ export {
   SNIPPET_CATEGORIES,
   // Share token access log table
   shareTokenAccessLog,
+  // Idempotency tables
+  idempotencyKeys,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
@@ -634,6 +639,18 @@ export {
   type TransactionOptions,
   type TransactionResult,
 } from './transaction.js';
+
+// Re-export bulk transaction utilities
+export {
+  executeBulkTransaction,
+  executeBulkWrite,
+  createBulkApiResponse,
+  type BulkItemResult,
+  type BulkTransactionResult,
+  type BulkTransactionMode,
+  type BulkTransactionConfig,
+  type BulkApiResponse,
+} from './bulkTransaction.js';
 
 // Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds
 // Consumers should import these from @webedt/shared instead of drizzle-orm directly
