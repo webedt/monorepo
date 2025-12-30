@@ -16,6 +16,9 @@ export const SAFE_PATH_REGEX = /^[a-zA-Z0-9._\-\/]+$/;
 /** Pattern to detect directory traversal attempts */
 export const TRAVERSAL_PATTERN = /(?:^|\/|\\)\.\.(?:\/|\\|$)/;
 
+/** Pattern to detect current directory references (./ or /./), which could be used in path manipulation */
+export const CURRENT_DIR_PATTERN = /(?:^\.\/|\/\.\/|\/\.$)/;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -35,9 +38,11 @@ export interface PathValidationResult {
  * Checks for:
  * - Null bytes (can be used to truncate paths)
  * - Directory traversal patterns (../)
+ * - Current directory references (./)
  * - Excessive length (>1000 characters)
  * - Invalid characters (only allows [a-zA-Z0-9._\-\/])
  * - Empty paths
+ * - Leading slashes (absolute paths)
  *
  * @param path - The file path to validate
  * @returns Validation result with error message if invalid
@@ -49,6 +54,9 @@ export interface PathValidationResult {
  *
  * const result2 = validatePath('../../../etc/passwd');
  * // { valid: false, error: 'Path contains directory traversal patterns' }
+ *
+ * const result3 = validatePath('./config');
+ * // { valid: false, error: 'Path contains current directory references' }
  * ```
  */
 export function validatePath(path: string): PathValidationResult {
@@ -71,6 +79,12 @@ export function validatePath(path: string): PathValidationResult {
   // Matches: ../  ..\  /.. at start, middle, or end of path
   if (TRAVERSAL_PATTERN.test(path)) {
     return { valid: false, error: 'Path contains directory traversal patterns' };
+  }
+
+  // Check for current directory references (./ or /./)
+  // These could be used in path manipulation attacks
+  if (CURRENT_DIR_PATTERN.test(path) || path === '.') {
+    return { valid: false, error: 'Path contains current directory references' };
   }
 
   // Check for invalid characters
@@ -156,9 +170,19 @@ export function validateBranchPath(branch: string): PathValidationResult {
     return { valid: false, error: 'Branch name contains directory traversal patterns' };
   }
 
+  // Check for current directory references
+  if (CURRENT_DIR_PATTERN.test(branch) || branch === '.') {
+    return { valid: false, error: 'Branch name contains current directory references' };
+  }
+
   // Check for invalid characters
   if (!SAFE_PATH_REGEX.test(branch)) {
     return { valid: false, error: 'Branch name contains invalid characters' };
+  }
+
+  // Check for leading slashes (invalid in Git branch names)
+  if (branch.startsWith('/')) {
+    return { valid: false, error: 'Branch name cannot start with a slash' };
   }
 
   return { valid: true };

@@ -70,17 +70,30 @@ export function validatePathParam(options: {
 }
 
 /**
- * Middleware to validate the 'newPath' field in request body
+ * Middleware to validate path fields in request body
  *
  * Used for rename operations where both source path (param) and
  * destination path (body) need validation.
+ *
+ * SECURITY NOTE: This middleware only validates the path format if the field is present.
+ * If the field is required for your operation, the route handler MUST check for its
+ * presence before using it. This middleware does NOT enforce field presence.
+ *
+ * @param fieldName - The name of the field in req.body to validate
+ * @returns Express middleware function
  *
  * @example
  * ```typescript
  * router.post('/:owner/:repo/rename/*',
  *   validatePathParam(),
  *   validateBodyPath('newPath'),
- *   async (req, res) => { ... }
+ *   async (req, res) => {
+ *     // Route handler must still check if newPath exists before using it
+ *     if (!req.body.newPath) {
+ *       return res.status(400).json({ error: 'newPath is required' });
+ *     }
+ *     // Safe to use newPath - format has been validated by middleware
+ *   }
  * );
  * ```
  */
@@ -89,7 +102,8 @@ export function validateBodyPath(fieldName: string): RequestHandler {
     const pathValue = req.body?.[fieldName];
 
     if (!pathValue) {
-      // Let the route handler decide if the field is required
+      // Field is optional at middleware level. If field is security-required,
+      // the route handler MUST validate its presence before using it.
       next();
       return;
     }
