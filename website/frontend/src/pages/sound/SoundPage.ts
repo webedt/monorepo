@@ -1580,8 +1580,9 @@ export class SoundPage extends Page<SoundPageOptions> {
       this.renderWaveform();
       toast.success(`Loaded ${file.name}`);
     } catch (error) {
-      console.error('Failed to load audio:', error);
-      toast.error('Failed to load audio file');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to load audio file:', { error: message, fileName: file.name });
+      toast.error(`Failed to load audio: ${message}`);
     }
   }
 
@@ -1721,9 +1722,13 @@ export class SoundPage extends Page<SoundPageOptions> {
         }
       }
     } catch (error) {
-      console.error('Failed to load files:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to load audio files list:', { error: message, sessionPath: this.getSessionPath() });
       if (listLoading) listLoading.style.display = 'none';
-      if (listEmpty) listEmpty.style.display = 'flex';
+      if (listEmpty) {
+        listEmpty.style.display = 'flex';
+        listEmpty.textContent = `Failed to load files: ${message}`;
+      }
     }
   }
 
@@ -1756,8 +1761,9 @@ export class SoundPage extends Page<SoundPageOptions> {
       this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer.slice(0));
       this.setupLoadedAudio(filePath);
     } catch (error) {
-      console.error('Failed to load audio:', error);
-      toast.error('Failed to load audio file');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to load audio from storage:', { error: message, filePath });
+      toast.error(`Failed to load audio: ${message}`);
     }
   }
 
@@ -1844,8 +1850,9 @@ export class SoundPage extends Page<SoundPageOptions> {
       this.hasUnsavedChanges = false;
       this.updateUnsavedIndicator();
     } catch (error) {
-      console.error('Failed to save audio:', error);
-      toast.error('Failed to save audio');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to save audio:', { error: message, filePath: this.currentFilePath });
+      toast.error(`Failed to save audio: ${message}`);
     } finally {
       this.isSaving = false;
     }
@@ -1926,17 +1933,26 @@ export class SoundPage extends Page<SoundPageOptions> {
 
       toast.info(`Syncing ${audioFiles.length} audio file(s)...`);
 
+      const failedFiles: string[] = [];
       for (const file of audioFiles) {
         try {
           await offlineStorage.markFileSynced(file.sessionPath, file.filePath);
         } catch (error) {
-          console.error(`Failed to sync file ${file.filePath}:`, error);
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          console.error('Failed to sync audio file:', { error: message, filePath: file.filePath });
+          failedFiles.push(file.filePath);
         }
       }
 
-      toast.success('Audio files synced successfully');
+      if (failedFiles.length > 0) {
+        toast.error(`Failed to sync ${failedFiles.length} file(s)`);
+      } else {
+        toast.success('Audio files synced successfully');
+      }
     } catch (error) {
-      console.error('Failed to sync pending changes:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to sync pending changes:', { error: message });
+      toast.error(`Sync failed: ${message}`);
     }
   }
 
