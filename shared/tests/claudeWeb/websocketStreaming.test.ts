@@ -9,7 +9,7 @@
  * - Abort signal handling
  */
 
-import { describe, it, beforeEach, afterEach, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { EventEmitter } from 'events';
 
