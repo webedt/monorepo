@@ -49,7 +49,7 @@ export class WorkerStore extends Store<WorkerState> {
         sessionStorage.setItem('workerStore', JSON.stringify(state));
       } catch (error) {
         // Storage save failed - log in development only
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           const message = error instanceof Error ? error.message : 'Unknown error';
           console.warn('WorkerStore: Failed to save to sessionStorage:', message);
         }

@@ -16,10 +16,12 @@
     "start": "concurrently -n frontend,backend -c blue,green \"npm run preview -w website/frontend\" \"npm run start -w website/backend\"",
     "clean": "npm run clean --workspaces --if-present",
     "cli": "npm run dev -w cli --",
-    "lint": "eslint --ext .ts,.tsx shared/src cli/src website/frontend/src website/backend/src",
-    "lint:catch": "eslint --ext .ts,.tsx --rule 'no-empty: [error, {allowEmptyCatch: false}]' shared/src cli/src website/frontend/src website/backend/src"
+    "lint": "eslint shared/src cli/src website/frontend/src website/backend/src",
+    "lint:catch": "eslint --rule 'no-empty: [error, {allowEmptyCatch: false}]' shared/src cli/src website/frontend/src website/backend/src"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
     "concurrently": "^8.2.2",
     "eslint": "^9.17.0"
   },

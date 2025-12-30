@@ -1,19 +1,36 @@
 /**
- * ESLint Configuration
+ * ESLint Configuration (Flat Config - ESLint 9.x)
  *
  * This configuration focuses on preventing silent error swallowing
  * in catch blocks across the codebase.
  *
- * Run with: npx eslint --ext .ts,.tsx src/
+ * Run with: npx eslint shared/src cli/src website/frontend/src website/backend/src
  */
 
+import typescriptParser from '@typescript-eslint/parser';
+import typescriptPlugin from '@typescript-eslint/eslint-plugin';
+
 export default [
+  {
+    // Ignore build artifacts and dependencies
+    // Note: This must come first in the config array
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/*.d.ts', // Declaration files
+    ],
+  },
   {
     // Apply to all TypeScript files
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
+      parser: typescriptParser,
+    },
+    plugins: {
+      '@typescript-eslint': typescriptPlugin,
     },
     rules: {
       /**
@@ -40,20 +57,10 @@ export default [
        * Bad:  catch { console.log('error'); }
        * Good: catch (error) { console.log('error:', error); }
        */
-      'no-unused-vars': ['warn', {
+      '@typescript-eslint/no-unused-vars': ['warn', {
         caughtErrors: 'all',
         caughtErrorsIgnorePattern: '^_',
       }],
     },
-  },
-  {
-    // Ignore build artifacts and dependencies
-    ignores: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/build/**',
-      '**/*.js', // Compiled JS files
-      '**/*.d.ts', // Declaration files
-    ],
   },
 ];

@@ -162,8 +162,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         github = JSON.parse(github);
       } catch (error) {
         // Log parse error for debugging, then treat as if no github config was provided
+        // Note: Don't log rawValue to avoid exposing potentially sensitive data
         const message = error instanceof Error ? error.message : 'Unknown error';
-        logger.warn('Failed to parse github parameter as JSON:', { error: message, rawValue: github.slice(0, 100) });
+        logger.debug('Failed to parse github parameter as JSON:', { error: message });
         github = undefined;
       }
     }
