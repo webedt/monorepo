@@ -514,6 +514,11 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
+// Version conflict error handler (handles optimistic locking errors)
+// Must be registered before the generic error handler
+import { versionConflictErrorHandler } from './api/middleware/versionConflict.js';
+app.use(versionConflictErrorHandler);
+
 // Error handler
 app.use(
   (

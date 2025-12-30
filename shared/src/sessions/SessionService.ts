@@ -17,7 +17,11 @@ import { normalizeRepoUrl, generateSessionPath } from '../utils/helpers/sessionP
 import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { CLAUDE_API_BASE_URL } from '../config/env.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
+import {
+  updateSessionStatusWithLock,
+  InvalidStatusTransitionError,
+} from './sessionLocking.js';
 
 import type { TransactionContext } from '../db/index.js';
 import type {
@@ -243,6 +247,7 @@ export class SessionService extends ASession {
           remoteWebUrl: result.remoteWebUrl,
           totalCost: result.totalCost?.toString(),
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
           ...(finalSessionPath ? { sessionPath: finalSessionPath } : {}),
         })
         .where(eq(chatSessions.id, chatSessionId));
@@ -263,11 +268,12 @@ export class SessionService extends ASession {
         remoteWebUrl: result.remoteWebUrl,
       };
     } catch (error) {
-      // Update session to error state
+      // Update session to error state, incrementing version
       await db.update(chatSessions)
         .set({
           status: 'error',
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
         })
         .where(eq(chatSessions.id, chatSessionId));
 
@@ -303,14 +309,18 @@ export class SessionService extends ASession {
       remoteSessionId: session.remoteSessionId,
     });
 
-    // Use transaction to ensure status update and message insertion are atomic
-    // This prevents inconsistent state if message insertion fails
+    // Use transaction with pessimistic locking to prevent concurrent resume requests
+    // This ensures only one resume can succeed when multiple concurrent requests arrive
     const textPrompt = extractTextFromPrompt(prompt);
     await withTransactionOrThrow(db, async (tx: TransactionContext) => {
-      // Update session status
-      await tx.update(chatSessions)
-        .set({ status: 'running' })
-        .where(eq(chatSessions.id, sessionId));
+      // Acquire row lock and update status atomically
+      // This uses SELECT ... FOR UPDATE and validates the transition is allowed
+      await updateSessionStatusWithLock(tx, sessionId, {
+        status: 'running',
+      }, {
+        validateTransition: true,
+        allowedFromStatuses: ['completed', 'error'],
+      });
 
       // Store user message
       await tx.insert(messages).values({
@@ -364,7 +374,7 @@ export class SessionService extends ASession {
         handleEvent
       );
 
-      // Update session with final result
+      // Update session with final result, incrementing version
       const finalStatus = result.status === 'completed' ? 'completed' : 'error';
 
       await db.update(chatSessions)
@@ -372,6 +382,7 @@ export class SessionService extends ASession {
           status: finalStatus,
           totalCost: result.totalCost?.toString(),
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
         })
         .where(eq(chatSessions.id, sessionId));
 
@@ -390,10 +401,12 @@ export class SessionService extends ASession {
         remoteWebUrl: result.remoteWebUrl,
       };
     } catch (error) {
+      // Update session to error state, incrementing version
       await db.update(chatSessions)
         .set({
           status: 'error',
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
         })
         .where(eq(chatSessions.id, sessionId));
 
@@ -521,6 +534,7 @@ export class SessionService extends ASession {
         eventsToInsert.length > 0;
 
       // Update session and insert events in a transaction for consistency
+      // Increment version on any status change to support optimistic locking
       if (hasChanges) {
         await db.transaction(async (tx) => {
           // Batch insert new events for better performance
@@ -535,7 +549,7 @@ export class SessionService extends ASession {
             );
           }
 
-          // Update session with new values
+          // Update session with new values and increment version
           await tx
             .update(chatSessions)
             .set({
@@ -544,6 +558,7 @@ export class SessionService extends ASession {
               branch: branch ?? undefined,
               sessionPath: sessionPath ?? undefined,
               completedAt: completedAt ?? undefined,
+              version: sql`${chatSessions.version} + 1`,
             })
             .where(eq(chatSessions.id, sessionId));
         });
