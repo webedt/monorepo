@@ -114,6 +114,7 @@ export const messages = pgTable('messages', {
     fileName: string;
   }>>(),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 });
 
 export const events = pgTable('events', {
@@ -122,6 +123,7 @@ export const events = pgTable('events', {
   eventType: text('event_type').notNull(),
   eventData: json('event_data').notNull(),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 });
 
 // Execution history for task audit trail
@@ -718,10 +720,13 @@ export async function softDeleteSessionsByIssue(
     return 0;
   }
 
-  // Soft delete the sessions
+  const now = new Date();
+  const sessionIds = sessionsToDelete.map(s => s.id);
+
+  // Soft delete the sessions with cascading to messages and events
   await database
     .update(chatSessions)
-    .set({ deletedAt: new Date() })
+    .set({ deletedAt: now })
     .where(
       and(
         eq(chatSessions.issueNumber, issueNumber),
@@ -731,7 +736,23 @@ export async function softDeleteSessionsByIssue(
       )
     );
 
-  logger.info(`Soft-deleted ${sessionsToDelete.length} session(s) for issue #${issueNumber} in ${repositoryOwner}/${repositoryName}`);
+  // Cascade soft delete to messages
+  for (const sessionId of sessionIds) {
+    await database
+      .update(messages)
+      .set({ deletedAt: now })
+      .where(eq(messages.chatSessionId, sessionId));
+  }
+
+  // Cascade soft delete to events
+  for (const sessionId of sessionIds) {
+    await database
+      .update(events)
+      .set({ deletedAt: now })
+      .where(eq(events.chatSessionId, sessionId));
+  }
+
+  logger.info(`Soft-deleted ${sessionsToDelete.length} session(s) with cascading for issue #${issueNumber} in ${repositoryOwner}/${repositoryName}`);
   return sessionsToDelete.length;
 }
 

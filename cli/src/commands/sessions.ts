@@ -11,7 +11,7 @@ import { db, chatSessions, events, messages, users, createLazyServiceContainer, 
 
 import type { ClaudeAuth, ExecutionEvent, TransactionContext } from '@webedt/shared';
 
-import { eq, desc, and, lt, sql, count } from 'drizzle-orm';
+import { eq, desc, and, lt, sql, count, isNull } from 'drizzle-orm';
 
 // Lazy container for backward compatibility
 const lazyContainer = createLazyServiceContainer();
@@ -342,7 +342,10 @@ sessionsCommand
           timestamp: events.timestamp,
         })
         .from(events)
-        .where(eq(events.chatSessionId, sessionId))
+        .where(and(
+          eq(events.chatSessionId, sessionId),
+          isNull(events.deletedAt)
+        ))
         .orderBy(desc(events.timestamp))
         .limit(limit);
 

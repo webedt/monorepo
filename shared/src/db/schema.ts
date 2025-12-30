@@ -111,6 +111,7 @@ export const messages = pgTable('messages', {
     fileName: string;
   }>>(),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 });
 
 // Raw SSE events table - stores events exactly as received for replay
@@ -122,6 +123,7 @@ export const events = pgTable('events', {
   uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 }, (table) => [
   // Index for efficient UUID-based deduplication queries
   uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),

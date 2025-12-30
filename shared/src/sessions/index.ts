@@ -26,6 +26,16 @@ export { SessionCleanupService, sessionCleanupService } from './SessionCleanupSe
 export { ATrashCleanupService, type TrashCleanupResult, type TrashCleanupSession } from './ATrashCleanupService.js';
 export { TrashCleanupService, trashCleanupService } from './TrashCleanupService.js';
 
+// Soft delete service (cascading soft deletes for sessions and related data)
+export {
+  ASessionSoftDeleteService,
+  type SoftDeleteResult,
+  type RestoreResult,
+  type BulkSoftDeleteResult,
+  type BulkRestoreResult,
+} from './ASessionSoftDeleteService.js';
+export { SessionSoftDeleteService, sessionSoftDeleteService } from './SessionSoftDeleteService.js';
+
 // Event storage service
 export { AEventStorageService, type StoredEvent, type StoreEventResult } from './AEventStorageService.js';
 export { EventStorageService, eventStorageService } from './EventStorageService.js';
