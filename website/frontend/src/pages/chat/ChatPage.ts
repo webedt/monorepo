@@ -669,8 +669,9 @@ export class ChatPage extends Page<ChatPageOptions> {
           this.handleStreamEvent({ ...data, type: eventType });
         } catch (error) {
           // Log stream parsing errors with context for debugging
+          // Note: Don't log rawData to avoid exposing potentially sensitive information
           const message = error instanceof Error ? error.message : 'Unknown error';
-          console.error('Failed to parse SSE event:', { eventType, error: message, rawData: event.data?.slice(0, 200) });
+          console.error('Failed to parse SSE event:', { eventType, error: message });
         }
       });
     }
@@ -1188,8 +1189,9 @@ export class ChatPage extends Page<ChatPageOptions> {
           this.handleStreamEvent({ ...data, type: eventType });
         } catch (error) {
           // Log stream parsing errors with context for debugging
+          // Note: Don't log rawData to avoid exposing potentially sensitive information
           const message = error instanceof Error ? error.message : 'Unknown error';
-          console.error('Failed to parse resume SSE event:', { eventType, error: message, rawData: event.data?.slice(0, 200) });
+          console.error('Failed to parse resume SSE event:', { eventType, error: message });
         }
       });
     }
