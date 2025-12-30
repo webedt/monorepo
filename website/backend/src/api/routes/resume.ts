@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events, eq, and, or, asc, gt } from '@webedt/shared';
+import { db, chatSessions, events, eq, and, or, asc, gt, isNull } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { sseRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
@@ -213,16 +213,24 @@ router.get('/resume/:sessionId', requireAuth, sseRateLimiter, async (req: Reques
 
     // Replay stored events from database
     // If lastEventId is provided, resume from that event (skip already-received events)
+    // Filter out soft-deleted events
     const eventQuery = lastEventDbId && !isNaN(lastEventDbId)
       ? db
           .select()
           .from(events)
-          .where(and(eq(events.chatSessionId, session.id), gt(events.id, lastEventDbId)))
+          .where(and(
+            eq(events.chatSessionId, session.id),
+            gt(events.id, lastEventDbId),
+            isNull(events.deletedAt)
+          ))
           .orderBy(asc(events.id))
       : db
           .select()
           .from(events)
-          .where(eq(events.chatSessionId, session.id))
+          .where(and(
+            eq(events.chatSessionId, session.id),
+            isNull(events.deletedAt)
+          ))
           .orderBy(asc(events.id));
 
     const storedEvents = await eventQuery;
@@ -451,11 +459,14 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       return;
     }
 
-    // Get all events
+    // Get all non-deleted events
     const storedEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, session[0].id))
+      .where(and(
+        eq(events.chatSessionId, session[0].id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     // Format response to match what client expects (data.events, data.total)

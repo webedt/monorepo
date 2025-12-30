@@ -113,6 +113,7 @@ export const messages = pgTable('messages', {
     fileName: string;
   }>>(),
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 });
 
 // Raw SSE events table - stores events exactly as received for replay
@@ -124,6 +125,7 @@ export const events = pgTable('events', {
   uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'), // Soft delete - cascades from parent session
 }, (table) => [
   // Index for efficient UUID-based deduplication queries
   uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),
@@ -1200,3 +1202,33 @@ export type SnippetCollection = typeof snippetCollections.$inferSelect;
 export type NewSnippetCollection = typeof snippetCollections.$inferInsert;
 export type SnippetInCollection = typeof snippetsInCollections.$inferSelect;
 export type NewSnippetInCollection = typeof snippetsInCollections.$inferInsert;
+
+// ============================================================================
+// IDEMPOTENCY KEYS - Prevent duplicate processing of critical operations
+// ============================================================================
+
+// Idempotency Keys - Stores request/response pairs for critical operations
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  id: text('id').primaryKey(), // UUID
+  key: text('key').notNull(), // The idempotency key from X-Idempotency-Key header
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull(), // The API endpoint (e.g., '/api/payments/checkout')
+  method: text('method').notNull(), // HTTP method (POST, PUT, DELETE)
+  requestHash: text('request_hash').notNull(), // SHA-256 hash of request body for consistency check
+  statusCode: integer('status_code'), // Response status code (null while processing)
+  responseBody: json('response_body').$type<Record<string, unknown>>(), // Cached response (null while processing)
+  status: text('status').notNull().default('processing'), // 'processing' | 'completed' | 'failed'
+  lockedAt: timestamp('locked_at'), // For concurrent request handling (lock timeout)
+  expiresAt: timestamp('expires_at').notNull(), // TTL for the idempotency key (24h default)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+}, (table) => [
+  // Unique constraint: one key per user per endpoint
+  uniqueIndex('idempotency_key_user_endpoint_idx').on(table.key, table.userId, table.endpoint),
+]);
+
+// Type exports for Idempotency Keys
+export type IdempotencyKey = typeof idempotencyKeys.$inferSelect;
+export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;

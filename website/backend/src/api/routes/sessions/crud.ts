@@ -8,7 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { db, chatSessions, messages, events, eq, and, asc, isNotNull, logger, generateSessionPath, validateRequest, CommonSchemas } from '@webedt/shared';
+import { db, chatSessions, messages, events, eq, and, asc, isNull, isNotNull, logger, generateSessionPath, validateRequest, CommonSchemas, sessionSoftDeleteService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -467,11 +467,14 @@ router.post('/:id/messages', requireAuth, validateSessionId, sessionOwnershipMid
 router.get('/:id/messages', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
 
-  // Get messages
+  // Get non-deleted messages
   const sessionMessages = await db
     .select()
     .from(messages)
-    .where(eq(messages.chatSessionId, sessionId))
+    .where(and(
+      eq(messages.chatSessionId, sessionId),
+      isNull(messages.deletedAt)
+    ))
     .orderBy(messages.timestamp);
 
   sendData(res, {
@@ -491,11 +494,14 @@ router.get('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddle
     userId: authReq.user?.id
   });
 
-  // Get events ordered by timestamp (ascending for replay order)
+  // Get non-deleted events ordered by timestamp (ascending for replay order)
   const sessionEvents = await db
     .select()
     .from(events)
-    .where(eq(events.chatSessionId, sessionId))
+    .where(and(
+      eq(events.chatSessionId, sessionId),
+      isNull(events.deletedAt)
+    ))
     .orderBy(asc(events.timestamp));
 
   logger.info('Events fetched for session', {
@@ -621,13 +627,19 @@ router.post('/:id/restore', requireAuth, validateSessionId, asyncHandler(async (
     return;
   }
 
-  // Restore session
-  await db
-    .update(chatSessions)
-    .set({ deletedAt: null })
-    .where(eq(chatSessions.id, sessionId));
+  // Restore session with cascading to messages and events
+  const restoreResult = await sessionSoftDeleteService.restoreSession(sessionId);
 
-  sendData(res, { message: 'Session restored' });
+  if (!restoreResult.success) {
+    res.status(500).json({ success: false, error: restoreResult.error });
+    return;
+  }
+
+  sendData(res, {
+    message: 'Session restored',
+    messagesRestored: restoreResult.messagesRestored,
+    eventsRestored: restoreResult.eventsRestored,
+  });
 }, { errorMessage: 'Failed to restore session' }));
 
 // Worker callback endpoint

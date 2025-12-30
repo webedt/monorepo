@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, events, eq, asc, logger, ensureValidToken, fetchEnvironmentIdFromSessions, CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, extractEventUuid } from '@webedt/shared';
+import { db, chatSessions, users, events, eq, and, asc, isNull, logger, ensureValidToken, fetchEnvironmentIdFromSessions, CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, extractEventUuid } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -138,11 +138,14 @@ const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => 
 
   // No custom wrapper events - just replay stored events directly
 
-  // PHASE 1: Replay stored events from database
+  // PHASE 1: Replay stored non-deleted events from database
   const storedEvents = await db
     .select()
     .from(events)
-    .where(eq(events.chatSessionId, sessionId))
+    .where(and(
+      eq(events.chatSessionId, sessionId),
+      isNull(events.deletedAt)
+    ))
     .orderBy(asc(events.id));
 
   logger.info(`Replaying ${storedEvents.length} stored events for reconnection`, {
