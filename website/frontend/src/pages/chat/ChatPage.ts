@@ -238,42 +238,33 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Load settings from localStorage
     this.loadSettings();
 
-    // Setup back button
-    const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
-    if (backBtn) {
-      backBtn.addEventListener('click', () => this.navigate('/agents'));
-    }
+    // Setup back button - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-action="back"]', 'click', () => this.navigate('/agents'));
 
     // Setup view code button
-    const viewCodeBtn = this.$('[data-action="view-code"]') as HTMLButtonElement;
-    if (viewCodeBtn) {
-      viewCodeBtn.addEventListener('click', () => {
-        const sessionId = this.options.params?.sessionId;
-        if (sessionId) {
-          this.navigate(`/session/${sessionId}/code`);
-        }
-      });
-    }
+    this.addListenerBySelector('[data-action="view-code"]', 'click', () => {
+      const sessionId = this.options.params?.sessionId;
+      if (sessionId) {
+        this.navigate(`/session/${sessionId}/code`);
+      }
+    });
 
     // Setup send button (handles both send and stop)
-    const sendBtn = this.$('[data-action="send"]') as HTMLButtonElement;
-    if (sendBtn) {
-      sendBtn.addEventListener('click', () => {
-        // Check if we should stop or send
-        if (this.isSessionRunning() && !this.inputValue.trim()) {
-          this.handleStop();
-        } else {
-          this.handleSend();
-        }
-      });
-    }
+    this.addListenerBySelector('[data-action="send"]', 'click', () => {
+      // Check if we should stop or send
+      if (this.isSessionRunning() && !this.inputValue.trim()) {
+        this.handleStop();
+      } else {
+        this.handleSend();
+      }
+    });
 
     // Setup textarea
     this.inputElement = this.$('.chat-input') as HTMLTextAreaElement;
     if (this.inputElement) {
-      this.inputElement.addEventListener('input', () => this.handleInputChange());
-      this.inputElement.addEventListener('keydown', (e) => this.handleKeyDown(e));
-      this.inputElement.addEventListener('paste', (e) => this.handlePaste(e));
+      this.addListener(this.inputElement, 'input', () => this.handleInputChange());
+      this.addListener(this.inputElement, 'keydown', (e) => this.handleKeyDown(e as KeyboardEvent));
+      this.addListener(this.inputElement, 'paste', (e) => this.handlePaste(e as ClipboardEvent));
     }
 
     // Get messages container
@@ -392,12 +383,8 @@ export class ChatPage extends Page<ChatPageOptions> {
   }
 
   private setupToolbar(): void {
-    // View toggle buttons
-    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
-    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
-    const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
-
-    normalBtn?.addEventListener('click', () => {
+    // View toggle buttons - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-view="normal"]', 'click', () => {
       this.viewMode = 'normal';
       this.showRawJson = false;
       this.saveSettings();
@@ -406,7 +393,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.renderContent();
     });
 
-    detailedBtn?.addEventListener('click', () => {
+    this.addListenerBySelector('[data-view="detailed"]', 'click', () => {
       this.viewMode = 'detailed';
       this.showRawJson = false;
       this.saveSettings();
@@ -415,7 +402,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.renderContent();
     });
 
-    rawBtn?.addEventListener('click', () => {
+    this.addListenerBySelector('[data-view="raw"]', 'click', () => {
       this.viewMode = 'detailed'; // Raw uses detailed mode data
       this.showRawJson = true;
       this.saveSettings();
@@ -425,8 +412,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     });
 
     // Timestamps toggle
-    const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
-    timestampsBtn?.addEventListener('click', () => {
+    this.addListenerBySelector('[data-action="toggle-timestamps"]', 'click', () => {
       this.showTimestamps = !this.showTimestamps;
       this.saveSettings();
       this.updateToolbarState();
@@ -434,18 +420,16 @@ export class ChatPage extends Page<ChatPageOptions> {
     });
 
     // Widescreen toggle
-    const widescreenBtn = this.$('[data-action="toggle-widescreen"]') as HTMLButtonElement;
-    widescreenBtn?.addEventListener('click', () => {
+    this.addListenerBySelector('[data-action="toggle-widescreen"]', 'click', () => {
       this.widescreen = !this.widescreen;
       this.saveSettings();
       this.updateToolbarState();
     });
 
     // Filters dropdown
-    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
     const filterMenu = this.$('.filter-menu') as HTMLElement;
 
-    filtersBtn?.addEventListener('click', (e) => {
+    this.addListenerBySelector('[data-action="toggle-filters"]', 'click', (e) => {
       e.stopPropagation();
       const isVisible = filterMenu.style.display !== 'none';
       filterMenu.style.display = isVisible ? 'none' : 'block';
@@ -454,8 +438,8 @@ export class ChatPage extends Page<ChatPageOptions> {
       }
     });
 
-    // Close filter menu when clicking outside
-    document.addEventListener('click', () => {
+    // Close filter menu when clicking outside - using addListener for automatic cleanup
+    this.addListener(document, 'click', () => {
       if (filterMenu) {
         filterMenu.style.display = 'none';
       }

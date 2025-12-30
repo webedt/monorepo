@@ -424,16 +424,13 @@ export class ScenePage extends Page<ScenePageOptions> {
   protected onMount(): void {
     super.onMount();
 
-    // Setup back button
-    const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
-    if (backBtn) {
-      backBtn.addEventListener('click', () => {
-        if (this.hasUnsavedChanges && !confirm('You have unsaved changes. Leave anyway?')) {
-          return;
-        }
-        this.navigate(`/session/${this.options.params?.sessionId}/chat`);
-      });
-    }
+    // Setup back button - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-action="back"]', 'click', () => {
+      if (this.hasUnsavedChanges && !confirm('You have unsaved changes. Leave anyway?')) {
+        return;
+      }
+      this.navigate(`/session/${this.options.params?.sessionId}/chat`);
+    });
 
     // Setup save button
     const saveBtnContainer = this.$('.save-btn-container') as HTMLElement;
@@ -545,53 +542,34 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private setupToolbar(): void {
-    // Add object buttons
-    const addSpriteBtn = this.$('[data-action="add-sprite"]');
-    const addRectBtn = this.$('[data-action="add-rectangle"]');
-    const addCircleBtn = this.$('[data-action="add-circle"]');
-    const addTextBtn = this.$('[data-action="add-text"]');
-
-    if (addSpriteBtn) addSpriteBtn.addEventListener('click', () => this.addSprite());
-    if (addRectBtn) addRectBtn.addEventListener('click', () => this.addShape('rectangle'));
-    if (addCircleBtn) addCircleBtn.addEventListener('click', () => this.addShape('circle'));
-    if (addTextBtn) addTextBtn.addEventListener('click', () => this.addText());
+    // Add object buttons - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-action="add-sprite"]', 'click', () => this.addSprite());
+    this.addListenerBySelector('[data-action="add-rectangle"]', 'click', () => this.addShape('rectangle'));
+    this.addListenerBySelector('[data-action="add-circle"]', 'click', () => this.addShape('circle'));
+    this.addListenerBySelector('[data-action="add-text"]', 'click', () => this.addText());
 
     // UI Component buttons
-    const addUIButtonBtn = this.$('[data-action="add-ui-button"]');
-    const addUIPanelBtn = this.$('[data-action="add-ui-panel"]');
-    const addUITextBtn = this.$('[data-action="add-ui-text"]');
-    const addUIImageBtn = this.$('[data-action="add-ui-image"]');
-    const addUISliderBtn = this.$('[data-action="add-ui-slider"]');
-    const addUIProgressBtn = this.$('[data-action="add-ui-progress"]');
-    const addUICheckboxBtn = this.$('[data-action="add-ui-checkbox"]');
-
-    if (addUIButtonBtn) addUIButtonBtn.addEventListener('click', () => this.addUIButton());
-    if (addUIPanelBtn) addUIPanelBtn.addEventListener('click', () => this.addUIPanel());
-    if (addUITextBtn) addUITextBtn.addEventListener('click', () => this.addUIText());
-    if (addUIImageBtn) addUIImageBtn.addEventListener('click', () => this.addUIImage());
-    if (addUISliderBtn) addUISliderBtn.addEventListener('click', () => this.addUISlider());
-    if (addUIProgressBtn) addUIProgressBtn.addEventListener('click', () => this.addUIProgressBar());
-    if (addUICheckboxBtn) addUICheckboxBtn.addEventListener('click', () => this.addUICheckbox());
+    this.addListenerBySelector('[data-action="add-ui-button"]', 'click', () => this.addUIButton());
+    this.addListenerBySelector('[data-action="add-ui-panel"]', 'click', () => this.addUIPanel());
+    this.addListenerBySelector('[data-action="add-ui-text"]', 'click', () => this.addUIText());
+    this.addListenerBySelector('[data-action="add-ui-image"]', 'click', () => this.addUIImage());
+    this.addListenerBySelector('[data-action="add-ui-slider"]', 'click', () => this.addUISlider());
+    this.addListenerBySelector('[data-action="add-ui-progress"]', 'click', () => this.addUIProgressBar());
+    this.addListenerBySelector('[data-action="add-ui-checkbox"]', 'click', () => this.addUICheckbox());
 
     // Z-order manipulation buttons
-    const bringToFrontBtn = this.$('[data-action="bring-to-front"]');
-    const bringForwardBtn = this.$('[data-action="bring-forward"]');
-    const sendBackwardBtn = this.$('[data-action="send-backward"]');
-    const sendToBackBtn = this.$('[data-action="send-to-back"]');
-    const deleteBtn = this.$('[data-action="delete"]');
-
-    if (bringToFrontBtn) bringToFrontBtn.addEventListener('click', () => this.bringToFront());
-    if (bringForwardBtn) bringForwardBtn.addEventListener('click', () => this.bringForward());
-    if (sendBackwardBtn) sendBackwardBtn.addEventListener('click', () => this.sendBackward());
-    if (sendToBackBtn) sendToBackBtn.addEventListener('click', () => this.sendToBack());
-    if (deleteBtn) deleteBtn.addEventListener('click', () => this.deleteSelected());
+    this.addListenerBySelector('[data-action="bring-to-front"]', 'click', () => this.bringToFront());
+    this.addListenerBySelector('[data-action="bring-forward"]', 'click', () => this.bringForward());
+    this.addListenerBySelector('[data-action="send-backward"]', 'click', () => this.sendBackward());
+    this.addListenerBySelector('[data-action="send-to-back"]', 'click', () => this.sendToBack());
+    this.addListenerBySelector('[data-action="delete"]', 'click', () => this.deleteSelected());
 
     // View toggles
     const toggleGridBtn = this.$('[data-action="toggle-grid"]');
     const toggleSnapBtn = this.$('[data-action="toggle-snap"]');
 
     if (toggleGridBtn) {
-      toggleGridBtn.addEventListener('click', () => {
+      this.addListener(toggleGridBtn, 'click', () => {
         const activeScene = this.activeScene;
         if (!activeScene) return;
         sceneStore.updateSceneSettings(activeScene.id, { showGrid: !this.showGrid });
@@ -601,7 +579,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     if (toggleSnapBtn) {
-      toggleSnapBtn.addEventListener('click', () => {
+      this.addListener(toggleSnapBtn, 'click', () => {
         const activeScene = this.activeScene;
         if (!activeScene) return;
         sceneStore.updateSceneSettings(activeScene.id, { snapToGrid: !this.snapToGrid });
@@ -612,7 +590,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Origin crosshair toggle
     const toggleOriginBtn = this.$('[data-action="toggle-origin"]');
     if (toggleOriginBtn) {
-      toggleOriginBtn.addEventListener('click', () => {
+      this.addListener(toggleOriginBtn, 'click', () => {
         this.showOriginCrosshair = !this.showOriginCrosshair;
         toggleOriginBtn.classList.toggle('active', this.showOriginCrosshair);
         this.renderScene();
@@ -620,43 +598,26 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     // Reset view button
-    const resetViewBtn = this.$('[data-action="reset-view"]');
-    if (resetViewBtn) {
-      resetViewBtn.addEventListener('click', () => {
-        if (this.viewport) {
-          this.viewport.reset();
-          this.updateZoomDisplay();
-          this.renderScene();
-        }
-      });
-    }
+    this.addListenerBySelector('[data-action="reset-view"]', 'click', () => {
+      if (this.viewport) {
+        this.viewport.reset();
+        this.updateZoomDisplay();
+        this.renderScene();
+      }
+    });
 
     // Mode toggle (Edit/Play)
-    const toggleModeBtn = this.$('[data-action="toggle-mode"]');
-    if (toggleModeBtn) {
-      toggleModeBtn.addEventListener('click', () => this.toggleEditorMode());
-    }
+    this.addListenerBySelector('[data-action="toggle-mode"]', 'click', () => this.toggleEditorMode());
 
     // Custom components library
-    const toggleComponentsBtn = this.$('[data-action="toggle-components"]');
-    if (toggleComponentsBtn) {
-      toggleComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary());
-    }
-
-    const closeComponentsBtn = this.$('.close-panel-btn');
-    if (closeComponentsBtn) {
-      closeComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary(false));
-    }
-
-    const saveAsComponentBtn = this.$('[data-action="save-as-component"]');
-    if (saveAsComponentBtn) {
-      saveAsComponentBtn.addEventListener('click', () => this.saveSelectionAsComponent());
-    }
+    this.addListenerBySelector('[data-action="toggle-components"]', 'click', () => this.toggleComponentsLibrary());
+    this.addListenerBySelector('.close-panel-btn', 'click', () => this.toggleComponentsLibrary(false));
+    this.addListenerBySelector('[data-action="save-as-component"]', 'click', () => this.saveSelectionAsComponent());
 
     // Components library search
     const searchInput = this.$('.components-search-input') as HTMLInputElement;
     if (searchInput) {
-      searchInput.addEventListener('input', () => {
+      this.addListener(searchInput, 'input', () => {
         if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
         this.searchDebounceTimer = setTimeout(() => {
           this.updateComponentsLibrary(searchInput.value.trim());
@@ -669,7 +630,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (componentsPanel) {
       const categoryBtns = componentsPanel.querySelectorAll('.category-btn');
       categoryBtns.forEach((btn: Element) => {
-        btn.addEventListener('click', () => {
+        this.addListener(btn, 'click', () => {
           categoryBtns.forEach((b: Element) => b.classList.remove('active'));
           btn.classList.add('active');
           const category = (btn as HTMLElement).dataset.category || 'all';
@@ -679,22 +640,13 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     // Play mode controls
-    const playBtn = this.$('[data-action="play"]');
-    const pauseBtn = this.$('[data-action="pause"]');
-    const stopBtn = this.$('[data-action="stop"]');
-    const playSpeedSelect = this.$('.play-speed-select') as HTMLSelectElement;
+    this.addListenerBySelector('[data-action="play"]', 'click', () => this.startPlayMode());
+    this.addListenerBySelector('[data-action="pause"]', 'click', () => this.togglePausePlayMode());
+    this.addListenerBySelector('[data-action="stop"]', 'click', () => this.stopPlayMode());
 
-    if (playBtn) {
-      playBtn.addEventListener('click', () => this.startPlayMode());
-    }
-    if (pauseBtn) {
-      pauseBtn.addEventListener('click', () => this.togglePausePlayMode());
-    }
-    if (stopBtn) {
-      stopBtn.addEventListener('click', () => this.stopPlayMode());
-    }
+    const playSpeedSelect = this.$('.play-speed-select') as HTMLSelectElement;
     if (playSpeedSelect) {
-      playSpeedSelect.addEventListener('change', () => {
+      this.addListener(playSpeedSelect, 'change', () => {
         this.playModeTimeScale = parseFloat(playSpeedSelect.value);
         if (this.gameRuntime) {
           this.gameRuntime.setTimeScale(this.playModeTimeScale);
@@ -716,7 +668,8 @@ export class ScenePage extends Page<ScenePageOptions> {
         this.stopPlayMode();
       }
     };
-    window.addEventListener('keydown', this.boundPlayModeKeyHandler);
+    // Use addListener for automatic cleanup
+    this.addListener(window, 'keydown', this.boundPlayModeKeyHandler as EventListener);
   }
 
   private setupCanvas(): void {
@@ -731,20 +684,20 @@ export class ScenePage extends Page<ScenePageOptions> {
         zoom: 1,
       });
 
-      // Create bound handlers for cleanup
+      // Create bound handlers for cleanup reference
       this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
       this.boundHandleMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
       this.boundHandleMouseUp = () => this.handleMouseUp();
       this.boundHandleWheel = (e: WheelEvent) => this.handleWheel(e);
 
-      // Mouse events for object selection and dragging
-      this.sceneCanvas.addEventListener('mousedown', this.boundHandleMouseDown);
-      this.sceneCanvas.addEventListener('mousemove', this.boundHandleMouseMove);
-      this.sceneCanvas.addEventListener('mouseup', this.boundHandleMouseUp);
-      this.sceneCanvas.addEventListener('mouseleave', this.boundHandleMouseUp);
+      // Mouse events for object selection and dragging - using addListener for automatic cleanup
+      this.addListener(this.sceneCanvas, 'mousedown', this.boundHandleMouseDown as EventListener);
+      this.addListener(this.sceneCanvas, 'mousemove', this.boundHandleMouseMove as EventListener);
+      this.addListener(this.sceneCanvas, 'mouseup', this.boundHandleMouseUp as EventListener);
+      this.addListener(this.sceneCanvas, 'mouseleave', this.boundHandleMouseUp as EventListener);
 
       // Wheel event for zooming
-      this.sceneCanvas.addEventListener('wheel', this.boundHandleWheel);
+      this.addListener(this.sceneCanvas, 'wheel', this.boundHandleWheel as EventListener);
     }
   }
 
@@ -752,7 +705,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Pivot preset buttons
     const pivotPresets = this.$$('.pivot-preset');
     pivotPresets.forEach((btn) => {
-      btn.addEventListener('click', () => {
+      this.addListener(btn, 'click', () => {
         const activeScene = this.activeScene;
         const pivotData = (btn as HTMLButtonElement).dataset.pivot;
         if (!pivotData || !this.selectedObjectId || !activeScene) return;
@@ -775,7 +728,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Pivot X input
     const pivotXInput = this.$('.pivot-x') as HTMLInputElement;
     if (pivotXInput) {
-      pivotXInput.addEventListener('change', () => {
+      this.addListener(pivotXInput, 'change', () => {
         const activeScene = this.activeScene;
         if (!this.selectedObjectId || !activeScene) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
@@ -795,7 +748,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Pivot Y input
     const pivotYInput = this.$('.pivot-y') as HTMLInputElement;
     if (pivotYInput) {
-      pivotYInput.addEventListener('change', () => {
+      this.addListener(pivotYInput, 'change', () => {
         const activeScene = this.activeScene;
         if (!this.selectedObjectId || !activeScene) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
@@ -820,7 +773,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     const uiTextInput = this.$('.ui-text') as HTMLInputElement;
 
     if (uiWidthInput) {
-      uiWidthInput.addEventListener('change', () => {
+      this.addListener(uiWidthInput, 'change', () => {
         if (!this.selectedObjectId) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
@@ -832,7 +785,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     if (uiHeightInput) {
-      uiHeightInput.addEventListener('change', () => {
+      this.addListener(uiHeightInput, 'change', () => {
         if (!this.selectedObjectId) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
@@ -844,7 +797,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     if (uiValueSlider) {
-      uiValueSlider.addEventListener('input', () => {
+      this.addListener(uiValueSlider, 'input', () => {
         if (!this.selectedObjectId) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
@@ -858,7 +811,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     if (uiCheckedInput) {
-      uiCheckedInput.addEventListener('change', () => {
+      this.addListener(uiCheckedInput, 'change', () => {
         if (!this.selectedObjectId) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
@@ -870,7 +823,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     if (uiTextInput) {
-      uiTextInput.addEventListener('input', () => {
+      this.addListener(uiTextInput, 'input', () => {
         if (!this.selectedObjectId) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
@@ -884,7 +837,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Z-order input handler
     const zIndexInput = this.$('.z-index-input') as HTMLInputElement;
     if (zIndexInput) {
-      zIndexInput.addEventListener('change', () => {
+      this.addListener(zIndexInput, 'change', () => {
         const activeScene = this.activeScene;
         if (!this.selectedObjectId || !activeScene) return;
         const newZIndex = parseInt(zIndexInput.value) || 0;
@@ -900,7 +853,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Z-order button handlers in properties panel
     const zOrderButtons = this.$$('[data-z-action]');
     zOrderButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
+      this.addListener(btn, 'click', () => {
         const action = (btn as HTMLElement).dataset.zAction;
         switch (action) {
           case 'bring-to-front': this.bringToFront(); break;
@@ -943,7 +896,8 @@ export class ScenePage extends Page<ScenePageOptions> {
         this.deleteSelected();
       }
     };
-    document.addEventListener('keydown', this.boundKeydownHandler);
+    // Use addListener for automatic cleanup
+    this.addListener(document, 'keydown', this.boundKeydownHandler as EventListener);
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -3679,34 +3633,14 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   protected onUnmount(): void {
-    // Remove canvas event listeners
-    if (this.sceneCanvas) {
-      if (this.boundHandleMouseDown) {
-        this.sceneCanvas.removeEventListener('mousedown', this.boundHandleMouseDown);
-      }
-      if (this.boundHandleMouseMove) {
-        this.sceneCanvas.removeEventListener('mousemove', this.boundHandleMouseMove);
-      }
-      if (this.boundHandleMouseUp) {
-        this.sceneCanvas.removeEventListener('mouseup', this.boundHandleMouseUp);
-        this.sceneCanvas.removeEventListener('mouseleave', this.boundHandleMouseUp);
-      }
-      if (this.boundHandleWheel) {
-        this.sceneCanvas.removeEventListener('wheel', this.boundHandleWheel);
-      }
-    }
-
-    // Remove document-level keyboard listener
-    if (this.boundKeydownHandler) {
-      document.removeEventListener('keydown', this.boundKeydownHandler);
-    }
-
-    // Clear bound handler references
+    // Note: Event listeners are now cleaned up automatically by the ListenerRegistry
+    // Clear bound handler references to avoid memory leaks from closures
     this.boundHandleMouseDown = null;
     this.boundHandleMouseMove = null;
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
     this.boundKeydownHandler = null;
+    this.boundPlayModeKeyHandler = null;
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();

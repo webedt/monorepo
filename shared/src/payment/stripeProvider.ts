@@ -8,14 +8,22 @@ import { APaymentProvider } from './APaymentProvider.js';
 import { logger } from '../utils/logging/logger.js';
 import { STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET } from '../config/env.js';
 
+import {
+  isStripeNotFoundError,
+  mapRefundReason,
+  mapStripeCheckoutStatus,
+  mapStripeEventType,
+  mapStripeStatus,
+  sanitizeMetadata,
+  toCurrencyCode,
+} from './utils.js';
+
 import type { CheckoutSession } from './types.js';
 import type { CreateCheckoutRequest } from './types.js';
 import type { CreatePaymentIntentRequest } from './types.js';
-import type { CurrencyCode } from './types.js';
 import type { PaymentIntent } from './types.js';
 import type { PaymentMetadata } from './types.js';
 import type { PaymentProvider } from './types.js';
-import type { PaymentStatus } from './types.js';
 import type { ProviderHealthStatus } from './types.js';
 import type { RefundRequest } from './types.js';
 import type { RefundResult } from './types.js';
@@ -23,74 +31,9 @@ import type { WebhookEvent } from './types.js';
 import type { WebhookEventType } from './types.js';
 import type { WebhookVerification } from './types.js';
 
-const VALID_CURRENCY_CODES: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
-
-/**
- * Validates and returns a currency code, defaulting to USD if invalid
- */
-function toCurrencyCode(currency: string): CurrencyCode {
-  const upper = currency.toUpperCase() as CurrencyCode;
-  return VALID_CURRENCY_CODES.includes(upper) ? upper : 'USD';
-}
-
 export interface StripeConfig {
   secretKey: string;
   webhookSecret: string;
-}
-
-/**
- * Maps Stripe payment intent status to our PaymentStatus
- */
-function mapStripeStatus(status: Stripe.PaymentIntent.Status): PaymentStatus {
-  switch (status) {
-    case 'succeeded':
-      return 'succeeded';
-    case 'processing':
-      return 'processing';
-    case 'requires_payment_method':
-    case 'requires_confirmation':
-    case 'requires_action':
-      return 'requires_action';
-    case 'canceled':
-      return 'cancelled';
-    default:
-      return 'pending';
-  }
-}
-
-/**
- * Maps Stripe checkout session status to our PaymentStatus
- */
-function mapStripeCheckoutStatus(
-  status: Stripe.Checkout.Session.Status | null,
-  paymentStatus: Stripe.Checkout.Session.PaymentStatus | null
-): PaymentStatus {
-  if (status === 'complete' && paymentStatus === 'paid') {
-    return 'succeeded';
-  }
-  if (status === 'expired') {
-    return 'cancelled';
-  }
-  if (paymentStatus === 'unpaid') {
-    return 'pending';
-  }
-  return 'pending';
-}
-
-/**
- * Maps Stripe event type to our WebhookEventType
- */
-function mapStripeEventType(type: string): WebhookEventType | null {
-  const mapping: Record<string, WebhookEventType> = {
-    'checkout.session.completed': 'checkout.session.completed',
-    'checkout.session.expired': 'checkout.session.expired',
-    'payment_intent.succeeded': 'payment_intent.succeeded',
-    'payment_intent.payment_failed': 'payment_intent.payment_failed',
-    'payment_intent.canceled': 'payment_intent.cancelled',
-    'charge.refunded': 'charge.refunded',
-    'charge.dispute.created': 'charge.dispute.created',
-  };
-  return mapping[type] || null;
 }
 
 export class StripeProvider extends APaymentProvider {
@@ -132,7 +75,7 @@ export class StripeProvider extends APaymentProvider {
           },
           quantity: item.quantity,
         })),
-        metadata: this.sanitizeMetadata(request.metadata),
+        metadata: sanitizeMetadata(request.metadata),
         success_url: request.successUrl,
         cancel_url: request.cancelUrl,
         expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 minutes
@@ -176,7 +119,7 @@ export class StripeProvider extends APaymentProvider {
         metadata: (session.metadata as PaymentMetadata) || {},
       };
     } catch (error) {
-      if ((error as Stripe.errors.StripeError).code === 'resource_missing') {
+      if (isStripeNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -196,7 +139,7 @@ export class StripeProvider extends APaymentProvider {
       const intent = await this.stripe.paymentIntents.create({
         amount: request.amount.amount,
         currency: request.amount.currency.toLowerCase(),
-        metadata: this.sanitizeMetadata(request.metadata),
+        metadata: sanitizeMetadata(request.metadata),
         description: request.description,
         automatic_payment_methods: { enabled: true },
       });
@@ -243,7 +186,7 @@ export class StripeProvider extends APaymentProvider {
         createdAt: new Date(intent.created * 1000),
       };
     } catch (error) {
-      if ((error as Stripe.errors.StripeError).code === 'resource_missing') {
+      if (isStripeNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -291,9 +234,9 @@ export class StripeProvider extends APaymentProvider {
       const refund = await this.stripe.refunds.create({
         payment_intent: request.paymentIntentId,
         amount: request.amount,
-        reason: this.mapRefundReason(request.reason),
+        reason: mapRefundReason(request.reason),
         metadata: request.metadata
-          ? this.sanitizeMetadata(request.metadata)
+          ? sanitizeMetadata(request.metadata)
           : undefined,
       });
 
@@ -379,28 +322,6 @@ export class StripeProvider extends APaymentProvider {
         error: (error as Error).message,
       };
     }
-  }
-
-  private sanitizeMetadata(
-    metadata: PaymentMetadata
-  ): Record<string, string> {
-    const sanitized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(metadata)) {
-      if (value !== undefined) {
-        sanitized[key] = String(value);
-      }
-    }
-    return sanitized;
-  }
-
-  private mapRefundReason(
-    reason?: string
-  ): 'duplicate' | 'fraudulent' | 'requested_by_customer' | undefined {
-    if (!reason) return 'requested_by_customer';
-    const lowerReason = reason.toLowerCase();
-    if (lowerReason.includes('duplicate')) return 'duplicate';
-    if (lowerReason.includes('fraud')) return 'fraudulent';
-    return 'requested_by_customer';
   }
 
   private parseStripeEvent(

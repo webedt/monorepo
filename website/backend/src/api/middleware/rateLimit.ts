@@ -24,7 +24,7 @@
  * - File Operations: File read/write operations - prevents abuse
  */
 
-import rateLimit from 'express-rate-limit';
+import rateLimit, { type Options, type Store } from 'express-rate-limit';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import {
   logger,
@@ -203,11 +203,9 @@ export function getRateLimitDashboard(): {
   storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
   circuitBreakers: Record<string, { state: string; failures: number }>;
 } {
-  const storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }> = {} as any;
-
-  for (const [tier, store] of Object.entries(stores)) {
-    storeStats[tier as RateLimitTier] = store.getStats();
-  }
+  const storeStats = Object.fromEntries(
+    Object.entries(stores).map(([tier, store]) => [tier, store.getStats()])
+  ) as Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
 
   const circuitBreakers: Record<string, { state: string; failures: number }> = {};
   const allStats = circuitBreakerRegistry.getAllStats();
@@ -359,10 +357,14 @@ function createRateLimitHandler(tier: RateLimitTier, store: SlidingWindowStore) 
 }
 
 /**
- * Key generator that uses IP address
- * For authenticated endpoints, could optionally use user ID for per-user limits
+ * Get client IP address from request
+ * Handles X-Forwarded-For for proxied requests
+ *
+ * Note: For IPv6 normalization, express-rate-limit's default keyGenerator
+ * handles this properly. This helper is for cases where we need IP as part
+ * of a composite key.
  */
-function keyGenerator(req: Request): string {
+function getClientIp(req: Request): string {
   // Use IP address as the primary key
   // X-Forwarded-For header handling for proxied requests
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -379,7 +381,7 @@ function keyGenerator(req: Request): string {
  */
 function authenticatedKeyGenerator(req: Request): string {
   const authReq = req as AuthRequest;
-  const ip = keyGenerator(req);
+  const ip = getClientIp(req);
 
   // If user is authenticated, use combination of IP and user ID
   if (authReq.user?.id) {
@@ -428,24 +430,33 @@ function createEnhancedRateLimiter(
   tier: RateLimitTier,
   windowMs: number,
   maxRequests: number,
-  keyGen: (req: Request) => string = authenticatedKeyGenerator
+  keyGen?: (req: Request) => string
 ): RequestHandler {
   const store = stores[tier];
 
-  return rateLimit({
+  const options: Partial<Options> = {
     windowMs,
     max: (req: Request) => getEffectiveMaxRequests(tier, maxRequests),
     standardHeaders: true, // Return rate limit info in headers
     legacyHeaders: false, // Disable X-RateLimit-* headers
-    keyGenerator: keyGen,
     skip: createSkipFunction(tier),
     handler: createRateLimitHandler(tier, store),
-    store: store as any, // express-rate-limit store interface
+    store: store as unknown as Store, // SlidingWindowStore implements Store interface
     message: {
       success: false,
       error: 'Too many requests. Please try again later.',
     },
-  });
+  };
+
+  // Only set custom keyGenerator if provided
+  // When using custom keyGenerators that combine IP with other data,
+  // disable the IPv6 validation since we handle IP extraction properly
+  if (keyGen) {
+    options.keyGenerator = keyGen;
+    options.validate = { keyGeneratorIpFallback: false };
+  }
+
+  return rateLimit(options);
 }
 
 /**
@@ -456,12 +467,13 @@ function createEnhancedRateLimiter(
  * - POST /api/auth/register
  *
  * Default: 5 requests per minute
+ * Uses express-rate-limit's default IP-based keyGenerator which handles IPv6 properly
  */
 export const authRateLimiter = createEnhancedRateLimiter(
   'auth',
   config.authWindowMs,
-  config.authMaxRequests,
-  keyGenerator // IP-based only for auth
+  config.authMaxRequests
+  // No custom keyGenerator - uses express-rate-limit's default IP handling
 );
 
 /**
@@ -473,12 +485,13 @@ export const authRateLimiter = createEnhancedRateLimiter(
  * - GET /api/sessions/shared/:token/events/stream
  *
  * Default: 30 requests per minute
+ * Uses express-rate-limit's default IP-based keyGenerator which handles IPv6 properly
  */
 export const publicShareRateLimiter = createEnhancedRateLimiter(
   'public',
   config.publicWindowMs,
-  config.publicMaxRequests,
-  keyGenerator // IP-based only for public
+  config.publicMaxRequests
+  // No custom keyGenerator - uses express-rate-limit's default IP handling
 );
 
 /**
@@ -488,11 +501,13 @@ export const publicShareRateLimiter = createEnhancedRateLimiter(
  * - Most /api/* endpoints
  *
  * Default: 100 requests per minute
+ * Uses authenticated key generator for per-user tracking
  */
 export const standardRateLimiter = createEnhancedRateLimiter(
   'standard',
   config.standardWindowMs,
-  config.standardMaxRequests
+  config.standardMaxRequests,
+  authenticatedKeyGenerator
 );
 
 /**
@@ -510,7 +525,8 @@ export const standardRateLimiter = createEnhancedRateLimiter(
 export const aiOperationRateLimiter = createEnhancedRateLimiter(
   'ai',
   config.aiWindowMs,
-  config.aiMaxRequests
+  config.aiMaxRequests,
+  authenticatedKeyGenerator
 );
 
 /**
@@ -527,7 +543,8 @@ export const aiOperationRateLimiter = createEnhancedRateLimiter(
 export const syncOperationRateLimiter = createEnhancedRateLimiter(
   'sync',
   config.syncWindowMs,
-  config.syncMaxRequests
+  config.syncMaxRequests,
+  authenticatedKeyGenerator
 );
 
 /**
@@ -544,7 +561,8 @@ export const syncOperationRateLimiter = createEnhancedRateLimiter(
 export const searchRateLimiter = createEnhancedRateLimiter(
   'search',
   config.searchWindowMs,
-  config.searchMaxRequests
+  config.searchMaxRequests,
+  authenticatedKeyGenerator
 );
 
 /**
@@ -561,7 +579,8 @@ export const searchRateLimiter = createEnhancedRateLimiter(
 export const collaborationRateLimiter = createEnhancedRateLimiter(
   'collaboration',
   config.collaborationWindowMs,
-  config.collaborationMaxRequests
+  config.collaborationMaxRequests,
+  authenticatedKeyGenerator
 );
 
 /**
@@ -572,11 +591,13 @@ export const collaborationRateLimiter = createEnhancedRateLimiter(
  * - Workspace file operations
  *
  * Default: 100 requests per minute per user
+ * Uses authenticated key generator for per-user tracking
  */
 export const fileOperationRateLimiter = createEnhancedRateLimiter(
   'file',
   config.fileWindowMs,
-  config.fileMaxRequests
+  config.fileMaxRequests,
+  authenticatedKeyGenerator
 );
 
 /**
@@ -598,7 +619,7 @@ export const fileOperationRateLimiter = createEnhancedRateLimiter(
  */
 function sseKeyGenerator(req: Request): string {
   const authReq = req as AuthRequest;
-  const ip = keyGenerator(req);
+  const ip = getClientIp(req);
   const userId = authReq.user?.id || 'anonymous';
 
   // Extract session ID from URL parameters or path
@@ -648,13 +669,14 @@ export function createRateLimiter(
   tier: RateLimitTier = 'standard'
 ): RequestHandler {
   // Use authenticated key generator for user-specific tiers
+  // IP-only tiers (auth, public) use undefined to get express-rate-limit's default IPv6-safe handling
   const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration', 'sse', 'file'].includes(tier);
 
   return createEnhancedRateLimiter(
     tier,
     windowMs,
     max,
-    useAuthenticatedKey ? authenticatedKeyGenerator : keyGenerator
+    useAuthenticatedKey ? authenticatedKeyGenerator : undefined
   );
 }
 

@@ -3,9 +3,6 @@
  * tags:
  *   - name: Diffs
  *     description: File diff operations and comparison between Git branches
- *
- * Diff Routes
- * Provides diff visualization comparing current branch against base branch
  */
 
 import { Router, Request, Response } from 'express';

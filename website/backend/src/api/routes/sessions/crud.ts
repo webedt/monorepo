@@ -1,15 +1,21 @@
 /**
  * Sessions CRUD Routes
  * Basic create, read, update, delete operations for sessions
+ *
+ * Uses constructor injection pattern for better testability.
+ * Services are injected via factory function instead of ServiceProvider.get().
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, events, eq, and, asc, isNull, isNotNull, ServiceProvider, ASessionQueryService, logger, generateSessionPath } from '@webedt/shared';
+import { db, chatSessions, messages, events, eq, and, asc, isNull, isNotNull, logger, generateSessionPath, sessionSoftDeleteService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
+
 import type { AuthRequest } from '../../middleware/auth.js';
+
 import {
   validateSessionId,
   requireSessionOwnership,
+  createRequireSessionOwnership,
   asyncHandler,
   sendData,
   sendSession,
@@ -17,12 +23,53 @@ import {
   sendBadRequest,
   sendForbidden,
 } from '../../middleware/sessionMiddleware.js';
+
 import type { SessionRequest } from '../../middleware/sessionMiddleware.js';
-import { sessionListBroadcaster } from '@webedt/shared';
+
+import { sessionListBroadcaster, createLazyServiceContainer } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { extractEventUuid } from '@webedt/shared';
 
-const router = Router();
+import type { SessionCrudServices, SessionMiddlewareServices } from '@webedt/shared';
+
+// =============================================================================
+// Route Factory (Recommended Pattern)
+// =============================================================================
+
+/**
+ * Create session CRUD routes with injected services.
+ *
+ * This factory function enables proper unit testing by accepting
+ * services as parameters instead of using ServiceProvider.get().
+ *
+ * @param services - Session CRUD services container
+ * @param middlewareServices - Optional middleware services (for ownership checks)
+ * @returns Express Router with session CRUD routes
+ *
+ * @example
+ * ```typescript
+ * // In production
+ * const container = createServiceContainer();
+ * app.use('/api/sessions', createCrudRoutes(container));
+ *
+ * // In tests
+ * const mockContainer = createMockServiceContainer({
+ *   sessionQueryService: mockQueryService,
+ *   logger: mockLogger,
+ * });
+ * const router = createCrudRoutes(mockContainer);
+ * ```
+ */
+export function createCrudRoutes(
+  services: SessionCrudServices,
+  middlewareServices?: SessionMiddlewareServices
+): Router {
+  const router = Router();
+
+  // Use injected middleware services or fall back to default
+  const sessionOwnershipMiddleware = middlewareServices
+    ? createRequireSessionOwnership(middlewareServices)
+    : requireSessionOwnership;
 
 /**
  * @openapi
@@ -148,9 +195,9 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const queryService = ServiceProvider.get(ASessionQueryService);
 
-    const sessions = await queryService.listActive(authReq.user!.id);
+    // Use injected service instead of ServiceProvider.get()
+    const sessions = await services.sessionQueryService.listActive(authReq.user!.id);
 
     res.json({
       success: true,
@@ -211,7 +258,6 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 router.get('/search', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const queryService = ServiceProvider.get(ASessionQueryService);
 
     // Parse query parameters
     const query = (req.query.q as string) || '';
@@ -240,7 +286,8 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await queryService.search(authReq.user!.id, {
+    // Use injected service instead of ServiceProvider.get()
+    const result = await services.sessionQueryService.search(authReq.user!.id, {
       query: query.trim(),
       limit,
       offset,
@@ -269,13 +316,13 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
 router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const queryService = ServiceProvider.get(ASessionQueryService);
 
     // Parse pagination params
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 per request
     const offset = parseInt(req.query.offset as string) || 0;
 
-    const result = await queryService.listDeleted(authReq.user!.id, { limit, offset });
+    // Use injected service instead of ServiceProvider.get()
+    const result = await services.sessionQueryService.listDeleted(authReq.user!.id, { limit, offset });
 
     res.json({
       success: true,
@@ -324,8 +371,8 @@ router.get('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Requ
   const authReq = req as AuthRequest;
   const { sessionId } = req as SessionRequest;
 
-  const queryService = ServiceProvider.get(ASessionQueryService);
-  const session = await queryService.getByIdWithPreview(sessionId, authReq.user!.id);
+  // Use injected service instead of ServiceProvider.get()
+  const session = await services.sessionQueryService.getByIdWithPreview(sessionId, authReq.user!.id);
 
   if (!session) {
     sendNotFound(res, 'Session not found');
@@ -336,7 +383,7 @@ router.get('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Requ
 }, { errorMessage: 'Failed to fetch session' }));
 
 // Create an event for a session
-router.post('/:id/events', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { eventData } = req.body;
 
@@ -360,7 +407,7 @@ router.post('/:id/events', requireAuth, validateSessionId, requireSessionOwnersh
 }, { errorMessage: 'Failed to create event' }));
 
 // Create a message for a session
-router.post('/:id/messages', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/messages', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { type, content } = req.body;
 
@@ -390,14 +437,17 @@ router.post('/:id/messages', requireAuth, validateSessionId, requireSessionOwner
 }, { errorMessage: 'Failed to create message' }));
 
 // Get messages for a session
-router.get('/:id/messages', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id/messages', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
 
-  // Get messages
+  // Get non-deleted messages
   const sessionMessages = await db
     .select()
     .from(messages)
-    .where(eq(messages.chatSessionId, sessionId))
+    .where(and(
+      eq(messages.chatSessionId, sessionId),
+      isNull(messages.deletedAt)
+    ))
     .orderBy(messages.timestamp);
 
   sendData(res, {
@@ -407,7 +457,7 @@ router.get('/:id/messages', requireAuth, validateSessionId, requireSessionOwners
 }, { errorMessage: 'Failed to fetch messages' }));
 
 // Get events for a session
-router.get('/:id/events', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const { sessionId } = req as SessionRequest;
 
@@ -417,11 +467,14 @@ router.get('/:id/events', requireAuth, validateSessionId, requireSessionOwnershi
     userId: authReq.user?.id
   });
 
-  // Get events ordered by timestamp (ascending for replay order)
+  // Get non-deleted events ordered by timestamp (ascending for replay order)
   const sessionEvents = await db
     .select()
     .from(events)
-    .where(eq(events.chatSessionId, sessionId))
+    .where(and(
+      eq(events.chatSessionId, sessionId),
+      isNull(events.deletedAt)
+    ))
     .orderBy(asc(events.timestamp));
 
   logger.info('Events fetched for session', {
@@ -437,7 +490,7 @@ router.get('/:id/events', requireAuth, validateSessionId, requireSessionOwnershi
 }, { errorMessage: 'Failed to fetch events' }));
 
 // Update a chat session
-router.patch('/:id', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { userRequest, branch } = req.body;
 
@@ -470,7 +523,7 @@ router.patch('/:id', requireAuth, validateSessionId, requireSessionOwnership, as
 }, { errorMessage: 'Failed to update session' }));
 
 // Unlock a chat session
-router.post('/:id/unlock', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/unlock', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
 
   // Unlock session
@@ -484,7 +537,7 @@ router.post('/:id/unlock', requireAuth, validateSessionId, requireSessionOwnersh
 }, { errorMessage: 'Failed to unlock session' }));
 
 // Toggle favorite status for a chat session
-router.post('/:id/favorite', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/favorite', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const { sessionId, chatSession } = req as SessionRequest;
 
@@ -509,7 +562,7 @@ router.post('/:id/favorite', requireAuth, validateSessionId, requireSessionOwner
 }, { errorMessage: 'Failed to toggle favorite status' }));
 
 // Abort a running session
-router.post('/:id/abort', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/abort', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
 
   // Note: Local AI worker has been removed - sessions are now handled by Claude Remote
@@ -556,13 +609,19 @@ router.post('/:id/restore', requireAuth, validateSessionId, asyncHandler(async (
     return;
   }
 
-  // Restore session
-  await db
-    .update(chatSessions)
-    .set({ deletedAt: null })
-    .where(eq(chatSessions.id, sessionId));
+  // Restore session with cascading to messages and events
+  const restoreResult = await sessionSoftDeleteService.restoreSession(sessionId);
 
-  sendData(res, { message: 'Session restored' });
+  if (!restoreResult.success) {
+    res.status(500).json({ success: false, error: restoreResult.error });
+    return;
+  }
+
+  sendData(res, {
+    message: 'Session restored',
+    messagesRestored: restoreResult.messagesRestored,
+    eventsRestored: restoreResult.eventsRestored,
+  });
 }, { errorMessage: 'Failed to restore session' }));
 
 // Worker callback endpoint
@@ -626,5 +685,26 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
     status
   });
 }, { errorMessage: 'Failed to update session status' }));
+
+  return router;
+}
+
+// =============================================================================
+// Default Export (Backward Compatibility)
+// =============================================================================
+
+/**
+ * Default router using lazy service container.
+ *
+ * Services are accessed at request time (not at module load time)
+ * via lazy getters, allowing the router to be created before
+ * ServiceProvider is initialized.
+ *
+ * For new code, prefer using createCrudRoutes() with explicit
+ * service injection for better testability.
+ *
+ * @deprecated Use createCrudRoutes() for new code
+ */
+const router = createCrudRoutes(createLazyServiceContainer());
 
 export default router;

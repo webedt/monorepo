@@ -259,6 +259,10 @@ async function doInitialize(): Promise<void> {
       }
     }
 
+    if (schemaUpdate.duplicatesRemoved > 0) {
+      console.log(`  Cleaned up duplicate events: ${schemaUpdate.duplicatesRemoved} removed`);
+    }
+
     if (schemaUpdate.indexesCreated.length > 0) {
       console.log('  Created indexes:');
       for (const idx of schemaUpdate.indexesCreated) {
@@ -273,7 +277,7 @@ async function doInitialize(): Promise<void> {
       }
     }
 
-    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0) {
+    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0 && schemaUpdate.duplicatesRemoved === 0) {
       console.log('  ✅ Schema is up to date');
     }
 
@@ -669,3 +673,26 @@ export type {
   GeminiAuthData,
   ImageAiKeysData,
 } from './authTypes.js';
+
+// Re-export DataLoader utilities for query batching and N+1 prevention
+export {
+  DataLoader,
+  BatchContext,
+  createResultMap,
+  createResultMapBy,
+  groupBy,
+  groupByFn,
+  coalesceQueries,
+  type DataLoaderOptions,
+} from './dataLoader.js';
+
+// Re-export query logging utilities for development
+export {
+  QueryLogger,
+  getQueryLogger,
+  createRequestLogger,
+  createQueryLoggerMiddleware,
+  type QueryLogEntry,
+  type QueryAnalysis,
+  type QueryLoggerOptions,
+} from './queryLogger.js';

@@ -41,10 +41,19 @@ export interface EncryptedData {
 }
 
 /**
- * Check if encryption is enabled (ENCRYPTION_KEY is set)
+ * Check if encryption is enabled and fully configured.
+ * Requires both ENCRYPTION_KEY and a valid ENCRYPTION_SALT to be set.
+ * This ensures that encryption operations won't fail due to missing configuration.
  */
 export function isEncryptionEnabled(): boolean {
-  return !!ENCRYPTION_KEY;
+  if (!ENCRYPTION_KEY) {
+    return false;
+  }
+  // Also verify ENCRYPTION_SALT is set and valid (hex string of at least 32 chars)
+  if (!ENCRYPTION_SALT || !/^[0-9a-fA-F]{32,}$/.test(ENCRYPTION_SALT)) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -242,7 +251,8 @@ export function safeEncrypt(value: string | null | undefined): string | null {
 }
 
 /**
- * Safely decrypt a value, handling unencrypted data gracefully
+ * Safely decrypt a value, handling unencrypted data gracefully.
+ * Returns the original value on decryption failure to prevent 500 errors.
  */
 export function safeDecrypt(value: string | null | undefined): string | null {
   if (value === null || value === undefined) {
@@ -258,7 +268,15 @@ export function safeDecrypt(value: string | null | undefined): string | null {
     return value;
   }
 
-  return decrypt(value);
+  try {
+    return decrypt(value);
+  } catch (error) {
+    logger.warn('Failed to decrypt value, returning as-is', {
+      component: 'Encryption',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return value;
+  }
 }
 
 /**
@@ -278,8 +296,8 @@ export function safeEncryptJson<T>(data: T | null | undefined): string | null {
 }
 
 /**
- * Safely decrypt a JSON value, handling both encrypted and plain JSON
- * Returns null if the value cannot be decrypted or parsed as JSON
+ * Safely decrypt a JSON value, handling both encrypted and plain JSON.
+ * Returns null if the value cannot be decrypted or parsed as JSON.
  */
 export function safeDecryptJson<T>(value: string | T | null | undefined): T | null {
   if (value === null || value === undefined) {
@@ -317,7 +335,15 @@ export function safeDecryptJson<T>(value: string | T | null | undefined): T | nu
     }
   }
 
-  return decryptJson<T>(value as string);
+  try {
+    return decryptJson<T>(value as string);
+  } catch (error) {
+    logger.warn('Failed to decrypt JSON value, returning null', {
+      component: 'Encryption',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**

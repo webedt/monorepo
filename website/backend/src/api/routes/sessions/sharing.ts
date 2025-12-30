@@ -9,7 +9,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events, eq, and, asc, isNull, ServiceProvider, ASessionAuthorizationService, getPreviewUrlFromSession, logger, generateSecureShareToken, calculateShareTokenExpiration, isValidShareToken, SHARE_TOKEN_CONFIG, shareTokenAccessLogService } from '@webedt/shared';
+import { db, chatSessions, events, eq, and, asc, isNull, isNotNull, ServiceProvider, ASessionAuthorizationService, getPreviewUrlFromSession, logger, generateSecureShareToken, calculateShareTokenExpiration, isValidShareToken, SHARE_TOKEN_CONFIG, shareTokenAccessLogService } from '@webedt/shared';
 import type { ShareTokenAccessType, ShareTokenFailureReason } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -21,12 +21,12 @@ import {
   sendNotFound,
   sendBadRequest,
   sendForbidden,
-  setupSSEHeaders,
 } from '../../middleware/sessionMiddleware.js';
 import type { SessionRequest } from '../../middleware/sessionMiddleware.js';
 import { shareTokenValidationRateLimiter } from '../../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { createSSEWriter } from './helpers.js';
 
 /**
  * Extract client IP address from request, handling proxied requests.
@@ -224,11 +224,14 @@ router.get('/shared/:token/events', shareTokenValidationRateLimiter, async (req:
     // Log successful access
     logShareAccess(session.id, shareToken, 'events', req, true);
 
-    // Get events ordered by timestamp
+    // Get non-deleted events ordered by timestamp
     const sessionEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, session.id))
+      .where(and(
+        eq(events.chatSessionId, session.id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     res.json({
@@ -303,24 +306,28 @@ router.get('/shared/:token/events/stream', shareTokenValidationRateLimiter, asyn
       isActive
     });
 
-    // Set up SSE headers
-    setupSSEHeaders(res);
+    // Create SSEWriter with automatic heartbeat management
+    const writer = createSSEWriter(res);
+    writer.setup();
 
-    // Replay stored events
+    // Replay stored non-deleted events
     const storedEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, session.id))
+      .where(and(
+        eq(events.chatSessionId, session.id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     for (const event of storedEvents) {
-      if (res.writableEnded) break;
+      if (!writer.isWritable()) break;
       const eventData = {
         ...(event.eventData as object),
         _replayed: true,
         _originalTimestamp: event.timestamp
       };
-      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+      writer.writeEvent(eventData);
     }
 
     // Handle live streaming or completion
@@ -329,21 +336,20 @@ router.get('/shared/:token/events/stream', shareTokenValidationRateLimiter, asyn
 
       const unsubscribe = sessionEventBroadcaster.subscribe(session.id, subscriberId, (event) => {
         try {
-          if (res.writableEnded) {
+          if (!writer.isWritable()) {
             unsubscribe();
             return;
           }
 
-          res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+          writer.writeEvent(event.data as Record<string, unknown>);
 
           if (event.eventType === 'completed') {
-            res.write(`event: completed\n`);
-            res.write(`data: ${JSON.stringify({
+            writer.writeNamedEvent('completed', {
               websiteSessionId: session.id,
               completed: true,
               replayed: false
-            })}\n\n`);
-            res.end();
+            });
+            writer.end();
             unsubscribe();
           }
         } catch (err) {
@@ -354,23 +360,24 @@ router.get('/shared/:token/events/stream', shareTokenValidationRateLimiter, asyn
 
       req.on('close', () => {
         logger.info(`Client disconnected from shared session stream: ${session.id}`, { component: 'Sessions' });
+        writer.end();
         unsubscribe();
       });
 
       req.on('error', (err) => {
         logger.error(`Shared stream error for session ${session.id}`, err, { component: 'Sessions' });
+        writer.end();
         unsubscribe();
       });
     } else {
       // Session not active - send completion and close
-      res.write(`event: completed\n`);
-      res.write(`data: ${JSON.stringify({
+      writer.writeNamedEvent('completed', {
         websiteSessionId: session.id,
         completed: true,
         replayed: true,
         status: session.status
-      })}\n\n`);
-      res.end();
+      });
+      writer.end();
     }
   } catch (error) {
     logger.error('Shared session stream error', error as Error, { component: 'Sessions' });
