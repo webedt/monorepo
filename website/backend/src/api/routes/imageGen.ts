@@ -11,6 +11,13 @@ import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: ImageGen
+ *     description: AI-powered image generation and editing
+ */
+
 // Available models for image generation
 const AVAILABLE_MODELS = {
   'google/gemini-2.5-flash-image': {
@@ -228,6 +235,78 @@ async function generateWithGoogle(
   }
 }
 
+/**
+ * @openapi
+ * /image-gen/generate:
+ *   post:
+ *     tags:
+ *       - ImageGen
+ *     summary: Generate or edit image
+ *     description: |
+ *       Generates a new image from a prompt or edits an existing image.
+ *       Supports multiple providers (OpenRouter, CometAPI, Google).
+ *       Rate limited to 10 requests per minute.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prompt
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *                 description: Image generation prompt
+ *               imageData:
+ *                 type: string
+ *                 description: Base64 encoded image for editing
+ *               selection:
+ *                 type: object
+ *                 description: Selection region for targeted editing
+ *                 properties:
+ *                   x:
+ *                     type: number
+ *                   y:
+ *                     type: number
+ *                   width:
+ *                     type: number
+ *                   height:
+ *                     type: number
+ *               provider:
+ *                 type: string
+ *                 enum: [openrouter, cometapi, google]
+ *               model:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Image generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     imageData:
+ *                       type: string
+ *                       description: Base64 encoded result image
+ *                     provider:
+ *                       type: string
+ *                     model:
+ *                       type: string
+ *       400:
+ *         description: Missing prompt or API key
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Main image generation endpoint
 // Rate limited to prevent abuse of expensive AI image generation (10/min per user)
 router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Request, res: Response) => {
@@ -317,6 +396,56 @@ router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Reques
   }
 });
 
+/**
+ * @openapi
+ * /image-gen/models:
+ *   get:
+ *     tags:
+ *       - ImageGen
+ *     summary: Get available models
+ *     description: Returns list of available image generation models and providers.
+ *     responses:
+ *       200:
+ *         description: Models and providers retrieved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     models:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           displayName:
+ *                             type: string
+ *                           description:
+ *                             type: string
+ *                           providers:
+ *                             type: array
+ *                             items:
+ *                               type: string
+ *                     providers:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           description:
+ *                             type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 // Get available models and providers
 router.get('/models', requireAuth, async (req: Request, res: Response) => {
   res.json({

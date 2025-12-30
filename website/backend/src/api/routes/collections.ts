@@ -4,33 +4,64 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, collections, sessionCollections, chatSessions, eq, and, desc, asc, sql, withTransactionOrThrow } from '@webedt/shared';
+import {
+  db,
+  collections,
+  sessionCollections,
+  chatSessions,
+  eq,
+  and,
+  desc,
+  asc,
+  sql,
+  withTransactionOrThrow,
+  logger,
+  isValidHexColor,
+  isValidIcon,
+  VALID_ICONS,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
 import type { TransactionContext } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
-// Validation constants
-const VALID_ICONS = ['folder', 'star', 'code', 'bookmark', 'archive'] as const;
-const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
-
-// Validation helpers
-function isValidHexColor(color: unknown): color is string {
-  return typeof color === 'string' && HEX_COLOR_REGEX.test(color);
-}
-
-function isValidIcon(icon: unknown): icon is string {
-  return typeof icon === 'string' && VALID_ICONS.includes(icon as (typeof VALID_ICONS)[number]);
-}
+/**
+ * @openapi
+ * tags:
+ *   - name: Collections
+ *     description: User-created organizational folders for sessions
+ */
 
 // ===========================================================================
 // IMPORTANT: Routes with specific paths must be defined BEFORE parameterized
 // routes like /:id to prevent the parameter from matching literal path segments
 // ===========================================================================
 
+/**
+ * @openapi
+ * /collections/session/{sessionId}:
+ *   get:
+ *     tags:
+ *       - Collections
+ *     summary: Get collections for a session
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Collections retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get collections for a specific session
 // NOTE: Must be before /:id to prevent 'session' from being matched as an id
 router.get('/session/:sessionId', requireAuth, async (req: Request, res: Response) => {
@@ -81,6 +112,44 @@ router.get('/session/:sessionId', requireAuth, async (req: Request, res: Respons
   }
 });
 
+/**
+ * @openapi
+ * /collections/session/{sessionId}/bulk:
+ *   post:
+ *     tags:
+ *       - Collections
+ *     summary: Bulk add session to collections
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - collectionIds
+ *             properties:
+ *               collectionIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Sessions added
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Bulk add session to multiple collections
 // NOTE: Must be before /:id to prevent 'session' from being matched as an id
 router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: Response) => {
@@ -161,6 +230,36 @@ router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: R
   }
 });
 
+/**
+ * @openapi
+ * /collections/reorder:
+ *   post:
+ *     tags:
+ *       - Collections
+ *     summary: Reorder collections
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderedIds
+ *             properties:
+ *               orderedIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Collections reordered
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Reorder collections
 // NOTE: Must be before /:id to prevent 'reorder' from being matched as an id
 router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
@@ -214,6 +313,22 @@ router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
 // Standard CRUD routes with parameterized paths
 // ===========================================================================
 
+/**
+ * @openapi
+ * /collections:
+ *   get:
+ *     tags:
+ *       - Collections
+ *     summary: List user collections
+ *     description: Returns all collections for the current user with session counts.
+ *     responses:
+ *       200:
+ *         description: Collections retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get all collections for the current user
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -255,6 +370,29 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /collections/{id}:
+ *   get:
+ *     tags:
+ *       - Collections
+ *     summary: Get collection by ID
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Collection retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get a single collection by ID
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -278,6 +416,44 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /collections:
+ *   post:
+ *     tags:
+ *       - Collections
+ *     summary: Create collection
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               color:
+ *                 type: string
+ *                 pattern: '^#[0-9A-Fa-f]{6}$'
+ *               icon:
+ *                 type: string
+ *                 enum: [folder, star, code, bookmark, archive]
+ *               isDefault:
+ *                 type: boolean
+ *     responses:
+ *       201:
+ *         description: Collection created
+ *       400:
+ *         description: Invalid input or name exists
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Create a new collection
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -367,6 +543,49 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /collections/{id}:
+ *   patch:
+ *     tags:
+ *       - Collections
+ *     summary: Update collection
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               color:
+ *                 type: string
+ *               icon:
+ *                 type: string
+ *               sortOrder:
+ *                 type: integer
+ *               isDefault:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Collection updated
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Update a collection
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -454,6 +673,29 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /collections/{id}:
+ *   delete:
+ *     tags:
+ *       - Collections
+ *     summary: Delete collection
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Collection deleted
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a collection
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -487,6 +729,29 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /collections/{id}/sessions:
+ *   get:
+ *     tags:
+ *       - Collections
+ *     summary: Get collection sessions
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Sessions retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get sessions in a collection
 router.get('/:id/sessions', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -544,6 +809,36 @@ router.get('/:id/sessions', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+/**
+ * @openapi
+ * /collections/{id}/sessions/{sessionId}:
+ *   post:
+ *     tags:
+ *       - Collections
+ *     summary: Add session to collection
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       201:
+ *         description: Session added
+ *       400:
+ *         description: Already in collection
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Add a session to a collection
 router.post('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -607,6 +902,34 @@ router.post('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: R
   }
 });
 
+/**
+ * @openapi
+ * /collections/{id}/sessions/{sessionId}:
+ *   delete:
+ *     tags:
+ *       - Collections
+ *     summary: Remove session from collection
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session removed
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Remove a session from a collection
 router.delete('/:id/sessions/:sessionId', requireAuth, async (req: Request, res: Response) => {
   try {

@@ -3,8 +3,15 @@
  * Handles game purchases and transaction history
  */
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Purchases
+ *     description: Game purchases and transaction history
+ */
+
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPaymentService } from '@webedt/shared';
+import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPaymentService, FRONTEND_URL, FRONTEND_PORT } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -17,7 +24,44 @@ const router = Router();
 // All routes require authentication
 router.use(requireAuth);
 
-// Get purchase statistics (must be before /:purchaseId to avoid being treated as purchaseId)
+/**
+ * @openapi
+ * /api/purchases/stats/summary:
+ *   get:
+ *     summary: Get purchase statistics summary
+ *     tags: [Purchases]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Purchase statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalPurchases:
+ *                       type: integer
+ *                     completedPurchases:
+ *                       type: integer
+ *                     refundedPurchases:
+ *                       type: integer
+ *                     totalSpentCents:
+ *                       type: number
+ *                     totalRefundedCents:
+ *                       type: number
+ *                     netSpentCents:
+ *                       type: number
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/stats/summary', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -58,7 +102,56 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
   }
 });
 
-// Get purchase history (must be before /:purchaseId to avoid being treated as purchaseId)
+/**
+ * @openapi
+ * /api/purchases/history:
+ *   get:
+ *     summary: Get purchase history
+ *     tags: [Purchases]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 200
+ *       - name: offset
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Purchase history with game details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     purchases:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/history', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -105,7 +198,100 @@ router.get('/history', async (req: Request, res: Response) => {
   }
 });
 
-// Purchase a game (free games only - paid games use /api/payments/checkout)
+/**
+ * @openapi
+ * /api/purchases/buy/{gameId}:
+ *   post:
+ *     summary: Purchase a game
+ *     description: Free games are added immediately. Paid games redirect to checkout or return payment details.
+ *     tags: [Purchases]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: gameId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               provider:
+ *                 type: string
+ *                 enum: [stripe, paypal]
+ *                 description: Payment provider (required for paid games to create checkout)
+ *     responses:
+ *       200:
+ *         description: Free game purchased or checkout session created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - type: object
+ *                   description: Free game purchase
+ *                   properties:
+ *                     success:
+ *                       type: boolean
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         purchase:
+ *                           type: object
+ *                         libraryItem:
+ *                           type: object
+ *                         message:
+ *                           type: string
+ *                 - type: object
+ *                   description: Paid game checkout
+ *                   properties:
+ *                     success:
+ *                       type: boolean
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         requiresPayment:
+ *                           type: boolean
+ *                         checkoutUrl:
+ *                           type: string
+ *                         sessionId:
+ *                           type: string
+ *                         provider:
+ *                           type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       402:
+ *         description: Payment required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 error:
+ *                   type: string
+ *                 requiresPayment:
+ *                   type: boolean
+ *                 price:
+ *                   type: number
+ *                 currency:
+ *                   type: string
+ *                 availableProviders:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                 checkoutEndpoint:
+ *                   type: string
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/buy/:gameId', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -168,7 +354,7 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
         }
 
         // Build checkout URLs (provider-specific placeholders)
-        const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
+        const baseUrl = FRONTEND_URL || `http://localhost:${FRONTEND_PORT}`;
         // Stripe replaces {CHECKOUT_SESSION_ID}; PayPal appends its own token/PayerID params
         const successUrl = provider === 'stripe'
           ? `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}&provider=stripe`
@@ -275,7 +461,39 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
   }
 });
 
-// Get specific purchase
+/**
+ * @openapi
+ * /api/purchases/{purchaseId}:
+ *   get:
+ *     summary: Get specific purchase details
+ *     tags: [Purchases]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: purchaseId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Purchase details with game information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.get('/:purchaseId', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -314,7 +532,59 @@ router.get('/:purchaseId', async (req: Request, res: Response) => {
   }
 });
 
-// Request refund (requires admin approval)
+/**
+ * @openapi
+ * /api/purchases/{purchaseId}/refund:
+ *   post:
+ *     summary: Request refund for a purchase
+ *     description: Submit a refund request (requires admin approval, within 14 days)
+ *     tags: [Purchases]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: purchaseId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 minLength: 10
+ *     responses:
+ *       200:
+ *         description: Refund request submitted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     purchase:
+ *                       type: object
+ *                     message:
+ *                       type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;

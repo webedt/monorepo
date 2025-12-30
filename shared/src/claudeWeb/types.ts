@@ -289,6 +289,12 @@ export interface SessionResult {
   numTurns?: number;
   /** Final result text */
   result?: string;
+  /** Input tokens used (if available) */
+  inputTokens?: number;
+  /** Output tokens generated (if available) */
+  outputTokens?: number;
+  /** Session creation timestamp (if available) */
+  createdAt?: string;
 }
 
 /**

@@ -1,4 +1,7 @@
 import { logger } from '../logging/logger.js';
+import { getErrorCode, getStatusCode, asNetworkError } from '../errorTypes.js';
+import { RETRY } from '../../config/constants.js';
+import { sleep, calculateBackoffDelay as calculateBackoff } from '../timing.js';
 
 export interface RetryConfig {
   maxRetries: number;
@@ -22,18 +25,18 @@ export interface RetryResult<T> {
 }
 
 const DEFAULT_CONFIG: RetryConfig = {
-  maxRetries: 3,
-  baseDelayMs: 1000,
-  maxDelayMs: 30000,
-  backoffMultiplier: 2,
+  maxRetries: RETRY.DEFAULT.MAX_ATTEMPTS,
+  baseDelayMs: RETRY.DEFAULT.BASE_DELAY_MS,
+  maxDelayMs: RETRY.DEFAULT.MAX_DELAY_MS,
+  backoffMultiplier: RETRY.DEFAULT.BACKOFF_MULTIPLIER,
   useJitter: true,
-  jitterFactor: 0.3,
+  jitterFactor: RETRY.DEFAULT.JITTER_FACTOR,
 };
 
 function defaultIsRetryable(error: Error): boolean {
   const message = error.message.toLowerCase();
-  const errorCode = (error as any).code;
-  const statusCode = (error as any).status || (error as any).statusCode;
+  const errorCode = getErrorCode(error);
+  const statusCode = getStatusCode(error);
 
   if (errorCode === 'ENOTFOUND' || errorCode === 'ETIMEDOUT' ||
       errorCode === 'ECONNRESET' || errorCode === 'ECONNREFUSED' ||
@@ -58,24 +61,15 @@ function defaultIsRetryable(error: Error): boolean {
   return false;
 }
 
+/**
+ * Calculate exponential backoff delay with optional jitter.
+ * Delegates to the centralized timing module.
+ */
 export function calculateBackoffDelay(
   attempt: number,
   config: Pick<RetryConfig, 'baseDelayMs' | 'maxDelayMs' | 'backoffMultiplier' | 'useJitter' | 'jitterFactor'>
 ): number {
-  const exponentialDelay = config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt - 1);
-  let delay = Math.min(exponentialDelay, config.maxDelayMs);
-
-  if (config.useJitter) {
-    const jitter = Math.random() * config.jitterFactor * delay;
-    delay = Math.random() > 0.5 ? delay + jitter : delay - jitter;
-    delay = Math.max(delay, config.baseDelayMs * 0.5);
-  }
-
-  return Math.floor(delay);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return calculateBackoff(attempt, config);
 }
 
 export async function retryWithBackoff<T>(
@@ -195,49 +189,29 @@ export function createRetryWrapper(config: Partial<RetryConfig> = {}) {
 
 export const RETRY_CONFIGS = {
   fast: {
-    maxRetries: 2,
-    baseDelayMs: 100,
-    maxDelayMs: 1000,
-    backoffMultiplier: 2,
-    useJitter: true,
+    ...RETRY.PROFILES.FAST,
   } satisfies Partial<RetryConfig>,
 
   standard: {
-    maxRetries: 3,
-    baseDelayMs: 1000,
-    maxDelayMs: 10000,
-    backoffMultiplier: 2,
-    useJitter: true,
+    ...RETRY.PROFILES.STANDARD,
   } satisfies Partial<RetryConfig>,
 
   aggressive: {
-    maxRetries: 5,
-    baseDelayMs: 500,
-    maxDelayMs: 30000,
-    backoffMultiplier: 2,
-    useJitter: true,
+    ...RETRY.PROFILES.AGGRESSIVE,
   } satisfies Partial<RetryConfig>,
 
   rateLimitAware: {
-    maxRetries: 3,
-    baseDelayMs: 5000,
-    maxDelayMs: 60000,
-    backoffMultiplier: 2,
-    useJitter: true,
+    ...RETRY.PROFILES.RATE_LIMIT,
     isRetryable: (error: Error) => {
-      const statusCode = (error as any).status || (error as any).statusCode;
+      const statusCode = getStatusCode(error);
       return statusCode === 429 || defaultIsRetryable(error);
     },
   } satisfies Partial<RetryConfig>,
 
   network: {
-    maxRetries: 4,
-    baseDelayMs: 2000,
-    maxDelayMs: 30000,
-    backoffMultiplier: 2,
-    useJitter: true,
+    ...RETRY.PROFILES.NETWORK,
     isRetryable: (error: Error) => {
-      const code = (error as any).code;
+      const code = getErrorCode(error);
       return code === 'ENOTFOUND' || code === 'ETIMEDOUT' ||
              code === 'ECONNRESET' || code === 'ECONNREFUSED' ||
              defaultIsRetryable(error);
@@ -245,8 +219,17 @@ export const RETRY_CONFIGS = {
   } satisfies Partial<RetryConfig>,
 };
 
-export function extractRetryAfterMs(error: any): number | null {
-  const headers = error.response?.headers || error.headers;
+/**
+ * Extract the retry-after delay from an error's response headers.
+ * Supports both numeric (seconds) and date string formats.
+ */
+export function extractRetryAfterMs(error: unknown): number | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const networkErr = asNetworkError(error);
+  const headers = networkErr.response?.headers;
   if (!headers) return null;
 
   const retryAfter = headers['retry-after'] || headers['Retry-After'];

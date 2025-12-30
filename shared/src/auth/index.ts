@@ -9,3 +9,5 @@ export * from './githubAuth.js';
 export * from './databaseAuth.js';
 export * from './ATokenRefreshService.js';
 export * from './TokenRefreshService.js';
+export * from './tokenPersistence.js';
+export * from './DaemonTokenRefreshService.js';

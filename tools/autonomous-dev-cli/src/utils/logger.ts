@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { StructuredError, type ErrorContext, formatError } from './errors.js';
+import { attachOperationInfo } from './typeGuards.js';
 import { randomUUID } from 'crypto';
 import { memoryUsage } from 'process';
 import { existsSync, mkdirSync, appendFileSync, statSync, renameSync, readdirSync, unlinkSync } from 'fs';
@@ -206,7 +207,7 @@ interface ErrorLogOptions {
  * Structured JSON log entry schema for consistent logging
  */
 export interface StructuredLogEntry {
-  timestamp: string;
+  timestamp?: string;
   level: LogLevel;
   message: string;
   correlationId?: string;
@@ -1265,8 +1266,7 @@ export async function timeOperation<T>(
 
     // Re-throw with timing info attached
     if (error instanceof Error) {
-      (error as any).operationDuration = duration;
-      (error as any).operationName = operationName;
+      attachOperationInfo(error, operationName, duration);
     }
     throw error;
   }
@@ -1339,8 +1339,7 @@ export function timeOperationSync<T>(
     }
 
     if (error instanceof Error) {
-      (error as any).operationDuration = duration;
-      (error as any).operationName = operationName;
+      attachOperationInfo(error, operationName, duration);
     }
     throw error;
   }
@@ -1493,14 +1492,13 @@ class Logger {
    */
   private createLogEntry(level: LogLevel, message: string, meta?: object): StructuredLogEntry {
     const entry: StructuredLogEntry = {
-      timestamp: this.includeTimestamp ? new Date().toISOString() : '',
       level,
       message,
     };
 
-    // Remove empty timestamp for cleaner JSON output
-    if (!this.includeTimestamp) {
-      delete (entry as any).timestamp;
+    // Only include timestamp if configured
+    if (this.includeTimestamp) {
+      entry.timestamp = new Date().toISOString();
     }
 
     const correlationId = this.getEffectiveCorrelationId();

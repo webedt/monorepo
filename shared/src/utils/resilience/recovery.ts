@@ -1,9 +1,12 @@
 import { logger } from '../logging/logger.js';
 import { retryWithBackoff, RETRY_CONFIGS } from './retry.js';
-import type { RetryConfig } from './retry.js';
+import { sleep } from '../timing.js';
 import { circuitBreakerRegistry } from './circuitBreaker.js';
-import type { CircuitBreaker } from './circuitBreaker.js';
 import { metrics } from '../monitoring/metrics.js';
+import { getErrorCode, getStatusCode, getRetryAfterHeader } from '../errorTypes.js';
+
+import type { RetryConfig } from './retry.js';
+import type { CircuitBreaker } from './circuitBreaker.js';
 
 export type RecoveryStrategy =
   | 'retry'
@@ -43,8 +46,8 @@ export function classifyError(error: Error): {
   suggestedDelayMs: number;
 } {
   const message = error.message.toLowerCase();
-  const errorCode = (error as any).code;
-  const statusCode = (error as any).status || (error as any).statusCode;
+  const errorCode = getErrorCode(error);
+  const statusCode = getStatusCode(error);
 
   if (statusCode === 401 || message.includes('unauthorized') ||
       message.includes('token expired') || message.includes('invalid token')) {
@@ -78,7 +81,7 @@ export function classifyError(error: Error): {
     };
   }
 
-  if (statusCode >= 500 && statusCode < 600) {
+  if (statusCode !== undefined && statusCode >= 500 && statusCode < 600) {
     return {
       type: 'server_error',
       strategy: 'circuit_breaker',
@@ -87,7 +90,7 @@ export function classifyError(error: Error): {
     };
   }
 
-  if (statusCode === 409 || statusCode === 423 ||
+  if ((statusCode !== undefined && (statusCode === 409 || statusCode === 423)) ||
       message.includes('locked') || message.includes('conflict')) {
     return {
       type: 'conflict_error',
@@ -178,6 +181,13 @@ export async function attemptRecovery(
           data: options.fallbackValue,
         };
       }
+      // No fallback value provided, fall through to skip behavior
+      return {
+        recovered: false,
+        strategy: 'skip',
+        message: `Error is not recoverable: ${classification.type}`,
+        shouldRetry: false,
+      };
 
     case 'skip':
     default:
@@ -266,7 +276,7 @@ async function handleBackoff(
   context: RecoveryContext,
   suggestedDelayMs: number
 ): Promise<RecoveryResult> {
-  const retryAfter = (context.error as any).response?.headers?.['retry-after'];
+  const retryAfter = getRetryAfterHeader(context.error);
   let delayMs = suggestedDelayMs;
 
   if (retryAfter) {
@@ -342,7 +352,7 @@ export async function withRecovery<T>(
       }
 
       if (recoveryResult.retryDelayMs && recoveryResult.retryDelayMs > 0) {
-        await new Promise(resolve => setTimeout(resolve, recoveryResult.retryDelayMs));
+        await sleep(recoveryResult.retryDelayMs);
       }
     }
   }

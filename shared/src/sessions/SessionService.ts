@@ -12,11 +12,13 @@ import { ASession } from './ASession.js';
 import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
 import { ClaudeRemoteProvider } from '../execution/providers/claudeRemoteProvider.js';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
+import { extractEventUuid } from '../utils/helpers/eventHelper.js';
 import { normalizeRepoUrl, generateSessionPath } from '../utils/helpers/sessionPathHelper.js';
 import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { CLAUDE_API_BASE_URL } from '../config/env.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
+import { updateSessionStatusWithLock } from './sessionLocking.js';
 
 import type { TransactionContext } from '../db/index.js';
 import type {
@@ -119,6 +121,9 @@ export class SessionService extends ASession {
 
     // Use transaction to ensure session and initial message are created atomically
     // This prevents orphaned sessions if message insertion fails
+    // Note: Unlike resume(), execute() creates a NEW session, so there's no race condition
+    // with other processes - the UUID is freshly generated and unique. Locking utilities
+    // are only needed when updating existing sessions that may be accessed concurrently.
     await withTransactionOrThrow(db, async (tx: TransactionContext) => {
       await tx.insert(chatSessions).values({
         id: chatSessionId,
@@ -153,7 +158,7 @@ export class SessionService extends ASession {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -161,6 +166,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -241,6 +247,7 @@ export class SessionService extends ASession {
           remoteWebUrl: result.remoteWebUrl,
           totalCost: result.totalCost?.toString(),
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
           ...(finalSessionPath ? { sessionPath: finalSessionPath } : {}),
         })
         .where(eq(chatSessions.id, chatSessionId));
@@ -261,11 +268,12 @@ export class SessionService extends ASession {
         remoteWebUrl: result.remoteWebUrl,
       };
     } catch (error) {
-      // Update session to error state
+      // Update session to error state, incrementing version
       await db.update(chatSessions)
         .set({
           status: 'error',
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
         })
         .where(eq(chatSessions.id, chatSessionId));
 
@@ -301,14 +309,18 @@ export class SessionService extends ASession {
       remoteSessionId: session.remoteSessionId,
     });
 
-    // Use transaction to ensure status update and message insertion are atomic
-    // This prevents inconsistent state if message insertion fails
+    // Use transaction with pessimistic locking to prevent concurrent resume requests
+    // This ensures only one resume can succeed when multiple concurrent requests arrive
     const textPrompt = extractTextFromPrompt(prompt);
     await withTransactionOrThrow(db, async (tx: TransactionContext) => {
-      // Update session status
-      await tx.update(chatSessions)
-        .set({ status: 'running' })
-        .where(eq(chatSessions.id, sessionId));
+      // Acquire row lock and update status atomically
+      // This uses SELECT ... FOR UPDATE and validates the transition is allowed
+      await updateSessionStatusWithLock(tx, sessionId, {
+        status: 'running',
+      }, {
+        validateTransition: true,
+        allowedFromStatuses: ['completed', 'error'],
+      });
 
       // Store user message
       await tx.insert(messages).values({
@@ -329,7 +341,7 @@ export class SessionService extends ASession {
         await onEvent(event);
       }
 
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -337,6 +349,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId: sessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -361,7 +374,7 @@ export class SessionService extends ASession {
         handleEvent
       );
 
-      // Update session with final result
+      // Update session with final result, incrementing version
       const finalStatus = result.status === 'completed' ? 'completed' : 'error';
 
       await db.update(chatSessions)
@@ -369,6 +382,7 @@ export class SessionService extends ASession {
           status: finalStatus,
           totalCost: result.totalCost?.toString(),
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
         })
         .where(eq(chatSessions.id, sessionId));
 
@@ -387,10 +401,12 @@ export class SessionService extends ASession {
         remoteWebUrl: result.remoteWebUrl,
       };
     } catch (error) {
+      // Update session to error state, incrementing version
       await db.update(chatSessions)
         .set({
           status: 'error',
           completedAt: new Date(),
+          version: sql`${chatSessions.version} + 1`,
         })
         .where(eq(chatSessions.id, sessionId));
 
@@ -455,17 +471,14 @@ export class SessionService extends ASession {
       const eventsResponse = await client.getEvents(session.remoteSessionId);
       const remoteEvents = eventsResponse.data || [];
 
-      // Get existing event UUIDs for this session
-      // TODO(perf): Currently fetches all eventData to extract UUIDs. For sessions with
-      // many events, this can be slow. Consider adding a dedicated 'uuid' column to the
-      // events table with an index for more efficient deduplication queries.
+      // Get existing event UUIDs for this session using the indexed uuid column
       const existingEvents = await db
-        .select({ eventData: events.eventData })
+        .select({ uuid: events.uuid })
         .from(events)
         .where(eq(events.chatSessionId, sessionId));
 
       const existingUuids = new Set(
-        existingEvents.map(e => (e.eventData as { uuid?: string })?.uuid).filter(Boolean)
+        existingEvents.map(e => e.uuid).filter((uuid): uuid is string => uuid !== null)
       );
 
       // Filter to only new events
@@ -512,15 +525,19 @@ export class SessionService extends ASession {
       const normalizedBranch = branch ?? null;
       const normalizedSessionPath = sessionPath ?? null;
 
+      // Check if status changed (used for version increment decision)
+      const statusChanged = newStatus !== session.status;
+
       // Check if anything changed (using normalized values for consistent comparison)
       const hasChanges =
-        newStatus !== session.status ||
+        statusChanged ||
         normalizedTotalCost !== session.totalCost ||
         normalizedBranch !== session.branch ||
         normalizedSessionPath !== session.sessionPath ||
         eventsToInsert.length > 0;
 
       // Update session and insert events in a transaction for consistency
+      // Only increment version on status change (not on event-only updates)
       if (hasChanges) {
         await db.transaction(async (tx) => {
           // Batch insert new events for better performance
@@ -528,6 +545,7 @@ export class SessionService extends ASession {
             await tx.insert(events).values(
               eventsToInsert.map(event => ({
                 chatSessionId: sessionId,
+                uuid: extractEventUuid(event as Record<string, unknown>),
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               }))
@@ -535,6 +553,7 @@ export class SessionService extends ASession {
           }
 
           // Update session with new values
+          // Increment version only when status changes to track state machine transitions
           await tx
             .update(chatSessions)
             .set({
@@ -543,6 +562,7 @@ export class SessionService extends ASession {
               branch: branch ?? undefined,
               sessionPath: sessionPath ?? undefined,
               completedAt: completedAt ?? undefined,
+              ...(statusChanged ? { version: sql`${chatSessions.version} + 1` } : {}),
             })
             .where(eq(chatSessions.id, sessionId));
         });

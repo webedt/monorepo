@@ -96,6 +96,11 @@ export {
   type TrashCleanupResult,
   type TrashCleanupSession,
 } from '../../sessions/ATrashCleanupService.js';
+export {
+  AInvitationCleanupService,
+  type InvitationCleanupResult,
+  type ExpiredInvitation,
+} from '../../sessions/AInvitationCleanupService.js';
 
 // Claude Web Client (from claudeWeb/)
 export { AClaudeWebClient } from '../../claudeWeb/AClaudeWebClient.js';

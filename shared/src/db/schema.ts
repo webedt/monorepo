@@ -1,44 +1,35 @@
 import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex } from 'drizzle-orm/pg-core';
 
+import {
+  encryptedText,
+  encryptedJsonColumn,
+} from './encryptedColumns.js';
+
+import type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from './encryptedColumns.js';
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
   passwordHash: text('password_hash').notNull(),
   githubId: text('github_id').unique(),
-  githubAccessToken: text('github_access_token'),
-  claudeAuth: json('claude_auth').$type<{
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    scopes?: string[];
-    subscriptionType?: string;
-    rateLimitTier?: string;
-  }>(),
-  codexAuth: json('codex_auth').$type<{
-    apiKey?: string;
-    accessToken?: string;
-    refreshToken?: string;
-    expiresAt?: number;
-  }>(),
-  geminiAuth: json('gemini_auth').$type<{
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    tokenType?: string;
-    scope?: string;
-  }>(),
-  // OpenRouter API key for code completions (autocomplete)
-  openrouterApiKey: text('openrouter_api_key'),
+  // Encrypted credentials - automatically encrypted on write, decrypted on read
+  githubAccessToken: encryptedText('github_access_token'),
+  claudeAuth: encryptedJsonColumn<ClaudeAuthData>('claude_auth'),
+  codexAuth: encryptedJsonColumn<CodexAuthData>('codex_auth'),
+  geminiAuth: encryptedJsonColumn<GeminiAuthData>('gemini_auth'),
+  // OpenRouter API key for code completions (autocomplete) - encrypted
+  openrouterApiKey: encryptedText('openrouter_api_key'),
   // Autocomplete settings
   autocompleteEnabled: boolean('autocomplete_enabled').default(true).notNull(),
   autocompleteModel: text('autocomplete_model').default('openai/gpt-oss-120b:cerebras'),
-  // Image editing AI provider API keys
-  imageAiKeys: json('image_ai_keys').$type<{
-    openrouter?: string;
-    cometapi?: string;
-    google?: string;
-  }>(),
+  // Image editing AI provider API keys - encrypted
+  imageAiKeys: encryptedJsonColumn<ImageAiKeysData>('image_ai_keys'),
   // Image editing AI preferences
   imageAiProvider: text('image_ai_provider').default('openrouter'), // 'openrouter' | 'cometapi' | 'google'
   imageAiModel: text('image_ai_model').default('google/gemini-2.5-flash-image'), // model identifier
@@ -104,6 +95,8 @@ export const chatSessions = pgTable('chat_sessions', {
   // Sharing fields - "public but unlisted" (shareable if you know the link)
   shareToken: text('share_token').unique(), // UUID-based token for sharing
   shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
+  // Optimistic locking - version counter for concurrent update detection
+  version: integer('version').default(1).notNull(), // Increments on each update
 });
 
 export const messages = pgTable('messages', {
@@ -128,9 +121,13 @@ export const events = pgTable('events', {
   chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  uuid: text('uuid'), // Extracted from eventData for efficient deduplication queries
   eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
-});
+}, (table) => [
+  // Index for efficient UUID-based deduplication queries
+  uniqueIndex('events_session_uuid_idx').on(table.chatSessionId, table.uuid),
+]);
 
 // Live Chat messages - branch-based chat messages for workspace collaboration
 export const liveChatMessages = pgTable('live_chat_messages', {
@@ -214,6 +211,14 @@ export const organizations = pgTable('organizations', {
 
 // Organization membership roles
 export type OrganizationRole = 'owner' | 'admin' | 'member';
+
+/** Valid organization role values */
+export const ORGANIZATION_ROLES: readonly OrganizationRole[] = ['owner', 'admin', 'member'] as const;
+
+/** Type guard to check if a string is a valid OrganizationRole */
+export function isOrganizationRole(value: unknown): value is OrganizationRole {
+  return typeof value === 'string' && ORGANIZATION_ROLES.includes(value as OrganizationRole);
+}
 
 // Organization members - junction table for users and organizations
 export const organizationMembers = pgTable('organization_members', {

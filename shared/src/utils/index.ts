@@ -13,3 +13,18 @@ export * from './http/index.js';
 export * from './math/index.js';
 export * from './api/index.js';
 export * from './encryption.js';
+export * from './validators/index.js';
+export * from './errorTypes.js';
+export * from './typeGuards.js';
+export * from './lifecycle/index.js';
+export * from './batch/index.js';
+// Timing utilities - note: calculateBackoffDelay is also exported from resilience/retry.ts
+// Use explicit exports to avoid conflicts
+export {
+  sleep,
+  addJitter,
+  addPositiveJitter,
+  sleepWithJitter,
+  sleepWithBackoff,
+} from './timing.js';
+export type { BackoffConfig } from './timing.js';

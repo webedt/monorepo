@@ -3,6 +3,8 @@
  * Utility for fetching content from external URLs with security checks
  */
 
+import { TIMEOUTS } from '../config/constants.js';
+
 import type { UrlImportOptions, UrlImportResult, UrlValidationResult } from './types.js';
 import {
   ALLOWED_PROTOCOLS,
@@ -121,7 +123,7 @@ export async function validateUrl(url: string): Promise<UrlValidationResult> {
 
     // Make a HEAD request to check accessibility
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.HTTP.HEAD);
 
     try {
       const response = await fetch(url, {

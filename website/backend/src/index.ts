@@ -17,6 +17,8 @@ import {
   ORPHAN_CLEANUP_INTERVAL_MINUTES,
   CLAUDE_SYNC_ENABLED,
   CLAUDE_SYNC_INTERVAL_MS,
+  SHUTDOWN_TIMEOUT_MS,
+  LB_DRAIN_DELAY_MS,
   validateEnv,
   logEnvConfig,
   bootstrapServices,
@@ -24,16 +26,16 @@ import {
 
 import { logger, runWithCorrelation } from '@webedt/shared';
 
-// Import database (initializes on import)
-import { waitForDatabase } from '@webedt/shared';
+// Import database - initializeDatabase runs migrations and schema updates
+import { waitForDatabase, initializeDatabase } from '@webedt/shared';
 
 // Import routes
 import executeRemoteRoutes from './api/routes/executeRemote.js';
 import resumeRoutes from './api/routes/resume.js';
 import authRoutes from './api/routes/auth.js';
-import userRoutes from './api/routes/user.js';
-import sessionsRoutes from './api/routes/sessions.js';
-import githubRoutes from './api/routes/github.js';
+import userRoutes from './api/routes/user/index.js';
+import sessionsRoutes from './api/routes/sessions/index.js';
+import githubRoutes from './api/routes/github/index.js';
 import adminRoutes from './api/routes/admin.js';
 import transcribeRoutes from './api/routes/transcribe.js';
 import imageGenRoutes from './api/routes/imageGen.js';
@@ -72,12 +74,21 @@ import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/mi
 import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
+import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
+import { versionConflictErrorHandler } from './api/middleware/versionConflict.js';
+
+// Import graceful shutdown
+import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
 
 // Import health monitoring and metrics utilities
 import {
   healthMonitor,
   createDatabaseHealthCheck,
   metrics,
+  initializeExternalApiResilience,
+  getExternalApiCircuitBreakerStatus,
+  areExternalApisAvailable,
+  getEventType,
 } from '@webedt/shared';
 
 // Import background sync service
@@ -98,8 +109,12 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
     const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
 
     // Find sessions stuck in 'running' or 'pending' for too long
+    // Only select the columns we need to avoid failures if DB schema is out of sync
     const stuckSessions = await db
-      .select()
+      .select({
+        id: chatSessions.id,
+        status: chatSessions.status,
+      })
       .from(chatSessions)
       .where(
         and(
@@ -127,7 +142,7 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
           .from(events)
           .where(eq(events.chatSessionId, session.id));
 
-        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+        const completedEvents = allEvents.filter(e => getEventType(e.eventData) === 'completed');
 
         // Check if session has any events at all (worker started processing)
         const totalEvents = allEvents.length;
@@ -303,6 +318,10 @@ app.use(csrfTokenMiddleware);
 // SSE endpoints, webhooks, and health checks are exempt
 app.use(csrfValidationMiddleware);
 
+// Connection tracker middleware for graceful shutdown
+// Tracks active HTTP connections and rejects new requests during shutdown
+app.use(connectionTrackerMiddleware);
+
 // Apply standard rate limiting to all API routes
 // This provides defense-in-depth alongside infrastructure-level limits
 // Note: Auth and public share endpoints have stricter limits applied at the route level
@@ -337,17 +356,25 @@ healthMonitor.startPeriodicChecks(30000);
 // Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints
 // at the root level, not part of the /api namespace, so they are not included in OpenAPI docs.
 app.get('/health', (req, res) => {
+  // Check external API availability via circuit breakers
+  const externalApis = areExternalApisAvailable();
+  const allExternalApisAvailable = externalApis.github && externalApis.claudeRemote;
+
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
     success: true,
     data: {
-      status: 'ok',
+      status: allExternalApisAvailable ? 'ok' : 'degraded',
       service: 'website-backend',
       containerId: CONTAINER_ID,
       build: {
         commitSha: BUILD_COMMIT_SHA,
         timestamp: BUILD_TIMESTAMP,
         imageTag: BUILD_IMAGE_TAG,
+      },
+      externalApis: {
+        github: externalApis.github ? 'available' : 'circuit_open',
+        claudeRemote: externalApis.claudeRemote ? 'available' : 'circuit_open',
       },
       timestamp: new Date().toISOString(),
     }
@@ -375,12 +402,28 @@ app.get('/health/status', async (req, res) => {
       },
     });
 
+    // Add external API circuit breaker details
+    const externalApiStatus = getExternalApiCircuitBreakerStatus();
+    const externalApis = areExternalApisAvailable();
+
     const statusCode = status.status === 'healthy' ? 200 : status.status === 'degraded' ? 200 : 503;
 
     res.setHeader('X-Container-ID', CONTAINER_ID);
     res.status(statusCode).json({
       success: status.status !== 'unhealthy',
-      data: status,
+      data: {
+        ...status,
+        externalApis: {
+          github: {
+            available: externalApis.github,
+            ...externalApiStatus.github,
+          },
+          claudeRemote: {
+            available: externalApis.claudeRemote,
+            ...externalApiStatus.claudeRemote,
+          },
+        },
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -473,6 +516,10 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
+// Version conflict error handler (handles optimistic locking errors)
+// Must be registered before the generic error handler
+app.use(versionConflictErrorHandler);
+
 // Error handler
 app.use(
   (
@@ -507,12 +554,26 @@ app.use(
   }
 );
 
+// Graceful shutdown configuration
+const shutdownConfig: GracefulShutdownConfig = {
+  shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+  loadBalancerDrainDelayMs: LB_DRAIN_DELAY_MS,
+  exitProcess: true,
+};
+
 // Start server
 async function startServer() {
+  // Initialize database first - runs migrations and schema updates
+  // This adds any missing columns (storage_quota_bytes, spending_limit_enabled, etc.)
+  await initializeDatabase();
+
   // Bootstrap all services (registers singletons with ServiceProvider)
   await bootstrapServices();
 
-  app.listen(PORT, () => {
+  // Initialize external API resilience (circuit breakers for GitHub and Claude Remote)
+  initializeExternalApiResilience();
+
+  const server = app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log('WebEDT Backend Server');
   console.log('='.repeat(60));
@@ -563,10 +624,11 @@ async function startServer() {
   // Run initial cleanup on startup
   cleanupOrphanedSessions();
 
-  // Schedule periodic cleanup
-  setInterval(() => {
+  // Schedule periodic cleanup and track the interval for graceful shutdown
+  const orphanCleanupInterval = setInterval(() => {
     cleanupOrphanedSessions();
   }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+  setOrphanCleanupInterval(orphanCleanupInterval);
 
   // Start Claude session background sync
   if (CLAUDE_SYNC_ENABLED) {
@@ -575,6 +637,18 @@ async function startServer() {
   } else {
     logger.info('Claude session sync is disabled');
   }
+
+  // Register graceful shutdown handlers
+  // These handle SIGTERM, SIGINT, uncaughtException, and unhandledRejection
+  registerShutdownHandlers(server, shutdownConfig);
+
+  // Log current connection tracking status
+  const connStats = connectionTracker.getStats();
+  logger.info('Connection tracking initialized', {
+    component: 'Startup',
+    activeConnections: connStats.activeConnections,
+    shutdownTimeoutMs: shutdownConfig.shutdownTimeoutMs,
+  });
   });
 }
 
@@ -582,19 +656,4 @@ async function startServer() {
 startServer().catch((error) => {
   logger.error('Failed to start server', error);
   process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully...');
-  healthMonitor.stopPeriodicChecks();
-  stopBackgroundSync();
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully...');
-  healthMonitor.stopPeriodicChecks();
-  stopBackgroundSync();
-  process.exit(0);
 });

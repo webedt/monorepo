@@ -3,8 +3,15 @@
  * Handles Stripe and PayPal payment processing
  */
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Payments
+ *     description: Payment processing with Stripe and PayPal
+ */
+
 import { Router, Request, Response } from 'express';
-import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService } from '@webedt/shared';
+import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService, FRONTEND_URL, FRONTEND_PORT, getRawBody } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -14,8 +21,34 @@ import type { PaymentProvider } from '@webedt/shared';
 const router = Router();
 
 /**
- * Get available payment providers
- * GET /api/payments/providers
+ * @openapi
+ * /api/payments/providers:
+ *   get:
+ *     summary: Get available payment providers
+ *     tags: [Payments]
+ *     responses:
+ *       200:
+ *         description: Available payment providers
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     providers:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     stripe:
+ *                       type: boolean
+ *                     paypal:
+ *                       type: boolean
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/providers', (req: Request, res: Response) => {
   try {
@@ -37,8 +70,55 @@ router.get('/providers', (req: Request, res: Response) => {
 });
 
 /**
- * Create a checkout session
- * POST /api/payments/checkout
+ * @openapi
+ * /api/payments/checkout:
+ *   post:
+ *     summary: Create a checkout session
+ *     tags: [Payments]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - gameId
+ *             properties:
+ *               gameId:
+ *                 type: string
+ *               provider:
+ *                 type: string
+ *                 enum: [stripe, paypal]
+ *                 default: stripe
+ *     responses:
+ *       200:
+ *         description: Checkout session created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     sessionId:
+ *                       type: string
+ *                     url:
+ *                       type: string
+ *                     provider:
+ *                       type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -113,7 +193,7 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Build success and cancel URLs (provider-specific placeholders)
-    const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
+    const baseUrl = FRONTEND_URL || `http://localhost:${FRONTEND_PORT}`;
     // Stripe replaces {CHECKOUT_SESSION_ID}; PayPal appends its own token/PayerID params
     const successUrl = provider === 'stripe'
       ? `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}&provider=stripe`
@@ -155,8 +235,58 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * Get checkout session status
- * GET /api/payments/checkout/:sessionId
+ * @openapi
+ * /api/payments/checkout/{sessionId}:
+ *   get:
+ *     summary: Get checkout session status
+ *     tags: [Payments]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Checkout session details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                     amount:
+ *                       type: number
+ *                     currency:
+ *                       type: string
+ *                     provider:
+ *                       type: string
+ *                     purchaseId:
+ *                       type: string
+ *                       nullable: true
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                     completedAt:
+ *                       type: string
+ *                       format: date-time
+ *                       nullable: true
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -200,8 +330,49 @@ router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Respon
 });
 
 /**
- * Capture PayPal order after user approval
- * POST /api/payments/paypal/capture
+ * @openapi
+ * /api/payments/paypal/capture:
+ *   post:
+ *     summary: Capture PayPal order after user approval
+ *     tags: [Payments]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: PayPal order captured successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     transactionId:
+ *                       type: string
+ *                     purchaseId:
+ *                       type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -260,8 +431,40 @@ router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) 
 });
 
 /**
- * Stripe webhook handler
- * POST /api/payments/webhooks/stripe
+ * @openapi
+ * /api/payments/webhooks/stripe:
+ *   post:
+ *     summary: Stripe webhook handler
+ *     description: Handles Stripe payment events (signature verification required)
+ *     tags: [Payments]
+ *     parameters:
+ *       - name: stripe-signature
+ *         in: header
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Webhook processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 received:
+ *                   type: boolean
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post(
   '/webhooks/stripe',
@@ -276,7 +479,7 @@ router.post(
 
       // Get raw body - Express body-parser must be configured to preserve raw body
       // Signature verification requires the raw body; JSON.stringify() won't work
-      const rawBody = (req as any).rawBody;
+      const rawBody = getRawBody(req);
       if (!rawBody) {
         logger.warn('Stripe webhook missing raw body - configure express.raw() middleware', {
           component: 'Payments',
@@ -312,8 +515,58 @@ router.post(
 );
 
 /**
- * PayPal webhook handler
- * POST /api/payments/webhooks/paypal
+ * @openapi
+ * /api/payments/webhooks/paypal:
+ *   post:
+ *     summary: PayPal webhook handler
+ *     description: Handles PayPal payment events (signature verification required)
+ *     tags: [Payments]
+ *     parameters:
+ *       - name: paypal-transmission-id
+ *         in: header
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: paypal-transmission-time
+ *         in: header
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: paypal-transmission-sig
+ *         in: header
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: paypal-auth-algo
+ *         in: header
+ *         schema:
+ *           type: string
+ *       - name: paypal-cert-url
+ *         in: header
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Webhook processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 received:
+ *                   type: boolean
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/webhooks/paypal', async (req: Request, res: Response) => {
   try {
@@ -331,7 +584,7 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
 
     // Get raw body - prefer rawBody from middleware, fall back to JSON.stringify for compatibility
     // Note: For production, configure express.raw() middleware to preserve raw body
-    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+    const rawBody = getRawBody(req) ?? JSON.stringify(req.body);
 
     // Construct signature string for verification (pipe-delimited format expected by paypalProvider)
     const signature = `${transmissionId}|${timestamp}|${transmissionSig}|${algo}|${certUrl}`;
@@ -362,8 +615,54 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
 });
 
 /**
- * Get user's payment transaction history
- * GET /api/payments/transactions
+ * @openapi
+ * /api/payments/transactions:
+ *   get:
+ *     summary: Get user's payment transaction history
+ *     tags: [Payments]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 200
+ *       - name: offset
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Transaction history retrieved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     transactions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/transactions', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -404,8 +703,55 @@ router.get('/transactions', requireAuth, async (req: Request, res: Response) => 
 });
 
 /**
- * Request refund for a transaction (admin approval required)
- * POST /api/payments/transactions/:transactionId/refund
+ * @openapi
+ * /api/payments/transactions/{transactionId}/refund:
+ *   post:
+ *     summary: Request refund for a transaction
+ *     description: Submit a refund request (requires admin approval, within 14 days)
+ *     tags: [Payments]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - name: transactionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 minLength: 10
+ *     responses:
+ *       200:
+ *         description: Refund request submitted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.post('/transactions/:transactionId/refund', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -489,8 +835,37 @@ router.post('/transactions/:transactionId/refund', requireAuth, async (req: Requ
 });
 
 /**
- * Payment provider health check
- * GET /api/payments/health
+ * @openapi
+ * /api/payments/health:
+ *   get:
+ *     summary: Payment provider health check
+ *     tags: [Payments]
+ *     responses:
+ *       200:
+ *         description: Health status of all payment providers
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     healthy:
+ *                       type: boolean
+ *                     providers:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           provider:
+ *                             type: string
+ *                           healthy:
+ *                             type: boolean
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/health', async (req: Request, res: Response) => {
   try {

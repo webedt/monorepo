@@ -1,4 +1,5 @@
 import { Component, ComponentOptions } from '../base';
+import { ArrayStorage } from '../../lib/typedStorage';
 import './searchable-select.css';
 
 export type SearchableSelectSize = 'sm' | 'md' | 'lg';
@@ -43,6 +44,7 @@ export class SearchableSelect extends Component<HTMLDivElement> {
   private isOpen = false;
   private focusedIndex = -1;
   private recentValues: string[] = [];
+  private recentValuesStorage: ArrayStorage<string> | null = null;
 
   constructor(options: SearchableSelectOptions = {}) {
     super('div', {
@@ -61,9 +63,17 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     this.selectOptions = options.options ?? [];
     this.filteredOptions = [...this.selectOptions];
 
-    // Load recent values from localStorage
+    // Initialize typed storage for recent values
     if (this.options.recentKey) {
-      this.recentValues = this.loadRecentValues();
+      this.recentValuesStorage = new ArrayStorage<string>(
+        this.options.recentKey,
+        [],
+        {
+          maxItems: this.options.maxRecent ?? 3,
+          itemValidator: (item): item is string => typeof item === 'string',
+        }
+      );
+      this.recentValues = this.recentValuesStorage.get();
     }
 
     // Find initially selected option
@@ -105,39 +115,16 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     }
   }
 
-  // Load recent values from localStorage
-  private loadRecentValues(): string[] {
-    if (!this.options.recentKey) return [];
-    try {
-      const stored = localStorage.getItem(this.options.recentKey);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          return parsed.slice(0, this.options.maxRecent);
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
-    return [];
-  }
-
   // Save a value to recent values
   private saveRecentValue(value: string): void {
-    if (!this.options.recentKey) return;
+    if (!this.recentValuesStorage) return;
 
     // Remove if already exists, then add to front
     this.recentValues = this.recentValues.filter(v => v !== value);
     this.recentValues.unshift(value);
-
-    // Keep only maxRecent items
     this.recentValues = this.recentValues.slice(0, this.options.maxRecent);
 
-    try {
-      localStorage.setItem(this.options.recentKey, JSON.stringify(this.recentValues));
-    } catch {
-      // Ignore storage errors
-    }
+    this.recentValuesStorage.set(this.recentValues);
   }
 
   private buildStructure(): void {
@@ -509,7 +496,7 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     this.filteredOptions = [...options];
 
     // Clear selection if current value is no longer in options
-    if (this.selectedOption && !options.find(o => o.value === this.selectedOption!.value)) {
+    if (this.selectedOption && !options.find(o => o.value === this.selectedOption?.value)) {
       this.selectedOption = null;
       this.updateTriggerText();
     }

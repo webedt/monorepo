@@ -8,8 +8,65 @@ import multer from 'multer';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
 import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
+import { OPENAI_API_KEY } from '@webedt/shared';
 
 const router = express.Router();
+
+/**
+ * @openapi
+ * tags:
+ *   - name: Transcribe
+ *     description: Audio transcription using OpenAI Whisper
+ */
+
+/**
+ * @openapi
+ * /transcribe/transcribe:
+ *   post:
+ *     tags:
+ *       - Transcribe
+ *     summary: Transcribe audio to text
+ *     description: |
+ *       Transcribes audio files using OpenAI Whisper API.
+ *       Supports webm, mp3, mp4, mpeg, mpga, m4a, and wav formats.
+ *       Maximum file size: 25MB. Rate limited to 10 requests per minute.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - audio
+ *             properties:
+ *               audio:
+ *                 type: string
+ *                 format: binary
+ *                 description: Audio file to transcribe
+ *     responses:
+ *       200:
+ *         description: Transcription successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     text:
+ *                       type: string
+ *                       description: Transcribed text
+ *       400:
+ *         description: No file provided or API key not configured
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 
 // Configure multer for memory storage
 const upload = multer({
@@ -34,7 +91,7 @@ const upload = multer({
  */
 router.post('/transcribe', aiOperationRateLimiter, upload.single('audio'), async (req: Request, res: Response) => {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = OPENAI_API_KEY;
 
     // Check if OpenAI API key is configured
     if (!apiKey) {
