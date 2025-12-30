@@ -536,6 +536,9 @@ export type {
   NewSnippetInCollection,
   SnippetLanguage,
   SnippetCategory,
+  // Share token access log types
+  ShareTokenAccessLog,
+  NewShareTokenAccessLog,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -594,6 +597,8 @@ export {
   snippetsInCollections,
   SNIPPET_LANGUAGES,
   SNIPPET_CATEGORIES,
+  // Share token access log table
+  shareTokenAccessLog,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

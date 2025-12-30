@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 import {
   encryptedText,
@@ -1200,3 +1200,34 @@ export type SnippetCollection = typeof snippetCollections.$inferSelect;
 export type NewSnippetCollection = typeof snippetCollections.$inferInsert;
 export type SnippetInCollection = typeof snippetsInCollections.$inferSelect;
 export type NewSnippetInCollection = typeof snippetsInCollections.$inferInsert;
+
+// ============================================================================
+// SHARE TOKEN ACCESS LOG - Audit trail for shared session access
+// ============================================================================
+
+// Share Token Access Log - Tracks access to shared sessions for security auditing
+export const shareTokenAccessLog = pgTable('share_token_access_log', {
+  id: text('id').primaryKey(), // UUID
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  shareToken: text('share_token').notNull(), // Token used (for audit even if rotated)
+  accessType: text('access_type').notNull(), // 'view' | 'events' | 'stream'
+  ipAddress: text('ip_address'), // Requester IP (hashed for privacy)
+  userAgent: text('user_agent'), // Browser/client info
+  country: text('country'), // Geo-location (if available)
+  success: boolean('success').notNull().default(true), // Whether access was granted
+  failureReason: text('failure_reason'), // If !success: 'expired' | 'invalid' | 'rate_limited'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  // Index for efficient session-based queries (getAccessLogs, getAccessStats)
+  index('share_token_access_log_session_id_idx').on(table.sessionId),
+  // Index for token-based lookups
+  index('share_token_access_log_share_token_idx').on(table.shareToken),
+  // Index for time-based cleanup and range queries
+  index('share_token_access_log_created_at_idx').on(table.createdAt),
+]);
+
+// Type exports for Share Token Access Log
+export type ShareTokenAccessLog = typeof shareTokenAccessLog.$inferSelect;
+export type NewShareTokenAccessLog = typeof shareTokenAccessLog.$inferInsert;
