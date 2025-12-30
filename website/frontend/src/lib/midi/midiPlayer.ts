@@ -376,7 +376,12 @@ export class MidiPlayer {
       this.masterGain.disconnect();
       this.masterGain = null;
     }
-    this.audioContext = null;
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {
+        // Ignore errors when closing audio context
+      });
+      this.audioContext = null;
+    }
     this.listeners.clear();
   }
 
