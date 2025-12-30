@@ -248,10 +248,12 @@ export class GitHubProjectsService {
 
     for (const item of items) {
       const status = item.status?.toLowerCase() || 'no status';
-      if (!byStatus.has(status)) {
-        byStatus.set(status, []);
+      let statusItems = byStatus.get(status);
+      if (!statusItems) {
+        statusItems = [];
+        byStatus.set(status, statusItems);
       }
-      byStatus.get(status)!.push(item);
+      statusItems.push(item);
     }
 
     return byStatus;
