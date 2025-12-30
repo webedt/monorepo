@@ -689,7 +689,8 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
 
 /**
  * Soft-delete all chat sessions associated with a GitHub issue number.
- * This marks sessions as deleted and cleans up storage.
+ * This marks sessions as deleted and cascades to messages and events.
+ * All operations are performed within a transaction for atomicity.
  * @param issueNumber The GitHub issue number
  * @param repositoryOwner The repository owner
  * @param repositoryName The repository name
@@ -723,34 +724,37 @@ export async function softDeleteSessionsByIssue(
   const now = new Date();
   const sessionIds = sessionsToDelete.map(s => s.id);
 
-  // Soft delete the sessions with cascading to messages and events
-  await database
-    .update(chatSessions)
-    .set({ deletedAt: now })
-    .where(
-      and(
-        eq(chatSessions.issueNumber, issueNumber),
-        eq(chatSessions.repositoryOwner, repositoryOwner),
-        eq(chatSessions.repositoryName, repositoryName),
-        isNull(chatSessions.deletedAt)
-      )
-    );
-
-  // Cascade soft delete to messages
-  for (const sessionId of sessionIds) {
-    await database
-      .update(messages)
+  // Use transaction to ensure atomicity of cascading soft deletes
+  await database.transaction(async (tx) => {
+    // Soft delete the sessions
+    await tx
+      .update(chatSessions)
       .set({ deletedAt: now })
-      .where(eq(messages.chatSessionId, sessionId));
-  }
+      .where(
+        and(
+          eq(chatSessions.issueNumber, issueNumber),
+          eq(chatSessions.repositoryOwner, repositoryOwner),
+          eq(chatSessions.repositoryName, repositoryName),
+          isNull(chatSessions.deletedAt)
+        )
+      );
 
-  // Cascade soft delete to events
-  for (const sessionId of sessionIds) {
-    await database
-      .update(events)
-      .set({ deletedAt: now })
-      .where(eq(events.chatSessionId, sessionId));
-  }
+    // Cascade soft delete to messages
+    for (const sessionId of sessionIds) {
+      await tx
+        .update(messages)
+        .set({ deletedAt: now })
+        .where(eq(messages.chatSessionId, sessionId));
+    }
+
+    // Cascade soft delete to events
+    for (const sessionId of sessionIds) {
+      await tx
+        .update(events)
+        .set({ deletedAt: now })
+        .where(eq(events.chatSessionId, sessionId));
+    }
+  });
 
   logger.info(`Soft-deleted ${sessionsToDelete.length} session(s) with cascading for issue #${issueNumber} in ${repositoryOwner}/${repositoryName}`);
   return sessionsToDelete.length;

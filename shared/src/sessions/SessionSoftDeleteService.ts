@@ -1,6 +1,6 @@
 import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
 import type { TransactionContext } from '../db/index.js';
-import { eq, inArray, isNull, isNotNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { logger } from '../utils/logging/logger.js';
 
 import { ASessionSoftDeleteService } from './ASessionSoftDeleteService.js';
@@ -145,14 +145,14 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
           .set({ deletedAt: null })
           .where(eq(chatSessions.id, sessionId));
 
-        // Restore messages (only those that were soft-deleted)
+        // Restore all messages associated with this session
         const restoredMessages = await tx
           .update(messages)
           .set({ deletedAt: null })
           .where(eq(messages.chatSessionId, sessionId))
           .returning({ id: messages.id });
 
-        // Restore events (only those that were soft-deleted)
+        // Restore all events associated with this session
         const restoredEvents = await tx
           .update(events)
           .set({ deletedAt: null })
