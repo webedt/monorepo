@@ -436,6 +436,7 @@ export async function closeDatabase(): Promise<void> {
 export type {
   User,
   NewUser,
+  UserRole,
   Session,
   NewSession,
   ChatSession,
@@ -540,6 +541,9 @@ export type {
 
 // Re-export table definitions from schema
 export {
+  // User role utilities
+  ROLE_HIERARCHY,
+  hasRolePermission,
   // Organization role utilities
   isOrganizationRole,
   ORGANIZATION_ROLES,
