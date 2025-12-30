@@ -26,8 +26,8 @@ import {
 
 import { logger, runWithCorrelation } from '@webedt/shared';
 
-// Import database (initializes on import)
-import { waitForDatabase } from '@webedt/shared';
+// Import database - initializeDatabase runs migrations and schema updates
+import { waitForDatabase, initializeDatabase } from '@webedt/shared';
 
 // Import routes
 import executeRemoteRoutes from './api/routes/executeRemote.js';
@@ -557,6 +557,10 @@ const shutdownConfig: GracefulShutdownConfig = {
 
 // Start server
 async function startServer() {
+  // Initialize database first - runs migrations and schema updates
+  // This adds any missing columns (storage_quota_bytes, spending_limit_enabled, etc.)
+  await initializeDatabase();
+
   // Bootstrap all services (registers singletons with ServiceProvider)
   await bootstrapServices();
 
