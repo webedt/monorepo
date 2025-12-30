@@ -4,9 +4,10 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { gameCloudSaves } from '../db/schema.js';
+import { createResultMap } from '../db/dataLoader.js';
 import { AGameSaveService } from './AGameSaveService.js';
 
 import type { CloudSave } from './types.js';
@@ -495,18 +496,62 @@ export class GameSaveService extends AGameSaveService {
 
   async syncGameSaves(userId: string, gameId: string): Promise<CloudSave[]> {
     const saves = await this.getUserGameSaves(userId, gameId);
-    const synced: CloudSave[] = [];
 
-    for (const save of saves) {
-      if (save.syncStatus !== 'synced') {
-        const syncedSave = await this.syncSave(save.id);
-        synced.push(syncedSave);
-      } else {
-        synced.push(save);
-      }
+    // Partition saves by sync status
+    const alreadySynced = saves.filter((s) => s.syncStatus === 'synced');
+    const needsSync = saves.filter((s) => s.syncStatus !== 'synced');
+
+    if (needsSync.length === 0) {
+      return saves;
     }
 
-    return synced;
+    // Batch update all unsynced saves in a single query
+    const syncedSaves = await this.batchSyncSaves(needsSync);
+
+    // Merge results preserving original order
+    const syncedMap = createResultMap(syncedSaves, 'id');
+    return saves.map((save) =>
+      syncedMap.get(save.id) ?? save
+    );
+  }
+
+  /**
+   * Batch sync multiple saves in a single database operation
+   * Replaces N individual UPDATE queries with 1 batch UPDATE
+   */
+  async batchSyncSaves(saves: CloudSave[]): Promise<CloudSave[]> {
+    if (saves.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    const saveIds = saves.map((s) => s.id);
+
+    // Single batch UPDATE for all saves
+    const results = await db
+      .update(gameCloudSaves)
+      .set({
+        syncStatus: 'synced',
+        syncedAt: now,
+        updatedAt: now,
+      })
+      .where(inArray(gameCloudSaves.id, saveIds))
+      .returning();
+
+    const syncedSaves = results.map((r) => this.mapCloudSave(r));
+
+    // Emit events for each synced save
+    for (const save of syncedSaves) {
+      this.emitEvent({
+        type: 'save_synced',
+        userId: save.userId,
+        gameId: save.gameId,
+        timestamp: now,
+        data: { saveId: save.id, cloudUrl: save.cloudUrl },
+      });
+    }
+
+    return syncedSaves;
   }
 
   subscribeToEvents(
