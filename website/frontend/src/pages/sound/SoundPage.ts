@@ -391,15 +391,12 @@ export class SoundPage extends Page<SoundPageOptions> {
     super.onMount();
 
     // Setup back button
-    const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
-    if (backBtn) {
-      backBtn.addEventListener('click', () => {
-        if (this.hasUnsavedChanges && !confirm('You have unsaved changes. Leave anyway?')) {
-          return;
-        }
-        this.navigate(`/session/${this.options.params?.sessionId}/chat`);
-      });
-    }
+    this.addListenerBySelector('[data-action="back"]', 'click', () => {
+      if (this.hasUnsavedChanges && !confirm('You have unsaved changes. Leave anyway?')) {
+        return;
+      }
+      this.navigate(`/session/${this.options.params?.sessionId}/chat`);
+    });
 
     // Setup save button
     const saveBtnContainer = this.$('.save-btn-container') as HTMLElement;
@@ -472,48 +469,30 @@ export class SoundPage extends Page<SoundPageOptions> {
   }
 
   private setupToolbar(): void {
-    const undoBtn = this.$('[data-action="undo"]');
-    const redoBtn = this.$('[data-action="redo"]');
-    const clipBtn = this.$('[data-action="clip"]');
-    const deleteBtn = this.$('[data-action="delete"]');
-    const fadeInBtn = this.$('[data-action="fade-in"]');
-    const fadeOutBtn = this.$('[data-action="fade-out"]');
-    const normalizeBtn = this.$('[data-action="normalize"]');
-    const reverseBtn = this.$('[data-action="reverse"]');
-    const zoomInBtn = this.$('[data-action="zoom-in"]');
-    const zoomOutBtn = this.$('[data-action="zoom-out"]');
-    const zoomFitBtn = this.$('[data-action="zoom-fit"]');
-    const uploadBtn = this.$('[data-action="upload"]');
-    const refreshBtn = this.$('[data-action="refresh"]');
-
-    if (undoBtn) undoBtn.addEventListener('click', () => this.undo());
-    if (redoBtn) redoBtn.addEventListener('click', () => this.redo());
-    if (clipBtn) clipBtn.addEventListener('click', () => this.clipToSelection());
-    if (deleteBtn) deleteBtn.addEventListener('click', () => this.deleteSelection());
-    if (fadeInBtn) fadeInBtn.addEventListener('click', () => this.fadeIn());
-    if (fadeOutBtn) fadeOutBtn.addEventListener('click', () => this.fadeOut());
-    if (normalizeBtn) normalizeBtn.addEventListener('click', () => this.normalize());
-    if (reverseBtn) reverseBtn.addEventListener('click', () => this.reverse());
-    if (zoomInBtn) zoomInBtn.addEventListener('click', () => toast.info('Zoom in'));
-    if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => toast.info('Zoom out'));
-    if (zoomFitBtn) zoomFitBtn.addEventListener('click', () => toast.info('Fit to view'));
-    if (uploadBtn) uploadBtn.addEventListener('click', () => this.uploadAudio());
-    if (refreshBtn) refreshBtn.addEventListener('click', () => this.loadFiles());
+    // Toolbar action buttons - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-action="undo"]', 'click', () => this.undo());
+    this.addListenerBySelector('[data-action="redo"]', 'click', () => this.redo());
+    this.addListenerBySelector('[data-action="clip"]', 'click', () => this.clipToSelection());
+    this.addListenerBySelector('[data-action="delete"]', 'click', () => this.deleteSelection());
+    this.addListenerBySelector('[data-action="fade-in"]', 'click', () => this.fadeIn());
+    this.addListenerBySelector('[data-action="fade-out"]', 'click', () => this.fadeOut());
+    this.addListenerBySelector('[data-action="normalize"]', 'click', () => this.normalize());
+    this.addListenerBySelector('[data-action="reverse"]', 'click', () => this.reverse());
+    this.addListenerBySelector('[data-action="zoom-in"]', 'click', () => toast.info('Zoom in'));
+    this.addListenerBySelector('[data-action="zoom-out"]', 'click', () => toast.info('Zoom out'));
+    this.addListenerBySelector('[data-action="zoom-fit"]', 'click', () => toast.info('Fit to view'));
+    this.addListenerBySelector('[data-action="upload"]', 'click', () => this.uploadAudio());
+    this.addListenerBySelector('[data-action="refresh"]', 'click', () => this.loadFiles());
 
     // Beat grid controls
-    const toggleGridBtn = this.$('[data-action="toggle-grid"]');
-    const toggleSnapBtn = this.$('[data-action="toggle-snap"]');
-    const detectBpmBtn = this.$('[data-action="detect-bpm"]');
+    this.addListenerBySelector('[data-action="toggle-grid"]', 'click', () => this.toggleBeatGrid());
+    this.addListenerBySelector('[data-action="toggle-snap"]', 'click', () => this.toggleSnapToBeat());
+    this.addListenerBySelector('[data-action="detect-bpm"]', 'click', () => this.detectBpm());
+
     const bpmInput = this.$('.bpm-input') as HTMLInputElement;
-    const subdivisionSelect = this.$('.subdivision-select') as HTMLSelectElement;
-
-    if (toggleGridBtn) toggleGridBtn.addEventListener('click', () => this.toggleBeatGrid());
-    if (toggleSnapBtn) toggleSnapBtn.addEventListener('click', () => this.toggleSnapToBeat());
-    if (detectBpmBtn) detectBpmBtn.addEventListener('click', () => this.detectBpm());
-
     if (bpmInput) {
       bpmInput.value = String(this.beatGridSettings.bpm);
-      bpmInput.addEventListener('change', (e) => {
+      this.addListener(bpmInput, 'change', (e) => {
         const value = parseInt((e.target as HTMLInputElement).value);
         if (value >= 20 && value <= 300) {
           beatGridStore.setBpm(value);
@@ -521,9 +500,10 @@ export class SoundPage extends Page<SoundPageOptions> {
       });
     }
 
+    const subdivisionSelect = this.$('.subdivision-select') as HTMLSelectElement;
     if (subdivisionSelect) {
       subdivisionSelect.value = String(this.beatGridSettings.subdivisions);
-      subdivisionSelect.addEventListener('change', (e) => {
+      this.addListener(subdivisionSelect, 'change', (e) => {
         const value = parseInt((e.target as HTMLSelectElement).value);
         beatGridStore.setSubdivisions(value);
       });
@@ -531,27 +511,22 @@ export class SoundPage extends Page<SoundPageOptions> {
   }
 
   private setupTransport(): void {
-    const playBtn = this.$('[data-action="play"]');
-    const stopBtn = this.$('[data-action="stop"]');
+    // Play/pause button
+    this.addListenerBySelector('[data-action="play"]', 'click', () => {
+      if (this.isPlaying) {
+        this.pause();
+      } else {
+        this.play();
+      }
+    });
+
+    // Stop button
+    this.addListenerBySelector('[data-action="stop"]', 'click', () => this.stop());
+
+    // Progress slider
     const progressSlider = this.$('.progress-slider') as HTMLInputElement;
-    const rateSelect = this.$('.playback-rate-select') as HTMLSelectElement;
-
-    if (playBtn) {
-      playBtn.addEventListener('click', () => {
-        if (this.isPlaying) {
-          this.pause();
-        } else {
-          this.play();
-        }
-      });
-    }
-
-    if (stopBtn) {
-      stopBtn.addEventListener('click', () => this.stop());
-    }
-
     if (progressSlider) {
-      progressSlider.addEventListener('input', (e) => {
+      this.addListener(progressSlider, 'input', (e) => {
         const value = parseFloat((e.target as HTMLInputElement).value);
         this.currentTime = (value / 100) * this.duration;
         this.updateTimeDisplay();
@@ -561,8 +536,10 @@ export class SoundPage extends Page<SoundPageOptions> {
       });
     }
 
+    // Playback rate select
+    const rateSelect = this.$('.playback-rate-select') as HTMLSelectElement;
     if (rateSelect) {
-      rateSelect.addEventListener('change', (e) => {
+      this.addListener(rateSelect, 'change', (e) => {
         this.playbackRate = parseFloat((e.target as HTMLSelectElement).value);
         if (this.sourceNode) {
           this.sourceNode.playbackRate.value = this.playbackRate;
@@ -576,7 +553,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     const volumeValue = this.$('.volume-value') as HTMLElement;
 
     if (volumeSlider) {
-      volumeSlider.addEventListener('input', (e) => {
+      this.addListener(volumeSlider, 'input', (e) => {
         this.volume = parseInt((e.target as HTMLInputElement).value);
         if (volumeValue) volumeValue.textContent = `${this.volume}%`;
         if (this.gainNode) {
@@ -601,11 +578,11 @@ export class SoundPage extends Page<SoundPageOptions> {
         resizeObserver.observe(container);
       }
 
-      // Mouse events for selection
-      this.waveformCanvas.addEventListener('mousedown', (e) => this.handleWaveformMouseDown(e));
-      this.waveformCanvas.addEventListener('mousemove', (e) => this.handleWaveformMouseMove(e));
-      this.waveformCanvas.addEventListener('mouseup', () => this.handleWaveformMouseUp());
-      this.waveformCanvas.addEventListener('mouseleave', () => this.handleWaveformMouseUp());
+      // Mouse events for selection - using addListener for automatic cleanup
+      this.addListener(this.waveformCanvas, 'mousedown', (e) => this.handleWaveformMouseDown(e as MouseEvent));
+      this.addListener(this.waveformCanvas, 'mousemove', (e) => this.handleWaveformMouseMove(e as MouseEvent));
+      this.addListener(this.waveformCanvas, 'mouseup', () => this.handleWaveformMouseUp());
+      this.addListener(this.waveformCanvas, 'mouseleave', () => this.handleWaveformMouseUp());
     }
   }
 
@@ -716,8 +693,9 @@ export class SoundPage extends Page<SoundPageOptions> {
       }
     };
 
-    document.addEventListener('keydown', this.keyboardHandler);
-    document.addEventListener('keyup', this.keyUpHandler);
+    // Use addListener for automatic cleanup
+    this.addListener(document, 'keydown', this.keyboardHandler as EventListener);
+    this.addListener(document, 'keyup', this.keyUpHandler as EventListener);
   }
 
   private setupBeatGrid(): void {
@@ -809,22 +787,14 @@ export class SoundPage extends Page<SoundPageOptions> {
   }
 
   private setupSynthPanel(): void {
-    // Toggle synth button
-    const toggleSynthBtn = this.$('[data-action="toggle-synth"]');
-    const closeSynthBtn = this.$('[data-action="close-synth"]');
-
-    if (toggleSynthBtn) {
-      toggleSynthBtn.addEventListener('click', () => this.toggleSynthPanel());
-    }
-
-    if (closeSynthBtn) {
-      closeSynthBtn.addEventListener('click', () => this.toggleSynthPanel(false));
-    }
+    // Toggle synth buttons - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-action="toggle-synth"]', 'click', () => this.toggleSynthPanel());
+    this.addListenerBySelector('[data-action="close-synth"]', 'click', () => this.toggleSynthPanel(false));
 
     // Waveform buttons
     const waveformBtns = this.$$('.synth-wave-btn');
     waveformBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
+      this.addListener(btn, 'click', () => {
         const waveform = (btn as HTMLElement).dataset.waveform as WaveformType;
         if (waveform) {
           audioSourceStore.setWaveform(waveform);
@@ -835,7 +805,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     // Preset selector
     const presetSelect = this.$('.synth-preset-select') as HTMLSelectElement;
     if (presetSelect) {
-      presetSelect.addEventListener('change', () => {
+      this.addListener(presetSelect, 'change', () => {
         audioSourceStore.applyPresetByName(presetSelect.value);
       });
     }
@@ -844,7 +814,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     const freqSlider = this.$('.synth-freq-slider') as HTMLInputElement;
     const freqValue = this.$('.synth-freq-value') as HTMLElement;
     if (freqSlider) {
-      freqSlider.addEventListener('input', () => {
+      this.addListener(freqSlider, 'input', () => {
         const freq = parseInt(freqSlider.value);
         audioSourceStore.setFrequency(freq);
         if (freqValue) freqValue.textContent = String(freq);
@@ -855,7 +825,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     const volSlider = this.$('.synth-vol-slider') as HTMLInputElement;
     const volValue = this.$('.synth-vol-value') as HTMLElement;
     if (volSlider) {
-      volSlider.addEventListener('input', () => {
+      this.addListener(volSlider, 'input', () => {
         const vol = parseInt(volSlider.value);
         audioSourceStore.setVolume(vol / 100);
         if (volValue) volValue.textContent = String(vol);
@@ -869,25 +839,25 @@ export class SoundPage extends Page<SoundPageOptions> {
     const releaseSlider = this.$('.synth-env-release') as HTMLInputElement;
 
     if (attackSlider) {
-      attackSlider.addEventListener('input', () => {
+      this.addListener(attackSlider, 'input', () => {
         audioSourceStore.setEnvelope({ attack: parseInt(attackSlider.value) / 1000 });
       });
     }
 
     if (decaySlider) {
-      decaySlider.addEventListener('input', () => {
+      this.addListener(decaySlider, 'input', () => {
         audioSourceStore.setEnvelope({ decay: parseInt(decaySlider.value) / 1000 });
       });
     }
 
     if (sustainSlider) {
-      sustainSlider.addEventListener('input', () => {
+      this.addListener(sustainSlider, 'input', () => {
         audioSourceStore.setEnvelope({ sustain: parseInt(sustainSlider.value) / 100 });
       });
     }
 
     if (releaseSlider) {
-      releaseSlider.addEventListener('input', () => {
+      this.addListener(releaseSlider, 'input', () => {
         audioSourceStore.setEnvelope({ release: parseInt(releaseSlider.value) / 1000 });
       });
     }
@@ -895,7 +865,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     // Piano keys
     const pianoKeys = this.$$('.piano-key');
     pianoKeys.forEach(key => {
-      key.addEventListener('mousedown', () => {
+      this.addListener(key, 'mousedown', () => {
         const note = (key as HTMLElement).dataset.note;
         if (note) {
           audioSourceStore.playNoteName(note);
@@ -903,12 +873,12 @@ export class SoundPage extends Page<SoundPageOptions> {
         }
       });
 
-      key.addEventListener('mouseup', () => {
+      this.addListener(key, 'mouseup', () => {
         audioSourceStore.stop();
         key.classList.remove('active');
       });
 
-      key.addEventListener('mouseleave', () => {
+      this.addListener(key, 'mouseleave', () => {
         if (key.classList.contains('active')) {
           audioSourceStore.stop();
           key.classList.remove('active');
@@ -917,20 +887,8 @@ export class SoundPage extends Page<SoundPageOptions> {
     });
 
     // Play/Stop buttons
-    const playBtn = this.$('[data-action="synth-play"]');
-    const stopBtn = this.$('[data-action="synth-stop"]');
-
-    if (playBtn) {
-      playBtn.addEventListener('click', () => {
-        audioSourceStore.play();
-      });
-    }
-
-    if (stopBtn) {
-      stopBtn.addEventListener('click', () => {
-        audioSourceStore.stop();
-      });
-    }
+    this.addListenerBySelector('[data-action="synth-play"]', 'click', () => audioSourceStore.play());
+    this.addListenerBySelector('[data-action="synth-stop"]', 'click', () => audioSourceStore.stop());
   }
 
   private toggleSynthPanel(show?: boolean): void {
@@ -1982,15 +1940,10 @@ export class SoundPage extends Page<SoundPageOptions> {
   protected onUnmount(): void {
     this.stopAnimation();
 
-    if (this.keyboardHandler) {
-      document.removeEventListener('keydown', this.keyboardHandler);
-      this.keyboardHandler = null;
-    }
-
-    if (this.keyUpHandler) {
-      document.removeEventListener('keyup', this.keyUpHandler);
-      this.keyUpHandler = null;
-    }
+    // Note: keyboard handlers are now cleaned up automatically by the ListenerRegistry
+    // Clear references to avoid memory leaks from closures
+    this.keyboardHandler = null;
+    this.keyUpHandler = null;
 
     if (this.sourceNode) {
       this.sourceNode.stop();

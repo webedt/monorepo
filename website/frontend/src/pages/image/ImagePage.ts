@@ -299,21 +299,18 @@ export class ImagePage extends Page<ImagePageOptions> {
   protected onMount(): void {
     super.onMount();
 
-    // Setup back button
-    const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
-    if (backBtn) {
-      backBtn.addEventListener('click', () => {
-        if (this.hasUnsavedChanges && !confirm('You have unsaved changes. Leave anyway?')) {
-          return;
-        }
-        this.navigate(`/session/${this.options.params?.sessionId}/chat`);
-      });
-    }
+    // Setup back button - using addListenerBySelector for automatic cleanup
+    this.addListenerBySelector('[data-action="back"]', 'click', () => {
+      if (this.hasUnsavedChanges && !confirm('You have unsaved changes. Leave anyway?')) {
+        return;
+      }
+      this.navigate(`/session/${this.options.params?.sessionId}/chat`);
+    });
 
     // Setup format selector
     const formatSelector = this.$('.format-selector') as HTMLSelectElement;
     if (formatSelector) {
-      formatSelector.addEventListener('change', () => {
+      this.addListener(formatSelector, 'change', () => {
         this.selectedFormat = formatSelector.value as ExportFormat;
       });
     }
@@ -398,7 +395,7 @@ export class ImagePage extends Page<ImagePageOptions> {
   private setupToolButtons(): void {
     const toolBtns = this.$$('[data-tool]');
     toolBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
+      this.addListener(btn, 'click', () => {
         const tool = (btn as HTMLElement).dataset.tool as Tool;
         this.selectTool(tool);
       });
@@ -416,29 +413,26 @@ export class ImagePage extends Page<ImagePageOptions> {
   private setupColorPickers(): void {
     const primaryColor = this.$('.primary-color') as HTMLInputElement;
     const secondaryColor = this.$('.secondary-color') as HTMLInputElement;
-    const swapBtn = this.$('.swap-colors-btn') as HTMLButtonElement;
 
     if (primaryColor) {
-      primaryColor.addEventListener('input', (e) => {
+      this.addListener(primaryColor, 'input', (e) => {
         this.primaryColor = (e.target as HTMLInputElement).value;
       });
     }
 
     if (secondaryColor) {
-      secondaryColor.addEventListener('input', (e) => {
+      this.addListener(secondaryColor, 'input', (e) => {
         this.secondaryColor = (e.target as HTMLInputElement).value;
       });
     }
 
-    if (swapBtn) {
-      swapBtn.addEventListener('click', () => {
-        const temp = this.primaryColor;
-        this.primaryColor = this.secondaryColor;
-        this.secondaryColor = temp;
-        if (primaryColor) primaryColor.value = this.primaryColor;
-        if (secondaryColor) secondaryColor.value = this.secondaryColor;
-      });
-    }
+    this.addListenerBySelector('.swap-colors-btn', 'click', () => {
+      const temp = this.primaryColor;
+      this.primaryColor = this.secondaryColor;
+      this.secondaryColor = temp;
+      if (primaryColor) primaryColor.value = this.primaryColor;
+      if (secondaryColor) secondaryColor.value = this.secondaryColor;
+    });
   }
 
   private setupBrushSize(): void {
@@ -446,7 +440,7 @@ export class ImagePage extends Page<ImagePageOptions> {
     const value = this.$('.brush-size-value') as HTMLElement;
 
     if (slider) {
-      slider.addEventListener('input', (e) => {
+      this.addListener(slider, 'input', (e) => {
         this.brushSize = parseInt((e.target as HTMLInputElement).value);
         if (value) value.textContent = `${this.brushSize}px`;
       });
@@ -454,13 +448,9 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private setupActionButtons(): void {
-    const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
-    const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
-    const clearBtn = this.$('[data-action="clear"]') as HTMLButtonElement;
-
-    if (undoBtn) undoBtn.addEventListener('click', () => this.undo());
-    if (redoBtn) redoBtn.addEventListener('click', () => this.redo());
-    if (clearBtn) clearBtn.addEventListener('click', () => this.clearCanvas());
+    this.addListenerBySelector('[data-action="undo"]', 'click', () => this.undo());
+    this.addListenerBySelector('[data-action="redo"]', 'click', () => this.redo());
+    this.addListenerBySelector('[data-action="clear"]', 'click', () => this.clearCanvas());
   }
 
   private setupCanvas(): void {
@@ -478,23 +468,23 @@ export class ImagePage extends Page<ImagePageOptions> {
       this.compositeAndRender();
       this.saveToHistory();
 
-      // Mouse events
-      this.displayCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-      this.displayCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-      this.displayCanvas.addEventListener('mouseup', () => this.handleMouseUp());
-      this.displayCanvas.addEventListener('mouseleave', () => this.handleMouseUp());
+      // Mouse events - using addListener for automatic cleanup
+      this.addListener(this.displayCanvas, 'mousedown', (e) => this.handleMouseDown(e as MouseEvent));
+      this.addListener(this.displayCanvas, 'mousemove', (e) => this.handleMouseMove(e as MouseEvent));
+      this.addListener(this.displayCanvas, 'mouseup', () => this.handleMouseUp());
+      this.addListener(this.displayCanvas, 'mouseleave', () => this.handleMouseUp());
 
       // Touch events for mobile support
-      this.displayCanvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
-      this.displayCanvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
-      this.displayCanvas.addEventListener('touchend', () => this.handleMouseUp());
-      this.displayCanvas.addEventListener('touchcancel', () => this.handleMouseUp());
+      this.addListener(this.displayCanvas, 'touchstart', (e) => this.handleTouchStart(e as TouchEvent), { passive: false });
+      this.addListener(this.displayCanvas, 'touchmove', (e) => this.handleTouchMove(e as TouchEvent), { passive: false });
+      this.addListener(this.displayCanvas, 'touchend', () => this.handleMouseUp());
+      this.addListener(this.displayCanvas, 'touchcancel', () => this.handleMouseUp());
 
       // Update cursor position in status bar
-      this.displayCanvas.addEventListener('mousemove', (e) => {
+      this.addListener(this.displayCanvas, 'mousemove', (e) => {
         const rect = this.displayCanvas!.getBoundingClientRect();
-        const x = Math.round(e.clientX - rect.left);
-        const y = Math.round(e.clientY - rect.top);
+        const x = Math.round((e as MouseEvent).clientX - rect.left);
+        const y = Math.round((e as MouseEvent).clientY - rect.top);
         const cursorStatus = this.$('.status-cursor') as HTMLElement;
         if (cursorStatus) {
           cursorStatus.textContent = `X: ${x}, Y: ${y}`;
@@ -502,17 +492,9 @@ export class ImagePage extends Page<ImagePageOptions> {
       });
     }
 
-    // New image button
-    const newImageBtn = this.$('.btn-new-image') as HTMLButtonElement;
-    if (newImageBtn) {
-      newImageBtn.addEventListener('click', () => this.createNewImage());
-    }
-
-    // Open image button
-    const openImageBtn = this.$('.btn-open-image') as HTMLButtonElement;
-    if (openImageBtn) {
-      openImageBtn.addEventListener('click', () => this.openImage());
-    }
+    // New image and open image buttons
+    this.addListenerBySelector('.btn-new-image', 'click', () => this.createNewImage());
+    this.addListenerBySelector('.btn-open-image', 'click', () => this.openImage());
   }
 
   private setupLayersPanel(): void {
@@ -570,37 +552,37 @@ export class ImagePage extends Page<ImagePageOptions> {
     const opacitySlider = this.$('.onion-opacity-slider') as HTMLInputElement;
 
     if (enabledToggle) {
-      enabledToggle.addEventListener('change', () => {
+      this.addListener(enabledToggle, 'change', () => {
         onionSkinningStore.setEnabled(enabledToggle.checked);
       });
     }
 
     if (prevToggle) {
-      prevToggle.addEventListener('change', () => {
+      this.addListener(prevToggle, 'change', () => {
         onionSkinningStore.setShowPrevious(prevToggle.checked);
       });
     }
 
     if (nextToggle) {
-      nextToggle.addEventListener('change', () => {
+      this.addListener(nextToggle, 'change', () => {
         onionSkinningStore.setShowNext(nextToggle.checked);
       });
     }
 
     if (prevCount) {
-      prevCount.addEventListener('change', () => {
+      this.addListener(prevCount, 'change', () => {
         onionSkinningStore.setPreviousCount(parseInt(prevCount.value) || 1);
       });
     }
 
     if (nextCount) {
-      nextCount.addEventListener('change', () => {
+      this.addListener(nextCount, 'change', () => {
         onionSkinningStore.setNextCount(parseInt(nextCount.value) || 1);
       });
     }
 
     if (opacitySlider) {
-      opacitySlider.addEventListener('input', () => {
+      this.addListener(opacitySlider, 'input', () => {
         const value = parseInt(opacitySlider.value) / 100;
         onionSkinningStore.updateSettings({
           previousOpacity: value,
@@ -615,21 +597,13 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private setupTimelineControls(): void {
-    const firstFrameBtn = this.$('[data-action="first-frame"]') as HTMLButtonElement;
-    const prevFrameBtn = this.$('[data-action="prev-frame"]') as HTMLButtonElement;
-    const nextFrameBtn = this.$('[data-action="next-frame"]') as HTMLButtonElement;
-    const lastFrameBtn = this.$('[data-action="last-frame"]') as HTMLButtonElement;
-    const addFrameBtn = this.$('[data-action="add-frame"]') as HTMLButtonElement;
-    const duplicateFrameBtn = this.$('[data-action="duplicate-frame"]') as HTMLButtonElement;
-    const deleteFrameBtn = this.$('[data-action="delete-frame"]') as HTMLButtonElement;
-
-    if (firstFrameBtn) firstFrameBtn.addEventListener('click', () => this.goToFrame(0));
-    if (prevFrameBtn) prevFrameBtn.addEventListener('click', () => this.previousFrame());
-    if (nextFrameBtn) nextFrameBtn.addEventListener('click', () => this.nextFrame());
-    if (lastFrameBtn) lastFrameBtn.addEventListener('click', () => this.goToFrame(this.frames.length - 1));
-    if (addFrameBtn) addFrameBtn.addEventListener('click', () => this.addFrame());
-    if (duplicateFrameBtn) duplicateFrameBtn.addEventListener('click', () => this.duplicateFrame());
-    if (deleteFrameBtn) deleteFrameBtn.addEventListener('click', () => this.deleteFrame());
+    this.addListenerBySelector('[data-action="first-frame"]', 'click', () => this.goToFrame(0));
+    this.addListenerBySelector('[data-action="prev-frame"]', 'click', () => this.previousFrame());
+    this.addListenerBySelector('[data-action="next-frame"]', 'click', () => this.nextFrame());
+    this.addListenerBySelector('[data-action="last-frame"]', 'click', () => this.goToFrame(this.frames.length - 1));
+    this.addListenerBySelector('[data-action="add-frame"]', 'click', () => this.addFrame());
+    this.addListenerBySelector('[data-action="duplicate-frame"]', 'click', () => this.duplicateFrame());
+    this.addListenerBySelector('[data-action="delete-frame"]', 'click', () => this.deleteFrame());
   }
 
   private updateOnionSkinningUI(): void {
@@ -980,7 +954,8 @@ export class ImagePage extends Page<ImagePageOptions> {
       }
     };
 
-    document.addEventListener('keydown', this.keyboardHandler);
+    // Use addListener for automatic cleanup
+    this.addListener(document, 'keydown', this.keyboardHandler as EventListener);
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -1530,10 +1505,9 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   protected onUnmount(): void {
-    if (this.keyboardHandler) {
-      document.removeEventListener('keydown', this.keyboardHandler);
-      this.keyboardHandler = null;
-    }
+    // Note: keyboard handler is now cleaned up automatically by the ListenerRegistry
+    // Clear reference to avoid memory leaks from closures
+    this.keyboardHandler = null;
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
