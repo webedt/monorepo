@@ -13,6 +13,146 @@ import type { AuthRequest } from '../../middleware/auth.js';
 const router = Router();
 
 /**
+ * Resolve file SHA from GitHub. Returns undefined if file doesn't exist.
+ * Caches resolved SHAs in the provided cache map.
+ */
+async function resolveSha(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  path: string,
+  branch: string,
+  shaCache?: Map<string, string>
+): Promise<string | undefined> {
+  const cacheKey = `${owner}/${repo}/${branch}/${path}`;
+
+  if (shaCache?.has(cacheKey)) {
+    return shaCache.get(cacheKey);
+  }
+
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref: branch,
+    });
+
+    if (!Array.isArray(data) && data.type === 'file') {
+      shaCache?.set(cacheKey, data.sha);
+      return data.sha;
+    }
+    return undefined;
+  } catch (error: unknown) {
+    const err = error as { status?: number };
+    if (err.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Create a new tree with file changes and commit it atomically.
+ * This uses the Git Trees API for efficient batch operations.
+ */
+async function commitTreeChanges(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+  message: string,
+  treeChanges: Array<{
+    path: string;
+    mode: '100644' | '100755' | '040000' | '160000' | '120000';
+    type: 'blob' | 'tree' | 'commit';
+    sha: string | null; // null to delete
+    content?: string; // for new/updated files
+  }>
+): Promise<{ commitSha: string; treeSha: string }> {
+  // Get current branch ref
+  const { data: refData } = await octokit.git.getRef({
+    owner,
+    repo,
+    ref: `heads/${branch}`,
+  });
+  const latestCommitSha = refData.object.sha;
+
+  // Get current commit to find base tree
+  const { data: commitData } = await octokit.git.getCommit({
+    owner,
+    repo,
+    commit_sha: latestCommitSha,
+  });
+  const baseTreeSha = commitData.tree.sha;
+
+  // Create new tree with changes
+  // Note: GitHub API accepts sha: null for deletions, but Octokit types expect string.
+  // We build the tree entries with proper typing and cast at the API boundary.
+  const treeEntries = treeChanges.map((change) => {
+    if (change.content !== undefined) {
+      // New or updated file with content
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: change.type,
+        content: change.content,
+      };
+    } else if (change.sha === null) {
+      // Delete file - GitHub API accepts sha: null to remove from tree
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: change.type,
+        sha: null as string | null,
+      };
+    } else {
+      // Keep existing blob (e.g., for renames)
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: change.type,
+        sha: change.sha,
+      };
+    }
+  });
+
+  // Type assertion needed: GitHub API accepts null for sha (to delete files)
+  // but Octokit's types only allow string
+  const { data: newTree } = await octokit.git.createTree({
+    owner,
+    repo,
+    base_tree: baseTreeSha,
+    tree: treeEntries as Array<{
+      path?: string;
+      mode?: '100644' | '100755' | '040000' | '160000' | '120000';
+      type?: 'blob' | 'tree' | 'commit';
+      sha?: string | null;
+      content?: string;
+    }>,
+  });
+
+  // Create commit
+  const { data: newCommit } = await octokit.git.createCommit({
+    owner,
+    repo,
+    message,
+    tree: newTree.sha,
+    parents: [latestCommitSha],
+  });
+
+  // Update branch ref
+  await octokit.git.updateRef({
+    owner,
+    repo,
+    ref: `heads/${branch}`,
+    sha: newCommit.sha,
+  });
+
+  return { commitSha: newCommit.sha, treeSha: newTree.sha };
+}
+
+/**
  * Get repository file tree
  */
 router.get('/:owner/:repo/tree/*', requireAuth, validatePathParam({ isBranchName: true }), async (req: Request, res: Response) => {
@@ -193,25 +333,7 @@ router.put('/:owner/:repo/contents/*', requireAuth, validatePathParam(), async (
 
     const contentBase64 = Buffer.from(content, 'utf-8').toString('base64');
 
-    let fileSha = sha;
-    if (!fileSha) {
-      try {
-        const { data } = await octokit.repos.getContent({
-          owner,
-          repo,
-          path,
-          ref: branch,
-        });
-        if (!Array.isArray(data) && data.type === 'file') {
-          fileSha = data.sha;
-        }
-      } catch (error: unknown) {
-        const err = error as { status?: number };
-        if (err.status !== 404) {
-          throw error;
-        }
-      }
-    }
+    const fileSha = sha || await resolveSha(octokit, owner, repo, path, branch);
 
     const result = await octokit.repos.createOrUpdateFileContents({
       owner,
@@ -276,26 +398,10 @@ router.delete('/:owner/:repo/contents/*', requireAuth, validatePathParam(), asyn
 
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
 
-    let fileSha = sha;
+    const fileSha = sha || await resolveSha(octokit, owner, repo, path, branch);
     if (!fileSha) {
-      try {
-        const { data } = await octokit.repos.getContent({
-          owner,
-          repo,
-          path,
-          ref: branch,
-        });
-        if (!Array.isArray(data) && data.type === 'file') {
-          fileSha = data.sha;
-        }
-      } catch (error: unknown) {
-        const err = error as { status?: number };
-        if (err.status === 404) {
-          res.status(404).json({ success: false, error: 'File not found' });
-          return;
-        }
-        throw error;
-      }
+      res.status(404).json({ success: false, error: 'File not found' });
+      return;
     }
 
     await octokit.repos.deleteFile({
@@ -303,7 +409,7 @@ router.delete('/:owner/:repo/contents/*', requireAuth, validatePathParam(), asyn
       repo,
       path,
       message: message || `Delete ${path}`,
-      sha: fileSha!,
+      sha: fileSha,
       branch,
     });
 
@@ -468,19 +574,29 @@ router.delete('/:owner/:repo/folder/*', requireAuth, validatePathParam(), async 
       return;
     }
 
-    // Delete each file in the folder
-    for (const file of filesToDelete) {
-      if (!file.path || !file.sha) continue;
+    // Use Git Trees API for atomic batch deletion
+    const treeChanges = filesToDelete
+      .filter((file) => file.path && file.sha)
+      .map((file) => ({
+        path: file.path!,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: null, // null indicates deletion
+      }));
 
-      await octokit.repos.deleteFile({
-        owner,
-        repo,
-        path: file.path,
-        message: message || `Delete folder ${folderPath}`,
-        sha: file.sha,
-        branch,
-      });
+    if (treeChanges.length === 0) {
+      res.status(404).json({ success: false, error: 'No valid files to delete in folder' });
+      return;
     }
+
+    await commitTreeChanges(
+      octokit,
+      owner,
+      repo,
+      branch,
+      message || `Delete folder ${folderPath}`,
+      treeChanges
+    );
 
     logger.info(`Deleted folder ${folderPath} (${filesToDelete.length} files) in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
@@ -489,7 +605,7 @@ router.delete('/:owner/:repo/folder/*', requireAuth, validatePathParam(), async 
       data: {
         message: 'Folder deleted successfully',
         path: folderPath,
-        filesDeleted: filesToDelete.length,
+        filesDeleted: treeChanges.length,
       },
     });
   } catch (error: unknown) {
@@ -561,44 +677,65 @@ router.post('/:owner/:repo/rename-folder/*', requireAuth, validatePathParam(), v
       return;
     }
 
-    // Move each file to new location
+    // Check if any files already exist at the new paths
+    const existingAtNewPath = tree.tree.filter(
+      (item) => item.type === 'blob' && item.path?.startsWith(newFolderPath + '/')
+    );
+
+    if (existingAtNewPath.length > 0) {
+      res.status(422).json({ success: false, error: 'Files already exist at new path' });
+      return;
+    }
+
+    // Use Git Trees API for atomic batch rename
+    // Build tree changes: add files at new paths, delete files at old paths
+    const treeChanges: Array<{
+      path: string;
+      mode: '100644' | '100755' | '040000' | '160000' | '120000';
+      type: 'blob' | 'tree' | 'commit';
+      sha: string | null;
+    }> = [];
+
     for (const file of filesToMove) {
       if (!file.path || !file.sha) continue;
-
-      // Get file content
-      const { data: fileContent } = await octokit.repos.getContent({
-        owner,
-        repo,
-        path: file.path,
-        ref: branch,
-      });
-
-      if (Array.isArray(fileContent) || fileContent.type !== 'file') continue;
 
       // Calculate new path
       const relativePath = file.path.substring(oldFolderPath.length + 1);
       const newPath = `${newFolderPath}/${relativePath}`;
 
-      // Create file at new path
-      await octokit.repos.createOrUpdateFileContents({
-        owner,
-        repo,
+      // Determine file mode (preserve executable flag if present)
+      const fileMode: '100644' | '100755' = file.mode === '100755' ? '100755' : '100644';
+
+      // Add file at new path (reuse existing blob SHA - no need to fetch content)
+      treeChanges.push({
         path: newPath,
-        message: message || `Rename folder ${oldFolderPath} to ${newFolderPath}`,
-        content: fileContent.content || '',
-        branch,
+        mode: fileMode,
+        type: 'blob',
+        sha: file.sha,
       });
 
-      // Delete old file
-      await octokit.repos.deleteFile({
-        owner,
-        repo,
+      // Delete file at old path
+      treeChanges.push({
         path: file.path,
-        message: message || `Rename folder ${oldFolderPath} to ${newFolderPath}`,
-        sha: file.sha,
-        branch,
+        mode: fileMode,
+        type: 'blob',
+        sha: null,
       });
     }
+
+    if (treeChanges.length === 0) {
+      res.status(404).json({ success: false, error: 'No valid files to move in folder' });
+      return;
+    }
+
+    await commitTreeChanges(
+      octokit,
+      owner,
+      repo,
+      branch,
+      message || `Rename folder ${oldFolderPath} to ${newFolderPath}`,
+      treeChanges
+    );
 
     logger.info(`Renamed folder ${oldFolderPath} to ${newFolderPath} (${filesToMove.length} files) in ${owner}/${repo}/${branch}`, { component: 'GitHub' });
 
@@ -608,7 +745,7 @@ router.post('/:owner/:repo/rename-folder/*', requireAuth, validatePathParam(), v
         message: 'Folder renamed successfully',
         oldPath: oldFolderPath,
         newPath: newFolderPath,
-        filesMoved: filesToMove.length,
+        filesMoved: treeChanges.length / 2,
       },
     });
   } catch (error: unknown) {
