@@ -19,6 +19,15 @@ import {
   type CacheHealth,
 } from './types.js';
 
+/**
+ * Doubly-linked list node for O(1) LRU tracking
+ */
+interface LRUNode {
+  key: string;
+  prev: LRUNode | null;
+  next: LRUNode | null;
+}
+
 export class MemoryCache {
   private cache: Map<string, CacheEntry> = new Map();
   private tags: Map<string, Set<string>> = new Map(); // tag -> keys
@@ -28,6 +37,14 @@ export class MemoryCache {
   private lastCleanup: Date | null = null;
   private accessTimings: number[] = [];
   private errors: string[] = [];
+
+  // Pending promises for getOrSet to prevent stampeding herd
+  private pendingPromises: Map<string, Promise<unknown>> = new Map();
+
+  // LRU doubly-linked list for O(1) eviction
+  private lruHead: LRUNode | null = null; // most recently used
+  private lruTail: LRUNode | null = null; // least recently used
+  private lruNodes: Map<string, LRUNode> = new Map();
 
   constructor(config: Partial<CacheConfig> = {}) {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
@@ -60,6 +77,8 @@ export class MemoryCache {
           }
         });
       }, this.config.cleanupIntervalMs);
+      // Allow Node.js to exit even if timer is still active
+      this.cleanupTimer.unref();
     }
   }
 
@@ -68,6 +87,7 @@ export class MemoryCache {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+    this.pendingPromises.clear();
     await this.clear();
   }
 
@@ -97,6 +117,7 @@ export class MemoryCache {
       // Remove expired entry
       this.cache.delete(key);
       this.removeFromTags(key);
+      this.removeFromLRU(key);
       if (this.config.enableStats) {
         this.stats.misses++;
         this.stats.entryCount--;
@@ -106,9 +127,10 @@ export class MemoryCache {
       return { value: undefined, hit: false, expired: true, accessTimeMs };
     }
 
-    // Update access metadata (LRU tracking)
+    // Update access metadata and move to front of LRU list
     entry.lastAccessedAt = now;
     entry.accessCount++;
+    this.moveToFrontOfLRU(key);
 
     if (this.config.enableStats) {
       this.stats.hits++;
@@ -137,6 +159,7 @@ export class MemoryCache {
     if (existingEntry) {
       this.stats.sizeBytes -= existingEntry.sizeBytes;
       this.removeFromTags(key);
+      this.removeFromLRU(key);
     }
 
     // Create new entry
@@ -150,6 +173,9 @@ export class MemoryCache {
     };
 
     this.cache.set(key, entry);
+
+    // Add to front of LRU list
+    this.addToFrontOfLRU(key);
 
     // Track tags
     if (options?.tags) {
@@ -176,6 +202,7 @@ export class MemoryCache {
 
     this.cache.delete(key);
     this.removeFromTags(key);
+    this.removeFromLRU(key);
 
     if (this.config.enableStats) {
       this.stats.deletes++;
@@ -204,6 +231,9 @@ export class MemoryCache {
   async clear(): Promise<void> {
     this.cache.clear();
     this.tags.clear();
+    this.lruNodes.clear();
+    this.lruHead = null;
+    this.lruTail = null;
     this.stats = this.createEmptyStats();
   }
 
@@ -285,16 +315,34 @@ export class MemoryCache {
     factory: () => Promise<T>,
     options?: CacheSetOptions
   ): Promise<T> {
+    // Check cache first
     const result = await this.get<T>(key);
-
     if (result.hit) {
       return result.value as T;
     }
 
+    // Check if there's already a pending request for this key (prevent stampeding herd)
+    const pending = this.pendingPromises.get(key);
+    if (pending) {
+      return pending as Promise<T>;
+    }
+
     // Execute factory and cache result
-    const value = await factory();
-    await this.set(key, value, options);
-    return value;
+    const promise = (async () => {
+      try {
+        const value = await factory();
+        await this.set(key, value, options);
+        return value;
+      } finally {
+        // Clean up pending promise after completion
+        this.pendingPromises.delete(key);
+      }
+    })();
+
+    // Store the pending promise
+    this.pendingPromises.set(key, promise);
+
+    return promise;
   }
 
   getStats(): CacheStats {
@@ -332,6 +380,8 @@ export class MemoryCache {
             this.errors.push(`Cleanup error: ${err.message}`);
           });
         }, this.config.cleanupIntervalMs);
+        // Allow Node.js to exit even if timer is still active
+        this.cleanupTimer.unref();
       }
     }
   }
@@ -345,6 +395,7 @@ export class MemoryCache {
       if (now > entry.expiresAt) {
         this.cache.delete(key);
         this.removeFromTags(key);
+        this.removeFromLRU(key);
         removed++;
         if (this.config.enableStats) {
           this.stats.sizeBytes -= entry.sizeBytes;
@@ -390,29 +441,88 @@ export class MemoryCache {
 
   // Private helper methods
 
-  private calculateSize(value: unknown): number {
-    try {
-      // Rough size estimation using JSON stringification
-      const json = JSON.stringify(value);
-      // UTF-8 encoding: ASCII chars = 1 byte, others = 2-4 bytes
-      // Approximation: just use string length * 2 for safety
-      return json.length * 2;
-    } catch {
-      // If value can't be stringified, estimate based on type
-      if (typeof value === 'string') {
-        return value.length * 2;
-      }
-      if (typeof value === 'number') {
-        return 8;
-      }
-      if (typeof value === 'boolean') {
-        return 4;
-      }
-      if (Array.isArray(value)) {
-        return value.length * 100; // Rough estimate
-      }
-      return 1000; // Default for complex objects
+  private calculateSize(value: unknown, seen: WeakSet<object> = new WeakSet()): number {
+    // Fast path for primitives - no JSON.stringify needed
+    if (value === null || value === undefined) {
+      return 8;
     }
+
+    const type = typeof value;
+
+    if (type === 'string') {
+      return (value as string).length * 2;
+    }
+
+    if (type === 'number') {
+      return 8;
+    }
+
+    if (type === 'boolean') {
+      return 4;
+    }
+
+    if (type === 'bigint') {
+      return 16;
+    }
+
+    if (type === 'function' || type === 'symbol') {
+      return 32;
+    }
+
+    // For objects and arrays, traverse recursively with cycle detection
+    if (type === 'object') {
+      const obj = value as object;
+
+      // Detect circular references
+      if (seen.has(obj)) {
+        return 0; // Already counted this object
+      }
+      seen.add(obj);
+
+      // Special handling for Buffer
+      if (Buffer.isBuffer(obj)) {
+        return obj.length;
+      }
+
+      // Special handling for Date
+      if (obj instanceof Date) {
+        return 24;
+      }
+
+      // Special handling for Map and Set
+      if (obj instanceof Map || obj instanceof Set) {
+        let size = 32; // Base overhead
+        for (const item of obj) {
+          if (obj instanceof Map) {
+            size += this.calculateSize(item[0], seen) + this.calculateSize(item[1], seen);
+          } else {
+            size += this.calculateSize(item, seen);
+          }
+        }
+        return size;
+      }
+
+      // Arrays
+      if (Array.isArray(obj)) {
+        let size = 24 + obj.length * 8; // Array overhead + pointer array
+        for (const item of obj) {
+          size += this.calculateSize(item, seen);
+        }
+        return size;
+      }
+
+      // Plain objects
+      let size = 24; // Object overhead
+      const keys = Object.keys(obj);
+      for (const key of keys) {
+        size += key.length * 2; // Key string
+        size += 8; // Pointer
+        size += this.calculateSize((obj as Record<string, unknown>)[key], seen);
+      }
+      return size;
+    }
+
+    return 100; // Unknown type fallback
   }
 
   private ensureCapacity(newEntrySize: number): void {
@@ -428,34 +538,41 @@ export class MemoryCache {
   }
 
   private evictLRU(): void {
-    // Find the least recently used entry
-    let lruKey: string | null = null;
-    let lruTime = Infinity;
-
-    for (const [key, entry] of this.cache.entries()) {
-      if (entry.lastAccessedAt < lruTime) {
-        lruTime = entry.lastAccessedAt;
-        lruKey = key;
-      }
+    // O(1) eviction using doubly-linked list - evict from tail (LRU)
+    if (!this.lruTail) {
+      return;
     }
 
-    if (lruKey) {
-      const entry = this.cache.get(lruKey);
-      if (entry) {
-        this.cache.delete(lruKey);
-        this.removeFromTags(lruKey);
-        if (this.config.enableStats) {
-          this.stats.evictions++;
-          this.stats.entryCount = this.cache.size;
-          this.stats.sizeBytes -= entry.sizeBytes;
-        }
+    const lruKey = this.lruTail.key;
+    const entry = this.cache.get(lruKey);
+
+    if (entry) {
+      this.cache.delete(lruKey);
+      this.removeFromTags(lruKey);
+      this.removeFromLRU(lruKey);
+
+      if (this.config.enableStats) {
+        this.stats.evictions++;
+        this.stats.entryCount = this.cache.size;
+        this.stats.sizeBytes -= entry.sizeBytes;
       }
     }
   }
 
   private removeFromTags(key: string): void {
-    for (const taggedKeys of this.tags.values()) {
+    const emptyTags: string[] = [];
+
+    for (const [tag, taggedKeys] of this.tags.entries()) {
       taggedKeys.delete(key);
+      // Track empty tag sets for cleanup
+      if (taggedKeys.size === 0) {
+        emptyTags.push(tag);
+      }
+    }
+
+    // Clean up empty tag sets to prevent memory growth
+    for (const tag of emptyTags) {
+      this.tags.delete(tag);
     }
   }
 
@@ -473,5 +590,69 @@ export class MemoryCache {
     // Update average
     const sum = this.accessTimings.reduce((a, b) => a + b, 0);
     this.stats.avgAccessTimeMs = sum / this.accessTimings.length;
+  }
+
+  // LRU doubly-linked list helper methods for O(1) operations
+
+  private addToFrontOfLRU(key: string): void {
+    const node: LRUNode = { key, prev: null, next: this.lruHead };
+
+    if (this.lruHead) {
+      this.lruHead.prev = node;
+    }
+    this.lruHead = node;
+
+    if (!this.lruTail) {
+      this.lruTail = node;
+    }
+
+    this.lruNodes.set(key, node);
+  }
+
+  private moveToFrontOfLRU(key: string): void {
+    const node = this.lruNodes.get(key);
+    if (!node || node === this.lruHead) {
+      return; // Already at front or doesn't exist
+    }
+
+    // Remove from current position
+    if (node.prev) {
+      node.prev.next = node.next;
+    }
+    if (node.next) {
+      node.next.prev = node.prev;
+    }
+    if (node === this.lruTail) {
+      this.lruTail = node.prev;
+    }
+
+    // Add to front
+    node.prev = null;
+    node.next = this.lruHead;
+    if (this.lruHead) {
+      this.lruHead.prev = node;
+    }
+    this.lruHead = node;
+  }
+
+  private removeFromLRU(key: string): void {
+    const node = this.lruNodes.get(key);
+    if (!node) {
+      return;
+    }
+
+    if (node.prev) {
+      node.prev.next = node.next;
+    } else {
+      this.lruHead = node.next;
+    }
+
+    if (node.next) {
+      node.next.prev = node.prev;
+    } else {
+      this.lruTail = node.prev;
+    }
+
+    this.lruNodes.delete(key);
   }
 }

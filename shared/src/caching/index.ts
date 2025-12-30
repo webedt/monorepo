@@ -6,17 +6,18 @@
  *
  * @example
  * ```typescript
- * import { cacheService, ACacheService, CACHE_TTL } from '@webedt/shared';
+ * import { ACacheService, CACHE_TTL } from '@webedt/shared';
+ * import { ServiceProvider } from '@webedt/shared';
  *
- * // Using the global singleton
- * const result = await cacheService.getSessionList(userId);
+ * // Using dependency injection (recommended)
+ * const cache = ServiceProvider.get(ACacheService);
+ * const result = await cache.getSessionList(userId);
  * if (!result.hit) {
  *   const sessions = await fetchFromDatabase();
- *   await cacheService.setSessionList(userId, sessions);
+ *   await cache.setSessionList(userId, sessions);
  * }
  *
- * // Using dependency injection
- * const cache = ServiceProvider.get(ACacheService);
+ * // Or with generic methods
  * await cache.set('my-key', myValue, { ttlMs: CACHE_TTL.LONG });
  * ```
  */
@@ -26,7 +27,7 @@ export { ACacheService } from './ACacheService.js';
 
 // Concrete implementations
 export { MemoryCache } from './MemoryCache.js';
-export { CacheService, cacheService } from './CacheService.js';
+export { CacheService } from './CacheService.js';
 
 // Types
 export {

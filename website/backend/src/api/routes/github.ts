@@ -266,18 +266,27 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Try to get from cache first
-    const cacheService = ServiceProvider.get(ACacheService);
-    const cachedResult = await cacheService.getGitHubRepos(userId) as { hit: boolean; value?: CachedGitHubRepos };
+    // Try to get from cache first (with graceful degradation)
+    let cacheService: ACacheService | null = null;
+    try {
+      cacheService = ServiceProvider.get(ACacheService);
+      const cachedResult = await cacheService.getGitHubRepos(userId) as { hit: boolean; value?: CachedGitHubRepos };
 
-    if (cachedResult.hit && cachedResult.value) {
-      res.setHeader('X-Cache', 'HIT');
-      res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
-      res.json({ success: true, data: cachedResult.value.repos });
-      return;
+      if (cachedResult.hit && cachedResult.value) {
+        res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
+        res.json({ success: true, data: cachedResult.value.repos });
+        return;
+      }
+    } catch (cacheError) {
+      // Cache read failed - continue with GitHub API fetch
+      logger.warn('Cache read failed for GitHub repos', {
+        component: 'GitHub',
+        error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
+      });
     }
 
-    // Cache miss - fetch from GitHub API
+    // Cache miss or cache error - fetch from GitHub API
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
     const { data: repos } = await octokit.repos.listForAuthenticatedUser({
       sort: 'updated',
@@ -296,8 +305,15 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
       default_branch: repo.default_branch,
     }));
 
-    // Cache the result
-    await cacheService.setGitHubRepos(userId, formattedRepos);
+    // Try to cache the result (non-blocking, ignore errors)
+    if (cacheService) {
+      cacheService.setGitHubRepos(userId, formattedRepos).catch(err => {
+        logger.warn('Failed to cache GitHub repos', {
+          component: 'GitHub',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    }
 
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=300');
@@ -361,18 +377,27 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
       return;
     }
 
-    // Try to get from cache first
-    const cacheService = ServiceProvider.get(ACacheService);
-    const cachedResult = await cacheService.getGitHubBranches(userId, owner, repo) as { hit: boolean; value?: CachedGitHubBranches };
+    // Try to get from cache first (with graceful degradation)
+    let cacheService: ACacheService | null = null;
+    try {
+      cacheService = ServiceProvider.get(ACacheService);
+      const cachedResult = await cacheService.getGitHubBranches(userId, owner, repo) as { hit: boolean; value?: CachedGitHubBranches };
 
-    if (cachedResult.hit && cachedResult.value) {
-      res.setHeader('X-Cache', 'HIT');
-      res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=180');
-      res.json({ success: true, data: cachedResult.value.branches });
-      return;
+      if (cachedResult.hit && cachedResult.value) {
+        res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=180');
+        res.json({ success: true, data: cachedResult.value.branches });
+        return;
+      }
+    } catch (cacheError) {
+      // Cache read failed - continue with GitHub API fetch
+      logger.warn('Cache read failed for GitHub branches', {
+        component: 'GitHub',
+        error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
+      });
     }
 
-    // Cache miss - fetch from GitHub API
+    // Cache miss or cache error - fetch from GitHub API
     const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
     const { data: branches } = await octokit.repos.listBranches({
       owner,
@@ -389,8 +414,15 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req: Request, res
       },
     }));
 
-    // Cache the result
-    await cacheService.setGitHubBranches(userId, owner, repo, formattedBranches);
+    // Try to cache the result (non-blocking, ignore errors)
+    if (cacheService) {
+      cacheService.setGitHubBranches(userId, owner, repo, formattedBranches).catch(err => {
+        logger.warn('Failed to cache GitHub branches', {
+          component: 'GitHub',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    }
 
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('Cache-Control', 'private, max-age=180, stale-while-revalidate=180');
