@@ -214,6 +214,14 @@ function emit(event) {
   console.log(JSON.stringify(event));
 }
 
+// Debug logging (only outputs when DEBUG env var is set)
+const DEBUG = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+function debugLog(message, context = {}) {
+  if (DEBUG) {
+    console.error(`[DEBUG] ${message}`, JSON.stringify(context));
+  }
+}
+
 // === Title Generation ===
 // Four methods with fallback chain:
 // 1. claude.ai dust endpoint (fastest, ~1s, requires browser cookies)
@@ -403,35 +411,50 @@ Request: "${prompt}"`;
           }
         }
 
-        // Archive the temp session
-        await fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
+        // Archive the temp session (fire-and-forget with debug logging)
+        fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
           method: 'POST',
           headers: buildHeaders(accessToken, orgUuid),
           body: JSON.stringify({})
-        }).catch(() => {});
+        }).catch((error) => {
+          debugLog('Failed to archive temp title generation session', {
+            sessionId: session.id,
+            error: error.message || String(error),
+          });
+        });
 
         return result;
       }
 
       if (status.session_status === 'failed') {
-        // Archive and return null
-        await fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
+        // Archive and return null (fire-and-forget with debug logging)
+        fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
           method: 'POST',
           headers: buildHeaders(accessToken, orgUuid),
           body: JSON.stringify({})
-        }).catch(() => {});
+        }).catch((error) => {
+          debugLog('Failed to archive temp title generation session after failure', {
+            sessionId: session.id,
+            error: error.message || String(error),
+          });
+        });
         return null;
       }
 
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    // Timeout - archive and return null
-    await fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
+    // Timeout - archive and return null (fire-and-forget with debug logging)
+    fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
       method: 'POST',
       headers: buildHeaders(accessToken, orgUuid),
       body: JSON.stringify({})
-    }).catch(() => {});
+    }).catch((error) => {
+      debugLog('Failed to archive temp title generation session after timeout', {
+        sessionId: session.id,
+        error: error.message || String(error),
+      });
+    });
 
     return null;
   } catch {
