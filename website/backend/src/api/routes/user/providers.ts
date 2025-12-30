@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, logger } from '@webedt/shared';
 // Note: Encryption/decryption is now automatic via Drizzle custom column types
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -65,7 +65,7 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       data: { message: 'Codex authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Codex auth error:', error);
+    logger.error('Update Codex auth error', error, { component: 'user', operation: 'updateCodexAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Codex authentication' });
   }
 });
@@ -100,7 +100,7 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
       data: { message: 'Codex authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Codex auth error:', error);
+    logger.error('Remove Codex auth error', error, { component: 'user', operation: 'removeCodexAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Codex authentication' });
   }
 });
@@ -181,7 +181,7 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       data: { message: 'Gemini OAuth authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Gemini auth error:', error);
+    logger.error('Update Gemini auth error', error, { component: 'user', operation: 'updateGeminiAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Gemini authentication' });
   }
 });
@@ -216,7 +216,7 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Gemini authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Gemini auth error:', error);
+    logger.error('Remove Gemini auth error', error, { component: 'user', operation: 'removeGeminiAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Gemini authentication' });
   }
 });

@@ -74,7 +74,7 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
       data: { message: 'Claude authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Claude auth error:', error);
+    logger.error('Update Claude auth error', error, { component: 'user', operation: 'updateClaudeAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Claude authentication' });
   }
 });
@@ -109,7 +109,7 @@ router.delete('/claude-auth', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Claude authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Claude auth error:', error);
+    logger.error('Remove Claude auth error', error, { component: 'user', operation: 'removeClaudeAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Claude authentication' });
   }
 });

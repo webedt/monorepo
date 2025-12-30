@@ -36,7 +36,7 @@ export type {
 
 // Rate Limiter
 export { GitHubRateLimiter, withRateLimiting } from './rateLimiter.js';
-export type { RateLimitState, RateLimiterConfig } from './rateLimiter.js';
+export type { RateLimitState, GitHubRateLimiterConfig } from './rateLimiter.js';
 
 // Diff Parser
 export { parseDiff, formatDiffStats, getFileStatusLabel } from './diffParser.js';
