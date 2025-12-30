@@ -126,7 +126,8 @@ export class UndoRedoManager {
     if (!this.subscribers.has(tabPath)) {
       this.subscribers.set(tabPath, new Set());
     }
-    this.subscribers.get(tabPath)!.add(subscriber);
+    const tabSubscribers = this.subscribers.get(tabPath);
+    tabSubscribers?.add(subscriber);
 
     // Immediately notify with current state
     subscriber(this.getState(tabPath));

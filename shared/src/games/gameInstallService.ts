@@ -375,7 +375,8 @@ export class GameInstallService extends AGameInstallService {
     if (!this.eventSubscribers.has(userId)) {
       this.eventSubscribers.set(userId, new Set());
     }
-    this.eventSubscribers.get(userId)!.add(callback);
+    const subscribers = this.eventSubscribers.get(userId);
+    subscribers?.add(callback);
 
     return () => {
       this.eventSubscribers.get(userId)?.delete(callback);

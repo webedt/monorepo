@@ -251,7 +251,8 @@ export class GitHubProjectsService {
       if (!byStatus.has(status)) {
         byStatus.set(status, []);
       }
-      byStatus.get(status)!.push(item);
+      const statusItems = byStatus.get(status);
+      statusItems?.push(item);
     }
 
     return byStatus;

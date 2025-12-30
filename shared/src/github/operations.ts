@@ -270,13 +270,16 @@ export class GitHubOperations {
 
       // Update metadata
       const sessionPath = generateSessionPath(owner, repo, branchName);
-      metadata!.branch = branchName;
-      metadata!.sessionPath = sessionPath;
-      metadata!.sessionTitle = title;
-      metadata!.repositoryOwner = owner;
-      metadata!.repositoryName = repo;
+      if (!metadata) {
+        throw new Error('Session metadata is unexpectedly null after initialization');
+      }
+      metadata.branch = branchName;
+      metadata.sessionPath = sessionPath;
+      metadata.sessionTitle = title;
+      metadata.repositoryOwner = owner;
+      metadata.repositoryName = repo;
 
-      this.saveMetadata(sessionRoot, metadata!);
+      this.saveMetadata(sessionRoot, metadata);
 
       // Send branch_created and session_name events
       progress({
