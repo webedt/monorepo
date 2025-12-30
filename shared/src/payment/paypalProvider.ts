@@ -12,30 +12,28 @@ import {
   PAYPAL_SANDBOX,
 } from '../config/env.js';
 
+import {
+  centsToDollars,
+  dollarsToCents,
+  isPayPalNotFoundError,
+  mapPayPalEventType,
+  mapPayPalStatus,
+  PayPalApiError,
+  toCurrencyCode,
+} from './utils.js';
+
 import type { CheckoutSession } from './types.js';
 import type { CreateCheckoutRequest } from './types.js';
 import type { CreatePaymentIntentRequest } from './types.js';
-import type { CurrencyCode } from './types.js';
 import type { PaymentIntent } from './types.js';
 import type { PaymentMetadata } from './types.js';
 import type { PaymentProvider } from './types.js';
-import type { PaymentStatus } from './types.js';
 import type { ProviderHealthStatus } from './types.js';
 import type { RefundRequest } from './types.js';
 import type { RefundResult } from './types.js';
 import type { WebhookEvent } from './types.js';
 import type { WebhookEventType } from './types.js';
 import type { WebhookVerification } from './types.js';
-
-const VALID_CURRENCY_CODES: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
-
-/**
- * Validates and returns a currency code, defaulting to USD if invalid
- */
-function toCurrencyCode(currency: string): CurrencyCode {
-  const upper = currency.toUpperCase() as CurrencyCode;
-  return VALID_CURRENCY_CODES.includes(upper) ? upper : 'USD';
-}
 
 export interface PayPalConfig {
   clientId: string;
@@ -77,40 +75,6 @@ interface PayPalRefundResponse {
   status: string;
   amount: { value: string; currency_code: string };
   create_time: string;
-}
-
-/**
- * Maps PayPal order status to our PaymentStatus
- */
-function mapPayPalStatus(status: string): PaymentStatus {
-  switch (status.toUpperCase()) {
-    case 'COMPLETED':
-    case 'APPROVED':
-      return 'succeeded';
-    case 'CREATED':
-    case 'SAVED':
-    case 'PAYER_ACTION_REQUIRED':
-      return 'requires_action';
-    case 'VOIDED':
-      return 'cancelled';
-    default:
-      return 'pending';
-  }
-}
-
-/**
- * Maps PayPal webhook event type to our WebhookEventType
- */
-function mapPayPalEventType(type: string): WebhookEventType | null {
-  const mapping: Record<string, WebhookEventType> = {
-    'CHECKOUT.ORDER.APPROVED': 'checkout.session.completed',
-    'CHECKOUT.ORDER.COMPLETED': 'checkout.session.completed',
-    'PAYMENT.CAPTURE.COMPLETED': 'payment_intent.succeeded',
-    'PAYMENT.CAPTURE.DENIED': 'payment_intent.payment_failed',
-    'PAYMENT.CAPTURE.REFUNDED': 'charge.refunded',
-    'CUSTOMER.DISPUTE.CREATED': 'charge.dispute.created',
-  };
-  return mapping[type] || null;
 }
 
 export class PayPalProvider extends APaymentProvider {
@@ -193,7 +157,7 @@ export class PayPalProvider extends APaymentProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`PayPal API error ${response.status}: ${errorText}`);
+      throw new PayPalApiError(response.status, `PayPal API error ${response.status}: ${errorText}`);
     }
 
     return response.json() as T;
@@ -227,11 +191,11 @@ export class PayPalProvider extends APaymentProvider {
               custom_id: JSON.stringify(request.metadata),
               amount: {
                 currency_code: currency,
-                value: (totalAmount / 100).toFixed(2),
+                value: centsToDollars(totalAmount),
                 breakdown: {
                   item_total: {
                     currency_code: currency,
-                    value: (totalAmount / 100).toFixed(2),
+                    value: centsToDollars(totalAmount),
                   },
                 },
               },
@@ -240,7 +204,7 @@ export class PayPalProvider extends APaymentProvider {
                 description: item.description?.slice(0, 127),
                 unit_amount: {
                   currency_code: item.currency,
-                  value: (item.amount / 100).toFixed(2),
+                  value: centsToDollars(item.amount),
                 },
                 quantity: String(item.quantity),
                 category: 'DIGITAL_GOODS',
@@ -308,7 +272,7 @@ export class PayPalProvider extends APaymentProvider {
         metadata,
       };
     } catch (error) {
-      if ((error as Error).message.includes('404')) {
+      if (isPayPalNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -332,7 +296,7 @@ export class PayPalProvider extends APaymentProvider {
             custom_id: JSON.stringify(request.metadata),
             amount: {
               currency_code: request.amount.currency,
-              value: (request.amount.amount / 100).toFixed(2),
+              value: centsToDollars(request.amount.amount),
             },
           },
         ],
@@ -372,7 +336,7 @@ export class PayPalProvider extends APaymentProvider {
         status: mapPayPalStatus(order.status),
         amount: {
           amount: purchaseUnit
-            ? Math.round(parseFloat(purchaseUnit.amount.value) * 100)
+            ? dollarsToCents(purchaseUnit.amount.value)
             : 0,
           currency: toCurrencyCode(purchaseUnit?.amount.currency_code || 'USD'),
         },
@@ -380,7 +344,7 @@ export class PayPalProvider extends APaymentProvider {
         createdAt: new Date(),
       };
     } catch (error) {
-      if ((error as Error).message.includes('404')) {
+      if (isPayPalNotFoundError(error)) {
         return null;
       }
       throw error;
@@ -433,7 +397,7 @@ export class PayPalProvider extends APaymentProvider {
       if (request.amount) {
         const capture = order.purchase_units[0].payments.captures[0];
         refundBody.amount = {
-          value: (request.amount / 100).toFixed(2),
+          value: centsToDollars(request.amount),
           currency_code: capture.amount.currency_code,
         };
       }
@@ -455,7 +419,7 @@ export class PayPalProvider extends APaymentProvider {
         provider: 'paypal',
         paymentIntentId: request.paymentIntentId,
         amount: {
-          amount: Math.round(parseFloat(refund.amount.value) * 100),
+          amount: dollarsToCents(refund.amount.value),
           currency: toCurrencyCode(refund.amount.currency_code),
         },
         status: refund.status === 'COMPLETED' ? 'succeeded' : 'pending',
@@ -582,7 +546,7 @@ export class PayPalProvider extends APaymentProvider {
         status: mapPayPalStatus(capture.status),
         amount: {
           amount: captureDetails
-            ? Math.round(parseFloat(captureDetails.amount.value) * 100)
+            ? dollarsToCents(captureDetails.amount.value)
             : 0,
           currency: toCurrencyCode(captureDetails?.amount.currency_code || 'USD'),
         },
@@ -635,7 +599,7 @@ export class PayPalProvider extends APaymentProvider {
         metadata,
         amount: resource.amount
           ? {
-              amount: Math.round(parseFloat(resource.amount.value) * 100),
+              amount: dollarsToCents(resource.amount.value),
               currency: toCurrencyCode(resource.amount.currency_code),
             }
           : undefined,
