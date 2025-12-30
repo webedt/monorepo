@@ -95,6 +95,8 @@ export const chatSessions = pgTable('chat_sessions', {
   // Sharing fields - "public but unlisted" (shareable if you know the link)
   shareToken: text('share_token').unique(), // UUID-based token for sharing
   shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
+  // Optimistic locking - version counter for concurrent update detection
+  version: integer('version').default(1).notNull(), // Increments on each update
 });
 
 export const messages = pgTable('messages', {
