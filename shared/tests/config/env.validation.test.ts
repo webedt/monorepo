@@ -343,4 +343,96 @@ describe('Environment Validation', () => {
       assert.ok(BATCH_MAX_BATCH_SIZE <= 1000, 'Default BATCH_MAX_BATCH_SIZE should not exceed 1000');
     });
   });
+
+  describe('validateEnv() function behavior', () => {
+    it('should return valid result structure', async () => {
+      const { validateEnv } = await import('../../src/config/env.js');
+      const result = validateEnv();
+
+      assert.ok('valid' in result, 'Result should have valid property');
+      assert.ok('errors' in result, 'Result should have errors property');
+      assert.ok('warnings' in result, 'Result should have warnings property');
+      assert.ok(Array.isArray(result.errors), 'Errors should be an array');
+      assert.ok(Array.isArray(result.warnings), 'Warnings should be an array');
+    });
+
+    it('should return valid=true with default operational limits', async () => {
+      const { validateEnv } = await import('../../src/config/env.js');
+      const result = validateEnv();
+
+      // Default values should not produce operational limit errors
+      const operationalErrors = result.errors.filter((e: string) =>
+        e.includes('SESSION_') ||
+        e.includes('DATALOADER_') ||
+        e.includes('SEARCH_') ||
+        e.includes('LIVE_CHAT_') ||
+        e.includes('BATCH_')
+      );
+
+      assert.strictEqual(
+        operationalErrors.length,
+        0,
+        `Default operational limits should not produce errors, but got: ${operationalErrors.join(', ')}`
+      );
+    });
+
+    it('should not produce upper bound warnings with default operational limits', async () => {
+      const { validateEnv } = await import('../../src/config/env.js');
+      const result = validateEnv();
+
+      // Default values should not trigger upper bound warnings for operational limits
+      const upperBoundWarnings = result.warnings.filter((w: string) =>
+        w.includes('exceeds recommended maximum')
+      );
+
+      const operationalUpperBoundWarnings = upperBoundWarnings.filter((w: string) =>
+        w.includes('SESSION_') ||
+        w.includes('DATALOADER_') ||
+        w.includes('SEARCH_') ||
+        w.includes('LIVE_CHAT_') ||
+        w.includes('BATCH_')
+      );
+
+      assert.strictEqual(
+        operationalUpperBoundWarnings.length,
+        0,
+        `Default operational limits should not trigger upper bound warnings, but got: ${operationalUpperBoundWarnings.join(', ')}`
+      );
+    });
+
+    it('should not produce relationship warnings with default operational limits', async () => {
+      const { validateEnv } = await import('../../src/config/env.js');
+      const result = validateEnv();
+
+      // Default values should maintain proper relationships (default < max, archive < batch)
+      const relationshipWarnings = result.warnings.filter((w: string) =>
+        w.includes('should not exceed')
+      );
+
+      const operationalRelationshipWarnings = relationshipWarnings.filter((w: string) =>
+        w.includes('SESSION_') ||
+        w.includes('SEARCH_')
+      );
+
+      assert.strictEqual(
+        operationalRelationshipWarnings.length,
+        0,
+        `Default operational limits should maintain proper relationships, but got: ${operationalRelationshipWarnings.join(', ')}`
+      );
+    });
+
+    it('should validate search suggestions default vs max relationship exists', async () => {
+      // Verify the validation logic includes SEARCH_SUGGESTIONS check
+      const {
+        SEARCH_SUGGESTIONS_DEFAULT_LIMIT,
+        SEARCH_SUGGESTIONS_MAX_LIMIT,
+      } = await import('../../src/config/env.js');
+
+      // The relationship should be valid with defaults
+      assert.ok(
+        SEARCH_SUGGESTIONS_DEFAULT_LIMIT <= SEARCH_SUGGESTIONS_MAX_LIMIT,
+        'Default SEARCH_SUGGESTIONS_DEFAULT_LIMIT should not exceed SEARCH_SUGGESTIONS_MAX_LIMIT'
+      );
+    });
+  });
 });

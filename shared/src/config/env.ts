@@ -930,6 +930,9 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   if (SEARCH_DEFAULT_LIMIT > SEARCH_MAX_LIMIT) {
     warnings.push(`SEARCH_DEFAULT_LIMIT (${SEARCH_DEFAULT_LIMIT}) should not exceed SEARCH_MAX_LIMIT (${SEARCH_MAX_LIMIT})`);
   }
+  if (SEARCH_SUGGESTIONS_DEFAULT_LIMIT > SEARCH_SUGGESTIONS_MAX_LIMIT) {
+    warnings.push(`SEARCH_SUGGESTIONS_DEFAULT_LIMIT (${SEARCH_SUGGESTIONS_DEFAULT_LIMIT}) should not exceed SEARCH_SUGGESTIONS_MAX_LIMIT (${SEARCH_SUGGESTIONS_MAX_LIMIT})`);
+  }
   if (LIVE_CHAT_MESSAGES_DEFAULT_LIMIT <= 0) {
     errors.push('LIVE_CHAT_MESSAGES_DEFAULT_LIMIT must be a positive number');
   }
