@@ -11,7 +11,6 @@ import type { AuthRequest } from './auth.js';
  * Extend Express Request to include storageSize
  */
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       storageSize?: number;

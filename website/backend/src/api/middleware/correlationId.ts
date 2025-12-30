@@ -64,7 +64,6 @@ function sanitizeCorrelationId(value: string): string | undefined {
  * Extends Express Request with correlation tracking data
  */
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       /**
