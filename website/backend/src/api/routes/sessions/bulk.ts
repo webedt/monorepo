@@ -9,6 +9,7 @@ import type { ClaudeAuth } from '@webedt/shared';
 import type { BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
+import { idempotencyMiddleware } from '../../middleware/idempotency.js';
 import { sendBadRequest } from '../../middleware/sessionMiddleware.js';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { deleteGitHubBranch, archiveClaudeRemoteSession } from './helpers.js';
@@ -99,7 +100,7 @@ function createCleanupOperation(
  * POST /api/sessions/bulk-delete
  * Soft delete multiple chat sessions (move to trash)
  */
-router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-delete', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-delete' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionIds, permanent = false, archiveRemote = true, deleteGitBranch = false, githubToken } = req.body as {
@@ -243,7 +244,7 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
  * POST /api/sessions/bulk-restore
  * Restore multiple deleted chat sessions
  */
-router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-restore', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-restore' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionIds } = req.body as { sessionIds: string[] };
@@ -311,7 +312,7 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
  * DELETE /api/sessions/deleted
  * Empty trash - permanently delete all deleted sessions for a user
  */
-router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
+router.delete('/deleted', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/empty-trash' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { archiveRemote = true, deleteGitBranch = false, githubToken } = req.query as {
@@ -413,7 +414,7 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
  * POST /api/sessions/bulk-archive-remote
  * Archive Claude Remote sessions (for sessions stored locally but need remote cleanup)
  */
-router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-archive-remote', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-archive-remote' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionIds, archiveLocal = false } = req.body as {
