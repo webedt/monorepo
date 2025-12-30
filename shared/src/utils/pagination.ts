@@ -48,6 +48,43 @@ export const DEFAULT_CURSOR_LIMIT = 50;
 export const MAX_CURSOR_LIMIT = 100;
 
 // =============================================================================
+// PAGINATION PRESETS
+// =============================================================================
+
+/**
+ * Pre-configured pagination settings for common use cases.
+ * Use these to avoid magic numbers and ensure consistency across endpoints.
+ *
+ * @example
+ * ```typescript
+ * const pagination = parseOffsetPagination(req.query, PAGINATION_PRESETS.MESSAGES);
+ * const cursor = parseCursorPagination(req.query, PAGINATION_PRESETS.MESSAGES);
+ * ```
+ */
+export const PAGINATION_PRESETS = {
+  /** Default settings for most list endpoints (limit: 20, max: 100) */
+  DEFAULT: { limit: DEFAULT_PAGE_LIMIT, maxLimit: MAX_PAGE_LIMIT },
+
+  /** Settings for message/event feeds (limit: 50, max: 100) */
+  MESSAGES: { limit: 50, maxLimit: 100 },
+
+  /** Settings for code snippets (limit: 50, max: 100) */
+  SNIPPETS: { limit: 50, maxLimit: 100 },
+
+  /** Settings for search results (limit: 25, max: 100) */
+  SEARCH: { limit: 25, maxLimit: 100 },
+
+  /** Settings for admin/management views (limit: 50, max: 200) */
+  ADMIN: { limit: 50, maxLimit: 200 },
+
+  /** Settings for compact lists (limit: 10, max: 50) */
+  COMPACT: { limit: 10, maxLimit: 50 },
+} as const;
+
+/** Type for pagination preset keys */
+export type PaginationPreset = keyof typeof PAGINATION_PRESETS;
+
+// =============================================================================
 // OFFSET-BASED PAGINATION TYPES
 // =============================================================================
 

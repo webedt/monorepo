@@ -65,6 +65,7 @@ import {
   eq,
   and,
   desc,
+  sql,
   parseOffsetPagination,
   buildLegacyPaginatedResponse,
 } from '@webedt/shared';
@@ -363,8 +364,15 @@ router.get('/browse', async (req: Request, res: Response) => {
       .from(games)
       .where(eq(games.status, 'published'));
 
-    // Fetch all published games first, then filter in memory
-    // (Drizzle doesn't easily support JSON array contains)
+    // NOTE: We fetch all published games and filter in-memory due to:
+    // 1. JSON array containment queries (genre/tag filters) require raw SQL
+    // 2. Text search across multiple fields needs in-memory processing
+    // 3. Complex multi-field sorting with dynamic order
+    //
+    // For large catalogs (10k+ games), consider:
+    // - Using PostgreSQL-specific JSON operators (@> for containment)
+    // - Implementing a search service (Elasticsearch/Meilisearch)
+    // - Adding database indexes on frequently-filtered columns
     let allGames = await baseQuery;
 
     // Apply filters
@@ -850,8 +858,8 @@ router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
-    // Get total count
-    const allWishlistItems = await db
+    // Get paginated wishlist items using SQL LIMIT/OFFSET
+    const paginatedItems = await db
       .select({
         wishlistItem: wishlists,
         game: games,
@@ -859,13 +867,17 @@ router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
       .from(wishlists)
       .innerJoin(games, eq(wishlists.gameId, games.id))
       .where(eq(wishlists.userId, authReq.user!.id))
-      .orderBy(desc(wishlists.addedAt));
+      .orderBy(desc(wishlists.addedAt))
+      .limit(pagination.limit)
+      .offset(pagination.offset);
 
-    const total = allWishlistItems.length;
-    const paginatedItems = allWishlistItems.slice(
-      pagination.offset,
-      pagination.offset + pagination.limit
-    );
+    // Get total count using efficient SQL COUNT
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(wishlists)
+      .where(eq(wishlists.userId, authReq.user!.id));
+
+    const total = count;
 
     res.json({
       success: true,

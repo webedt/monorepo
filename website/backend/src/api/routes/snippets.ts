@@ -28,6 +28,7 @@ import {
   isValidLanguage,
   isValidCategory,
   parseOffsetPagination,
+  PAGINATION_PRESETS,
 } from '@webedt/shared';
 import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -165,10 +166,10 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     } = req.query;
 
     // Parse pagination parameters using utility
-    const pagination = parseOffsetPagination(req.query as Record<string, unknown>, {
-      limit: 50,
-      maxLimit: 100,
-    });
+    const pagination = parseOffsetPagination(
+      req.query as Record<string, unknown>,
+      PAGINATION_PRESETS.SNIPPETS
+    );
 
     // Build base query conditions
     const conditions = [eq(snippets.userId, authReq.user!.id)];
@@ -196,15 +197,35 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       );
     }
 
-    // Filter by collection if specified - use a subquery approach
-    let snippetIdsInCollection: Set<string> | null = null;
-    if (typeof collectionId === 'string') {
+    // Filter by collection if specified - add to SQL conditions for accurate pagination
+    if (typeof collectionId === 'string' && collectionId.length > 0) {
+      // Get snippet IDs in this collection, then use them in the main query
       const collectionSnippetIds = await db
         .select({ snippetId: snippetsInCollections.snippetId })
         .from(snippetsInCollections)
         .where(eq(snippetsInCollections.collectionId, collectionId));
 
-      snippetIdsInCollection = new Set(collectionSnippetIds.map(c => c.snippetId));
+      const snippetIds = collectionSnippetIds.map(c => c.snippetId);
+
+      if (snippetIds.length === 0) {
+        // No snippets in collection, return empty result
+        res.json({
+          success: true,
+          data: {
+            snippets: [],
+            total: 0,
+            limit: pagination.limit,
+            offset: pagination.offset,
+            hasMore: false,
+            languages: SNIPPET_LANGUAGES,
+            categories: SNIPPET_CATEGORIES,
+          },
+        });
+        return;
+      }
+
+      // Add collection filter using SQL IN clause
+      conditions.push(sql`${snippets.id} = ANY(${snippetIds})`);
     }
 
     // Build sort order
@@ -220,28 +241,21 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     })();
     const orderDirection = order === 'asc' ? asc(sortColumn) : desc(sortColumn);
 
-    // Get total count for pagination
+    // Get total count for pagination (now includes collection filter if present)
     const countResult = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(snippets)
       .where(and(...conditions));
-    let total = countResult[0]?.count || 0;
+    const total = countResult[0]?.count || 0;
 
     // Get snippets with pagination
-    let userSnippets = await db
+    const userSnippets = await db
       .select()
       .from(snippets)
       .where(and(...conditions))
       .orderBy(orderDirection)
       .limit(pagination.limit)
       .offset(pagination.offset);
-
-    // Apply collection filter in-memory if needed (after main query for pagination)
-    if (snippetIdsInCollection !== null) {
-      userSnippets = userSnippets.filter(s => snippetIdsInCollection!.has(s.id));
-      // Note: total count may be inaccurate when filtering by collection
-      // For accurate count, would need a more complex query
-    }
 
     res.json({
       success: true,

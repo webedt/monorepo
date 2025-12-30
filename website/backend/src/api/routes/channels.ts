@@ -19,6 +19,7 @@ import {
   gt,
   parseCursorPagination,
   parseOffsetPagination,
+  PAGINATION_PRESETS,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -366,7 +367,7 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
 
     if (hasCursor) {
       // Cursor-based pagination for real-time feeds
-      const cursorParams = parseCursorPagination(query, { limit: 50, maxLimit: 100 });
+      const cursorParams = parseCursorPagination(query, PAGINATION_PRESETS.MESSAGES);
 
       // Build base conditions
       const baseConditions = [
@@ -383,14 +384,20 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
           .where(eq(channelMessages.id, cursorParams.cursor))
           .limit(1);
 
-        if (cursorMessage) {
-          if (cursorParams.direction === 'forward') {
-            // Get newer messages
-            baseConditions.push(gt(channelMessages.createdAt, cursorMessage.createdAt));
-          } else {
-            // Get older messages (default)
-            baseConditions.push(lt(channelMessages.createdAt, cursorMessage.createdAt));
-          }
+        if (!cursorMessage) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid cursor: message not found',
+          });
+          return;
+        }
+
+        if (cursorParams.direction === 'forward') {
+          // Get newer messages
+          baseConditions.push(gt(channelMessages.createdAt, cursorMessage.createdAt));
+        } else {
+          // Get older messages (default)
+          baseConditions.push(lt(channelMessages.createdAt, cursorMessage.createdAt));
         }
       }
 
@@ -443,7 +450,7 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
       });
     } else {
       // Offset-based pagination (backwards compatible)
-      const pagination = parseOffsetPagination(query, { limit: 50, maxLimit: 100 });
+      const pagination = parseOffsetPagination(query, PAGINATION_PRESETS.MESSAGES);
 
       // Get messages with author info
       const messages = await db
