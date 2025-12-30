@@ -151,7 +151,9 @@ export function calculateShareTokenExpiration(expiresInDays?: number): Date {
   return expiresAt;
 }
 
-// Track whether we've already warned about missing IP_HASH_SALT
+/**
+ * Track if we've already warned about missing IP_HASH_SALT to avoid log spam
+ */
 let ipHashSaltWarned = false;
 
 /**
