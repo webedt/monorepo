@@ -15,6 +15,7 @@ import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPay
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
+import { paymentRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 
 import type { PaymentProvider } from '@webedt/shared';
@@ -121,7 +122,7 @@ router.get('/providers', (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/checkout', requireAuth, idempotencyMiddleware({ endpoint: '/api/payments/checkout' }), async (req: Request, res: Response) => {
+router.post('/checkout', requireAuth, paymentRateLimiter, idempotencyMiddleware({ endpoint: '/api/payments/checkout' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { gameId, provider = 'stripe' } = req.body;
@@ -289,7 +290,7 @@ router.post('/checkout', requireAuth, idempotencyMiddleware({ endpoint: '/api/pa
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Response) => {
+router.get('/checkout/:sessionId', requireAuth, paymentRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionId } = req.params;
@@ -375,7 +376,7 @@ router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Respon
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/paypal/capture', requireAuth, idempotencyMiddleware({ endpoint: '/api/payments/paypal/capture' }), async (req: Request, res: Response) => {
+router.post('/paypal/capture', requireAuth, paymentRateLimiter, idempotencyMiddleware({ endpoint: '/api/payments/paypal/capture' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { orderId } = req.body;
@@ -665,7 +666,7 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/transactions', requireAuth, async (req: Request, res: Response) => {
+router.get('/transactions', requireAuth, paymentRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
@@ -754,7 +755,7 @@ router.get('/transactions', requireAuth, async (req: Request, res: Response) => 
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/transactions/:transactionId/refund', requireAuth, idempotencyMiddleware({ endpoint: '/api/payments/refund' }), async (req: Request, res: Response) => {
+router.post('/transactions/:transactionId/refund', requireAuth, paymentRateLimiter, idempotencyMiddleware({ endpoint: '/api/payments/refund' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { transactionId } = req.params;
