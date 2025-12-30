@@ -12,6 +12,17 @@ import type {
   ImageAiKeysData,
 } from './encryptedColumns.js';
 
+// User role hierarchy: user < editor < developer < admin
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
+export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+
+export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
+  const userLevel = ROLE_HIERARCHY.indexOf(userRole);
+  const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+  return userLevel >= requiredLevel;
+}
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
@@ -41,6 +52,7 @@ export const users = pgTable('users', {
   preferredModel: text('preferred_model'),
   chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
+  role: text('role').$type<UserRole>().default('user').notNull(), // User role for access control
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)

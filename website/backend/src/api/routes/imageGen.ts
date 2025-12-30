@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { db, users, eq } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
@@ -309,7 +309,7 @@ async function generateWithGoogle(
  */
 // Main image generation endpoint
 // Rate limited to prevent abuse of expensive AI image generation (10/min per user)
-router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Request, res: Response) => {
+router.post('/generate', requireEditor, aiOperationRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { prompt, imageData, selection, provider: requestedProvider, model: requestedModel } = req.body as ImageGenerationRequest;
@@ -447,7 +447,7 @@ router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Reques
  *         $ref: '#/components/responses/Unauthorized'
  */
 // Get available models and providers
-router.get('/models', requireAuth, async (req: Request, res: Response) => {
+router.get('/models', requireEditor, async (req: Request, res: Response) => {
   res.json({
     success: true,
     data: {

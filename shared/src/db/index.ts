@@ -128,6 +128,10 @@ export const db: NodePgDatabase<typeof schema> = createLazyProxy(getDbInstance);
 // Re-export schema tables (these don't need DB connection)
 export const { users, sessions, chatSessions, messages, events } = schema;
 
+// Re-export user role utilities
+export { ROLE_HIERARCHY, hasRolePermission } from './schema.js';
+export type { UserRole } from './schema.js';
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================

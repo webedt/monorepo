@@ -133,8 +133,9 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
     // Generate user ID
     const userId = generateIdFromEntropySize(10); // 10 bytes = 120 bits of entropy
 
-    // Check if this email should be admin
-    const isAdmin = normalizedEmail === 'etdofresh@gmail.com';
+    // Check if this email should be admin (configurable via ADMIN_EMAILS env var)
+    const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(e => e.toLowerCase().trim()) ?? [];
+    const isAdmin = adminEmails.includes(normalizedEmail);
 
     // Create user
     const [newUser] = await db
