@@ -49,6 +49,10 @@ import {
   RATE_LIMIT_SSE_MAX,
   RATE_LIMIT_FILE_WINDOW_MS,
   RATE_LIMIT_FILE_MAX,
+  RATE_LIMIT_PAYMENT_WINDOW_MS,
+  RATE_LIMIT_PAYMENT_MAX,
+  RATE_LIMIT_SESSION_CREATION_WINDOW_MS,
+  RATE_LIMIT_SESSION_CREATION_MAX,
   SKIP_RATE_LIMITING,
   RATE_LIMIT_SKIP_ADMINS,
   RATE_LIMIT_CB_DEGRADATION,
@@ -69,7 +73,9 @@ export type RateLimitTier =
   | 'search'
   | 'collaboration'
   | 'sse'
-  | 'file';
+  | 'file'
+  | 'payment'
+  | 'sessionCreation';
 
 /**
  * Rate limit configuration from centralized config
@@ -117,6 +123,16 @@ const config = {
   fileWindowMs: RATE_LIMIT_FILE_WINDOW_MS,
   fileMaxRequests: RATE_LIMIT_FILE_MAX,
 
+  // Payment operation limits (default: 10 requests per minute)
+  // Applies to: checkout, capture, refund, billing operations
+  paymentWindowMs: RATE_LIMIT_PAYMENT_WINDOW_MS,
+  paymentMaxRequests: RATE_LIMIT_PAYMENT_MAX,
+
+  // Session creation limits (default: 20 per hour)
+  // Applies to: creating new sessions (expensive operation)
+  sessionCreationWindowMs: RATE_LIMIT_SESSION_CREATION_WINDOW_MS,
+  sessionCreationMaxRequests: RATE_LIMIT_SESSION_CREATION_MAX,
+
   // Whether to skip rate limiting (for testing/development)
   skipRateLimiting: SKIP_RATE_LIMITING,
 
@@ -154,6 +170,8 @@ const rateLimitMetrics: RateLimitMetrics = {
     collaboration: 0,
     sse: 0,
     file: 0,
+    payment: 0,
+    sessionCreation: 0,
   },
   hitsByPath: {},
   hitsByUser: {},
@@ -175,6 +193,8 @@ const stores: Record<RateLimitTier, SlidingWindowStore> = {
   collaboration: createSlidingWindowStore(config.collaborationWindowMs),
   sse: createSlidingWindowStore(config.sseWindowMs),
   file: createSlidingWindowStore(config.fileWindowMs),
+  payment: createSlidingWindowStore(config.paymentWindowMs),
+  sessionCreation: createSlidingWindowStore(config.sessionCreationWindowMs),
 };
 
 /**
@@ -218,6 +238,8 @@ export function getRateLimitDashboard(): {
       collaboration: { windowMs: config.collaborationWindowMs, maxRequests: config.collaborationMaxRequests },
       sse: { windowMs: config.sseWindowMs, maxRequests: config.sseMaxRequests },
       file: { windowMs: config.fileWindowMs, maxRequests: config.fileMaxRequests },
+      payment: { windowMs: config.paymentWindowMs, maxRequests: config.paymentMaxRequests },
+      sessionCreation: { windowMs: config.sessionCreationWindowMs, maxRequests: config.sessionCreationMaxRequests },
     },
     storeStats,
     circuitBreakers,
@@ -240,6 +262,8 @@ export function resetRateLimitMetrics(): void {
     collaboration: 0,
     sse: 0,
     file: 0,
+    payment: 0,
+    sessionCreation: 0,
   };
   rateLimitMetrics.hitsByPath = {};
   rateLimitMetrics.hitsByUser = {};
@@ -626,6 +650,47 @@ export const sseRateLimiter = createEnhancedRateLimiter(
 );
 
 /**
+ * Payment operations rate limiter for payment/billing endpoints
+ *
+ * Applies to:
+ * - POST /api/payments/checkout (Create checkout session)
+ * - GET /api/payments/checkout/:sessionId (Get checkout status)
+ * - POST /api/payments/paypal/capture (Capture PayPal order)
+ * - GET /api/payments/transactions (Get transaction history)
+ * - POST /api/payments/transactions/:id/refund (Request refund)
+ * - GET /api/billing/current (Get billing info)
+ * - POST /api/billing/change-plan (Change subscription)
+ *
+ * Default: 10 requests per minute per user
+ * Protects against enumeration attacks and abuse
+ * Uses authenticated key generator for per-user tracking
+ */
+export const paymentRateLimiter = createEnhancedRateLimiter(
+  'payment',
+  config.paymentWindowMs,
+  config.paymentMaxRequests,
+  authenticatedKeyGenerator
+);
+
+/**
+ * Session creation rate limiter for expensive session operations
+ *
+ * Applies to:
+ * - POST /api/sessions/create-code-session (Create new session)
+ *
+ * Default: 20 creations per hour per user
+ * Protects against resource exhaustion (session creation triggers
+ * expensive operations like git clones and Claude API calls)
+ * Uses authenticated key generator for per-user tracking
+ */
+export const sessionCreationRateLimiter = createEnhancedRateLimiter(
+  'sessionCreation',
+  config.sessionCreationWindowMs,
+  config.sessionCreationMaxRequests,
+  authenticatedKeyGenerator
+);
+
+/**
  * Create a custom rate limiter with specific settings
  *
  * @param windowMs - Time window in milliseconds
@@ -640,7 +705,7 @@ export function createRateLimiter(
 ): RequestHandler {
   // Use authenticated key generator for user-specific tiers
   // IP-only tiers (auth, public) use undefined to get express-rate-limit's default IPv6-safe handling
-  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration', 'sse', 'file'].includes(tier);
+  const useAuthenticatedKey = ['standard', 'ai', 'sync', 'search', 'collaboration', 'sse', 'file', 'payment', 'sessionCreation'].includes(tier);
 
   return createEnhancedRateLimiter(
     tier,
@@ -721,6 +786,16 @@ export function logRateLimitConfig(): void {
       windowMs: config.sseWindowMs,
       maxRequests: config.sseMaxRequests,
       description: 'SSE streaming endpoints - per session',
+    },
+    payment: {
+      windowMs: config.paymentWindowMs,
+      maxRequests: config.paymentMaxRequests,
+      description: 'Payment and billing operations',
+    },
+    sessionCreation: {
+      windowMs: config.sessionCreationWindowMs,
+      maxRequests: config.sessionCreationMaxRequests,
+      description: 'Session creation (20 per hour)',
     },
   });
 }

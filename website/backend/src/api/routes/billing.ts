@@ -8,6 +8,7 @@ import { StorageService, STORAGE_TIERS } from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { paymentRateLimiter, publicShareRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -88,7 +89,7 @@ const TIER_PRICING = {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/current', requireAuth, async (req: Request, res: Response) => {
+router.get('/current', requireAuth, paymentRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const userId = authReq.user!.id;
@@ -189,7 +190,7 @@ router.get('/current', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/tiers', async (_req: Request, res: Response) => {
+router.get('/tiers', publicShareRateLimiter, async (_req: Request, res: Response) => {
   try {
     const tiers = Object.entries(STORAGE_TIERS).map(([name, bytes]) => {
       const pricing = TIER_PRICING[name as StorageTier];
@@ -275,7 +276,7 @@ router.get('/tiers', async (_req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/change-plan', requireAuth, async (req: Request, res: Response) => {
+router.post('/change-plan', requireAuth, paymentRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const userId = authReq.user!.id;

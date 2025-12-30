@@ -9,6 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { db, chatSessions, messages, events, eq, and, asc, isNull, isNotNull, logger, generateSessionPath, sessionSoftDeleteService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
+import { sessionCreationRateLimiter } from '../../middleware/rateLimit.js';
 
 import type { AuthRequest } from '../../middleware/auth.js';
 
@@ -112,7 +113,7 @@ export function createCrudRoutes(
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
+router.post('/create-code-session', requireAuth, sessionCreationRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const {
