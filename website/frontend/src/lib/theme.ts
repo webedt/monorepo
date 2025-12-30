@@ -3,6 +3,9 @@
  * Handles multiple theme switching with system preference support
  */
 
+import { SimpleStorage } from './typedStorage';
+import { UI_KEYS } from './storageKeys';
+
 export const THEMES = [
   'system',
   'light',
@@ -35,7 +38,11 @@ export const THEME_META: Record<Theme, { emoji: string; label: string }> = {
   emerald: { emoji: '💎', label: 'Emerald' },
 };
 
-const THEME_KEY = 'webedt:theme';
+const themeStorage = new SimpleStorage<Theme>(
+  UI_KEYS.THEME,
+  'system',
+  (value): value is Theme => typeof value === 'string' && THEMES.includes(value as Theme)
+);
 
 class ThemeManager {
   private currentTheme: Theme = 'system';
@@ -46,9 +53,8 @@ class ThemeManager {
     this.mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     this.mediaQuery.addEventListener('change', () => this.applyTheme());
 
-    // Load saved theme
-    const saved = localStorage.getItem(THEME_KEY);
-    this.currentTheme = (saved && THEMES.includes(saved as Theme)) ? saved as Theme : 'system';
+    // Load saved theme using typed storage
+    this.currentTheme = themeStorage.get();
     this.applyTheme();
   }
 
@@ -81,7 +87,7 @@ class ThemeManager {
    */
   setTheme(theme: Theme): void {
     this.currentTheme = theme;
-    localStorage.setItem(THEME_KEY, theme);
+    themeStorage.set(theme);
     this.applyTheme();
   }
 

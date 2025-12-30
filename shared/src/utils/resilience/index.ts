@@ -61,3 +61,39 @@ export {
   generateRequestKey,
   simpleHash,
 } from './requestDeduplicator.js';
+
+// External API Resilience
+export {
+  initializeExternalApiResilience,
+  resetExternalApiResilienceForTesting,
+  withGitHubResilience,
+  withClaudeRemoteResilience,
+  withCircuitBreakerOnly,
+  withRetryOnly,
+  getExternalApiCircuitBreakerStatus,
+  areExternalApisAvailable,
+  resetCircuitBreaker,
+  GITHUB_CIRCUIT_BREAKER_CONFIG,
+  CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG,
+  GITHUB_RETRY_CONFIG,
+  CLAUDE_REMOTE_RETRY_CONFIG,
+} from './externalApiResilience.js';
+
+// Rate Limiter
+export {
+  ARateLimiter,
+  ARateLimiterStore,
+  ARateLimiterRegistry,
+  type RateLimiterConfig,
+  type RateLimitResult,
+  type RateLimiterStats,
+  type SlidingWindowEntry,
+} from './ARateLimiter.js';
+
+export {
+  SlidingWindowRateLimiter,
+  SlidingWindowStore,
+  rateLimiterRegistry,
+  createRateLimiter,
+  createSlidingWindowStore,
+} from './rateLimiter.js';

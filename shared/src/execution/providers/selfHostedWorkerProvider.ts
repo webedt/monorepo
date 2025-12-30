@@ -16,18 +16,18 @@
  * to authenticate requests to the worker.
  */
 
-import { logger } from '../../utils/logging/logger.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import { AI_WORKER_URL, AI_WORKER_SECRET } from '../../config/env.js';
-import type {
-  ExecutionProvider,
-  ExecuteParams,
-  ResumeParams,
-  ExecutionResult,
-  ExecutionEventCallback,
-  ExecutionEvent,
-  ExecutionEventType,
-  ContentBlock,
+import {
+  AExecutionProvider,
+  type ExecuteParams,
+  type ResumeParams,
+  type ExecutionResult,
+  type ExecutionEventCallback,
+  type ExecutionEvent,
+  type ExecutionEventType,
+  type ContentBlock,
+  type ProviderCapabilities,
 } from './types.js';
 
 /**
@@ -79,11 +79,21 @@ interface WorkerExecuteRequest {
  * The worker handles actual Claude Agent SDK calls and streams
  * events back to this provider.
  */
-export class SelfHostedWorkerProvider implements ExecutionProvider {
+export class SelfHostedWorkerProvider extends AExecutionProvider {
   readonly name = 'self-hosted';
+
+  readonly capabilities: ProviderCapabilities = {
+    supportsResume: true,
+    supportsImages: true,
+    supportsInterrupt: true,
+    generatesTitle: true,
+    hasPersistentSessions: true,
+  };
+
   private config: SelfHostedWorkerConfig;
 
   constructor(config?: Partial<SelfHostedWorkerConfig>) {
+    super();
     this.config = {
       workerUrl: config?.workerUrl || AI_WORKER_URL || '',
       workerSecret: config?.workerSecret || AI_WORKER_SECRET,
@@ -91,9 +101,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
     };
 
     if (!this.config.workerUrl) {
-      logger.warn('SelfHostedWorkerProvider initialized without worker URL', {
-        component: 'SelfHostedWorkerProvider',
-      });
+      this.logExecution('warn', 'SelfHostedWorkerProvider initialized without worker URL', {});
     }
   }
 
@@ -118,9 +126,8 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       clearTimeout(timeout);
       return response.ok;
     } catch (error) {
-      logger.debug('Worker health check failed', {
-        component: 'SelfHostedWorkerProvider',
-        error: error instanceof Error ? error.message : 'Unknown error',
+      this.logExecution('debug', 'Worker health check failed', {
+        error: this.extractErrorMessage(error),
       });
       return false;
     }
@@ -158,8 +165,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       throw new Error('Claude authentication required for SelfHostedWorkerProvider');
     }
 
-    logger.info('Starting self-hosted worker execution', {
-      component: 'SelfHostedWorkerProvider',
+    this.logExecution('info', 'Starting self-hosted worker execution', {
       chatSessionId,
       gitUrl,
       workerUrl: this.config.workerUrl,
@@ -200,8 +206,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       throw new Error('Claude authentication required for SelfHostedWorkerProvider');
     }
 
-    logger.info('Resuming session via self-hosted worker', {
-      component: 'SelfHostedWorkerProvider',
+    this.logExecution('info', 'Resuming session via self-hosted worker', {
       chatSessionId,
       remoteSessionId,
       workerUrl: this.config.workerUrl,
@@ -236,8 +241,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       throw new Error('Claude authentication required for SelfHostedWorkerProvider interrupt');
     }
 
-    logger.info('Interrupting session via self-hosted worker', {
-      component: 'SelfHostedWorkerProvider',
+    this.logExecution('info', 'Interrupting session via self-hosted worker', {
       remoteSessionId,
     });
 
@@ -257,8 +261,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       throw new Error(`Failed to interrupt session: ${error}`);
     }
 
-    logger.info('Session interrupted via self-hosted worker', {
-      component: 'SelfHostedWorkerProvider',
+    this.logExecution('info', 'Session interrupted via self-hosted worker', {
       remoteSessionId,
     });
   }
@@ -283,7 +286,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       // Emit connected event
       await onEvent({
         type: 'connected',
-        timestamp: new Date().toISOString(),
+        timestamp: this.createTimestamp(),
         source: this.name,
         provider: 'self-hosted-worker',
       });
@@ -321,15 +324,14 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
     } catch (error) {
       clearTimeout(timeoutId);
 
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = this.extractErrorMessage(error);
       const isAbort = error instanceof Error && (
         error.name === 'AbortError' ||
         errorMessage.includes('aborted')
       );
 
       if (isAbort) {
-        logger.info('Worker execution aborted', {
-          component: 'SelfHostedWorkerProvider',
+        this.logExecution('info', 'Worker execution aborted', {
           chatSessionId: request.chatSessionId,
         });
 
@@ -339,18 +341,12 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
         };
       }
 
-      logger.error('Worker execution failed', error, {
-        component: 'SelfHostedWorkerProvider',
+      this.logExecution('error', 'Worker execution failed', {
+        error,
         chatSessionId: request.chatSessionId,
       });
 
-      await onEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        source: this.name,
-        error: errorMessage,
-      });
-
+      await this.emitErrorEvent(onEvent, error);
       throw error;
     }
   }
@@ -405,8 +401,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
               if (currentEventType) {
                 // Warn about unrecognized event types for debugging
                 if (!KNOWN_EVENT_TYPES.has(currentEventType)) {
-                  logger.warn('Unrecognized event type from worker', {
-                    component: 'SelfHostedWorkerProvider',
+                  this.logExecution('warn', 'Unrecognized event type from worker', {
                     chatSessionId,
                     eventType: currentEventType,
                   });
@@ -437,8 +432,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
 
               await onEvent(event);
             } catch (parseError) {
-              logger.warn('Failed to parse worker event', {
-                component: 'SelfHostedWorkerProvider',
+              this.logExecution('warn', 'Failed to parse worker event', {
                 chatSessionId,
                 data: currentData.slice(0, 200),
               });
@@ -453,8 +447,7 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
       reader.releaseLock();
     }
 
-    logger.info('Worker stream completed', {
-      component: 'SelfHostedWorkerProvider',
+    this.logExecution('info', 'Worker stream completed', {
       chatSessionId,
       status: result.status,
       branch: result.branch,

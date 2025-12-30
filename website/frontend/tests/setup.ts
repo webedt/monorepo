@@ -1,6 +1,6 @@
 /**
  * Vitest Test Setup
- * Sets up the test environment for component and store testing with jsdom.
+ * Sets up the test environment for component, store, and page testing with jsdom.
  */
 
 // Mock the HMR module since it's not available in test environment
@@ -9,9 +9,27 @@ vi.mock('../src/lib/hmr', () => ({
   registerComponent: () => {},
   unregisterComponent: () => {},
   registerStore: () => {},
+  registerPage: () => {},
+  unregisterPage: () => {},
   getHmrState: () => undefined,
   saveHmrState: () => {},
 }));
+
+// Mock toast notifications for page testing
+const mockToast = {
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+};
+
+vi.mock('../src/components', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    toast: mockToast,
+  };
+});
 
 // Extend window with any global variables needed for tests
 declare global {
@@ -22,6 +40,28 @@ declare global {
 
 // Set up mock version for tests
 window.__WEBEDT_VERSION__ = '0.0.1 [test] [2024-01-01]';
+
+// Mock matchMedia for theme detection (not available in jsdom)
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+
+// Mock ResizeObserver (not available in jsdom)
+global.ResizeObserver = class ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
 
 // Mock localStorage and sessionStorage for store tests
 const createStorageMock = () => {

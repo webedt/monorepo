@@ -6,7 +6,10 @@ import { TextArea } from '../input';
 import { Spinner } from '../spinner';
 import { toast } from '../toast';
 import { githubApi, sessionsApi } from '../../lib/api';
+import { lastRepoStorage } from '../../lib/storageInstances';
+
 import type { Repository, Branch, Session } from '../../types';
+
 import './new-session-modal.css';
 
 export interface NewSessionModalOptions extends ComponentOptions {
@@ -182,7 +185,7 @@ export class NewSessionModal extends Component<HTMLDivElement> {
   }
 
   private async autoSelectLastRepo(): Promise<void> {
-    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+    const lastUsedRepo = lastRepoStorage.get();
     if (lastUsedRepo && this.repos.length > 0) {
       const [owner, name] = lastUsedRepo.split('/');
       const lastRepo = this.repos.find(r => r.owner.login === owner && r.name === name);
@@ -319,8 +322,8 @@ export class NewSessionModal extends Component<HTMLDivElement> {
         title: taskDescription || undefined,
       });
 
-      // Save the selected repository to localStorage for next time
-      localStorage.setItem('webedt_last_repo', `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
+      // Save the selected repository for next time
+      lastRepoStorage.set(`${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
 
       toast.success('Session created!');
       this.options.onSessionCreated?.(response.session);

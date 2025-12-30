@@ -9,6 +9,10 @@
  * - geminiAuth (JSON with accessToken, refreshToken)
  * - openrouterApiKey (text)
  * - imageAiKeys (JSON with provider API keys)
+ *
+ * NOTE: With the introduction of encrypted Drizzle column types (encryptedColumns.ts),
+ * encryption/decryption is now automatic at the ORM level. This service is maintained
+ * for backward compatibility and for operations outside the ORM (migrations, CLI commands).
  */
 
 import { eq } from 'drizzle-orm';
@@ -21,6 +25,17 @@ import * as schema from '../db/schema.js';
 import { safeDecrypt, safeDecryptJson, safeEncrypt, safeEncryptJson, isEncryptionEnabled, isEncrypted } from '../utils/encryption.js';
 import { logger } from '../utils/logging/logger.js';
 
+// Import and re-export auth data types from the canonical source
+// These types are defined in authTypes.ts to avoid circular dependencies
+import type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from '../db/authTypes.js';
+
+export type { ClaudeAuthData, CodexAuthData, GeminiAuthData, ImageAiKeysData };
+
 /**
  * Database instance type with our schema
  */
@@ -30,48 +45,6 @@ type DatabaseInstance = NodePgDatabase<typeof schema>;
  * Users table type
  */
 type UsersTable = typeof usersTable;
-
-/**
- * Claude authentication data structure
- */
-export interface ClaudeAuthData {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  scopes?: string[];
-  subscriptionType?: string;
-  rateLimitTier?: string;
-}
-
-/**
- * Codex authentication data structure
- */
-export interface CodexAuthData {
-  apiKey?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  expiresAt?: number;
-}
-
-/**
- * Gemini authentication data structure
- */
-export interface GeminiAuthData {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  tokenType?: string;
-  scope?: string;
-}
-
-/**
- * Image AI keys data structure
- */
-export interface ImageAiKeysData {
-  openrouter?: string;
-  cometapi?: string;
-  google?: string;
-}
 
 /**
  * Sensitive fields in the user record

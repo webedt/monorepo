@@ -5,8 +5,9 @@
  * This ensures sessions created on claude.ai appear in the local UI without manual intervention.
  */
 
-import { db, chatSessions, events, users, getPool } from '../db/index.js';
-import { eq, and, or, isNotNull, isNull, gte, ne, lte } from 'drizzle-orm';
+import { db, chatSessions, events, users, getPool, withTransactionOrThrow } from '../db/index.js';
+import type { TransactionContext } from '../db/index.js';
+import { eq, and, or, isNotNull, isNull, gte, ne, lte, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
 import { generateSessionPath, normalizeRepoUrl } from '../utils/helpers/sessionPathHelper.js';
@@ -134,6 +135,7 @@ const syncStats: SyncStats = {
 };
 
 let syncIntervalId: NodeJS.Timeout | null = null;
+let initialTimeoutId: NodeJS.Timeout | null = null;
 
 /**
  * Map Anthropic session status to our internal status
@@ -212,20 +214,26 @@ async function cleanupRedundantSessions(
       return 0;
     }
 
-    // Soft-delete redundant sessions
+    // Soft-delete redundant sessions atomically using a transaction
     const sessionIds = sessionsToCleanup.map(s => s.id);
     const now = new Date();
 
-    for (const session of sessionsToCleanup) {
-      await db
+    // Use transaction to ensure all updates succeed or none do
+    await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      // Batch update all sessions at once for atomicity
+      await tx
         .update(chatSessions)
         .set({
           deletedAt: now,
           status: 'error' // Mark as error to indicate it was cleaned up
         })
-        .where(eq(chatSessions.id, session.id));
+        .where(inArray(chatSessions.id, sessionIds));
+    }, {
+      context: { operation: 'cleanupRedundantSessions', linkedSessionId, sessionCount: sessionIds.length },
+    });
 
-      // Notify subscribers about deletion
+    // Notify subscribers after transaction commits successfully
+    for (const session of sessionsToCleanup) {
       sessionListBroadcaster.notifySessionDeleted(userId, session.id);
 
       logger.info(`[SessionSync] Cleaned up redundant session`, {
@@ -761,9 +769,9 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
         // Extract user request from first user event or title
         let userRequest = remoteSession.title || 'Synced session';
-        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && (e.message as any)?.content);
-        const firstUserMessage = firstUserEvent?.message as { content?: unknown } | undefined;
-        if (firstUserMessage?.content) {
+        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && e.message?.content !== undefined);
+        const firstUserMessage = firstUserEvent?.message;
+        if (firstUserMessage?.content !== undefined) {
           const content = firstUserMessage.content;
           userRequest = typeof content === 'string'
             ? content.slice(0, 500)
@@ -772,9 +780,9 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
         // Extract total cost from result event
         let totalCost: string | undefined;
-        const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd);
-        if (resultEvent?.total_cost_usd) {
-          totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+        const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd !== undefined);
+        if (resultEvent?.total_cost_usd !== undefined) {
+          totalCost = resultEvent.total_cost_usd.toFixed(6);
         }
 
         const [importedSession] = await db.insert(chatSessions).values({
@@ -941,7 +949,8 @@ export function startBackgroundSync(): void {
   });
 
   // Run initial sync after a short delay (let server stabilize)
-  setTimeout(() => {
+  initialTimeoutId = setTimeout(() => {
+    initialTimeoutId = null; // Clear reference after it fires
     logger.info('[SessionSync] Running initial sync', { component: 'SessionSync' });
     runSync();
   }, CLAUDE_SYNC_INITIAL_DELAY_MS);
@@ -956,6 +965,13 @@ export function startBackgroundSync(): void {
  * Stop the background sync service
  */
 export function stopBackgroundSync(): void {
+  // Clear initial timeout if it hasn't fired yet
+  if (initialTimeoutId) {
+    clearTimeout(initialTimeoutId);
+    initialTimeoutId = null;
+  }
+
+  // Clear the periodic sync interval
   if (syncIntervalId) {
     clearInterval(syncIntervalId);
     syncIntervalId = null;

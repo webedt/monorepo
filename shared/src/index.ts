@@ -146,3 +146,8 @@ export * from './geometry/index.js';
 // SERVICES - Dependency injection and service registry
 // =============================================================================
 export * from './services/index.js';
+
+// =============================================================================
+// LIFECYCLE - Startup and shutdown management
+// =============================================================================
+export * from './lifecycle/index.js';

@@ -7,9 +7,13 @@ import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
 import { sessionsApi, userApi, createSessionExecuteEventSource } from '../../lib/api';
 import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
+import { UI_KEYS, LEGACY_KEYS } from '../../lib/storageKeys';
+import { SimpleStorage, RecordStorage } from '../../lib/typedStorage';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
-import type { Session, VerbosityLevel } from '../../types';
+
+import type { Session, VerbosityLevel, SessionStatus } from '../../types';
+
 import './chat.css';
 
 // View mode determines the level of detail shown
@@ -102,6 +106,15 @@ const NORMAL_MODE_EVENTS: Set<string> = new Set([
   'session_created', // Session started
   'session-created', // Session started (alt format)
 ]);
+
+// Typed storage instances for chat settings
+const chatViewModeStorage = new SimpleStorage<string>(UI_KEYS.CHAT_VIEW_MODE, '');
+const chatTimestampsStorage = new SimpleStorage<boolean>(UI_KEYS.CHAT_SHOW_TIMESTAMPS, false);
+const chatWidescreenStorage = new SimpleStorage<boolean>(UI_KEYS.CHAT_WIDESCREEN, false);
+const chatEventFiltersStorage = new RecordStorage<boolean>(
+  UI_KEYS.CHAT_EVENT_FILTERS,
+  { ...DEFAULT_EVENT_FILTERS }
+);
 
 interface ChatPageOptions extends PageOptions {
   params?: {
@@ -301,16 +314,16 @@ export class ChatPage extends Page<ChatPageOptions> {
       const userVerbosity = user?.chatVerbosityLevel;
 
       // Migrate legacy 'chat_showRawJson' setting if present
-      const legacyRawJson = localStorage.getItem('chat_showRawJson');
-      if (legacyRawJson === 'true' && !localStorage.getItem('chat_viewMode')) {
+      const legacyRawJson = localStorage.getItem(LEGACY_KEYS.CHAT_SHOW_RAW_JSON);
+      if (legacyRawJson === 'true' && !chatViewModeStorage.get()) {
         // One-time migration: convert legacy setting to new format
-        localStorage.setItem('chat_viewMode', 'raw');
-        localStorage.removeItem('chat_showRawJson');
+        chatViewModeStorage.set('raw');
+        localStorage.removeItem(LEGACY_KEYS.CHAT_SHOW_RAW_JSON);
       }
 
       // Database preference is the source of truth for verbosity level
       // localStorage only stores 'raw' mode (which isn't a verbosity level)
-      const savedViewMode = localStorage.getItem('chat_viewMode');
+      const savedViewMode = chatViewModeStorage.get();
 
       if (savedViewMode === 'raw') {
         // Raw mode is a local-only UI preference (not stored in database)
@@ -321,7 +334,7 @@ export class ChatPage extends Page<ChatPageOptions> {
         this.viewMode = this.verbosityToViewMode(userVerbosity);
         this.showRawJson = false;
         // Clear any stale localStorage view mode to avoid confusion
-        localStorage.removeItem('chat_viewMode');
+        chatViewModeStorage.remove();
       } else {
         // Default: 'normal' mode for regular users (cleaner view)
         this.viewMode = 'normal';
@@ -329,44 +342,30 @@ export class ChatPage extends Page<ChatPageOptions> {
       }
 
       // Load timestamps setting
-      const savedTimestamps = localStorage.getItem('chat_showTimestamps');
-      if (savedTimestamps !== null) {
-        this.showTimestamps = savedTimestamps === 'true';
-      }
+      this.showTimestamps = chatTimestampsStorage.get();
 
       // Load widescreen setting
-      const savedWidescreen = localStorage.getItem('chat_widescreen');
-      if (savedWidescreen !== null) {
-        this.widescreen = savedWidescreen === 'true';
-      }
+      this.widescreen = chatWidescreenStorage.get();
 
       // Load event filters (only used in detailed mode)
-      const savedFilters = localStorage.getItem('chat_eventFilters');
-      if (savedFilters) {
-        const parsed = JSON.parse(savedFilters);
-        this.eventFilters = { ...DEFAULT_EVENT_FILTERS, ...parsed };
-      }
+      this.eventFilters = chatEventFiltersStorage.get();
     } catch (error) {
       console.warn('Failed to load chat settings:', error);
     }
   }
 
   private saveSettings(): void {
-    try {
-      // Only save 'raw' mode to localStorage (normal/detailed are persisted to database)
-      // This ensures view mode syncs across devices via the database
-      if (this.showRawJson) {
-        localStorage.setItem('chat_viewMode', 'raw');
-      } else {
-        // Clear localStorage when not in raw mode - database is source of truth
-        localStorage.removeItem('chat_viewMode');
-      }
-      localStorage.setItem('chat_showTimestamps', String(this.showTimestamps));
-      localStorage.setItem('chat_widescreen', String(this.widescreen));
-      localStorage.setItem('chat_eventFilters', JSON.stringify(this.eventFilters));
-    } catch (error) {
-      console.warn('Failed to save chat settings:', error);
+    // Only save 'raw' mode to localStorage (normal/detailed are persisted to database)
+    // This ensures view mode syncs across devices via the database
+    if (this.showRawJson) {
+      chatViewModeStorage.set('raw');
+    } else {
+      // Clear localStorage when not in raw mode - database is source of truth
+      chatViewModeStorage.remove();
     }
+    chatTimestampsStorage.set(this.showTimestamps);
+    chatWidescreenStorage.set(this.widescreen);
+    chatEventFiltersStorage.set(this.eventFilters);
   }
 
   /**
@@ -1298,9 +1297,9 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
-  private updateSessionStatus(status: string): void {
+  private updateSessionStatus(status: SessionStatus): void {
     if (this.session) {
-      this.session.status = status as any;
+      this.session.status = status;
       this.updateHeader();
       this.updateSendButton();
     }

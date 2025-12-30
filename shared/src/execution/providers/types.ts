@@ -7,6 +7,7 @@
 
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import type { GeminiAuth } from '../../auth/lucia.js';
+import { logger } from '../../utils/logging/logger.js';
 
 /**
  * Event types emitted during execution.
@@ -328,8 +329,12 @@ export interface ExecutionEvent {
     input: Record<string, unknown>;
   };
   name?: string;
+  input?: unknown;
+  tool_use_id?: string;
 
-  // Result event (remote)
+  // Result event (metrics)
+  inputTokens?: number;
+  outputTokens?: number;
   total_cost_usd?: number;
   result_status?: string;
 
@@ -472,16 +477,42 @@ export interface ExecutionResult {
 export type ExecutionEventCallback = (event: ExecutionEvent) => void | Promise<void>;
 
 /**
+ * Provider capabilities for feature discovery.
+ *
+ * This interface allows consumers to query what features a provider supports,
+ * enabling UI/routing decisions based on provider capabilities.
+ */
+export interface ProviderCapabilities {
+  /** Whether the provider supports resuming existing sessions */
+  supportsResume: boolean;
+  /** Whether the provider supports image content blocks */
+  supportsImages: boolean;
+  /** Whether the provider supports interrupting running sessions */
+  supportsInterrupt: boolean;
+  /** Maximum tokens the provider can handle (undefined = no limit) */
+  maxTokens?: number;
+  /** Whether the provider generates session titles */
+  generatesTitle: boolean;
+  /** Whether the provider supports persistent remote sessions */
+  hasPersistentSessions: boolean;
+}
+
+/**
  * Execution Provider Interface
  *
  * Providers implement this interface to handle AI execution.
  * Available providers:
  * - ClaudeRemoteProvider: Delegates to Anthropic's Remote Sessions API
  * - SelfHostedWorkerProvider: Connects to a self-hosted AI worker for LLM execution
+ * - GeminiProvider: Uses Google's Gemini API
+ * - CodexRemoteProvider: Uses OpenAI's API
  */
 export interface ExecutionProvider {
   /** Provider name for logging */
   readonly name: string;
+
+  /** Provider capabilities for feature discovery */
+  readonly capabilities: ProviderCapabilities;
 
   /**
    * Execute a new AI request
@@ -505,4 +536,171 @@ export interface ExecutionProvider {
    * @param auth - Authentication credentials (ClaudeAuth or GeminiAuth depending on provider)
    */
   interrupt(remoteSessionId: string, auth?: ClaudeAuth | GeminiAuth): Promise<void>;
+}
+
+// ============================================================================
+// Abstract Base Class
+// ============================================================================
+
+/**
+ * Abstract base class for execution providers.
+ *
+ * Provides common functionality shared across all providers:
+ * - Text extraction from prompts (string or content blocks)
+ * - Structured logging with consistent component naming
+ * - Error event emission patterns
+ * - Timestamp generation
+ *
+ * Subclasses must implement:
+ * - name: Provider identifier for logging and routing
+ * - capabilities: Feature discovery interface
+ * - execute(): Main execution logic
+ * - resume(): Session resume logic
+ * - interrupt(): Session interruption
+ */
+export abstract class AExecutionProvider implements ExecutionProvider {
+  /** Provider name for logging */
+  abstract readonly name: string;
+
+  /** Provider capabilities for feature discovery */
+  abstract readonly capabilities: ProviderCapabilities;
+
+  /**
+   * Execute a new AI request
+   */
+  abstract execute(
+    params: ExecuteParams,
+    onEvent: ExecutionEventCallback
+  ): Promise<ExecutionResult>;
+
+  /**
+   * Resume an existing session with a new message
+   */
+  abstract resume(
+    params: ResumeParams,
+    onEvent: ExecutionEventCallback
+  ): Promise<ExecutionResult>;
+
+  /**
+   * Interrupt a running session
+   */
+  abstract interrupt(
+    remoteSessionId: string,
+    auth?: ClaudeAuth | GeminiAuth
+  ): Promise<void>;
+
+  // ============================================================================
+  // Protected Helper Methods
+  // ============================================================================
+
+  /**
+   * Extract text from a prompt that may be a string or content blocks.
+   * Filters for text blocks and joins them with newlines.
+   *
+   * @param prompt - String or array of content blocks
+   * @returns Extracted text string
+   */
+  protected extractTextFromPrompt(prompt: string | ContentBlock[]): string {
+    if (typeof prompt === 'string') {
+      return prompt;
+    }
+    return prompt
+      .filter((block): block is TextContentBlock => block.type === 'text' && 'text' in block)
+      .map(block => block.text)
+      .join('\n');
+  }
+
+  /**
+   * Extract error message from an unknown error.
+   * Safely handles Error instances and unknown types.
+   *
+   * @param error - The error to extract message from
+   * @returns Error message string
+   */
+  protected extractErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'Unknown error';
+  }
+
+  /**
+   * Create a timestamp string for events.
+   *
+   * @returns ISO 8601 timestamp string
+   */
+  protected createTimestamp(): string {
+    return new Date().toISOString();
+  }
+
+  /**
+   * Log execution stage with consistent component naming.
+   *
+   * @param level - Log level (info, error, warn, debug)
+   * @param message - Log message
+   * @param context - Additional context to log
+   */
+  protected logExecution(
+    level: 'info' | 'error' | 'warn' | 'debug',
+    message: string,
+    context: Record<string, unknown> = {}
+  ): void {
+    const logContext = {
+      component: this.constructor.name,
+      ...context,
+    };
+
+    switch (level) {
+      case 'info':
+        logger.info(message, logContext);
+        break;
+      case 'error':
+        // Extract error from context, defaulting to undefined if not provided
+        // logger.error signature: (message, error, context)
+        logger.error(message, context.error ?? undefined, logContext);
+        break;
+      case 'warn':
+        logger.warn(message, logContext);
+        break;
+      case 'debug':
+        logger.debug(message, logContext);
+        break;
+    }
+  }
+
+  /**
+   * Emit an error event with consistent structure.
+   *
+   * @param onEvent - Event callback
+   * @param error - Error to emit
+   */
+  protected async emitErrorEvent(
+    onEvent: ExecutionEventCallback,
+    error: unknown
+  ): Promise<void> {
+    await onEvent({
+      type: 'error',
+      timestamp: this.createTimestamp(),
+      source: this.name,
+      error: this.extractErrorMessage(error),
+    });
+  }
+
+  /**
+   * Emit a session_created event with consistent structure.
+   *
+   * @param onEvent - Event callback
+   * @param remoteSessionId - The remote session ID
+   * @param remoteWebUrl - Optional URL to view the session
+   */
+  protected async emitSessionCreatedEvent(
+    onEvent: ExecutionEventCallback,
+    remoteSessionId: string,
+    remoteWebUrl?: string
+  ): Promise<void> {
+    await onEvent({
+      type: 'session_created',
+      timestamp: this.createTimestamp(),
+      source: this.name,
+      remoteSessionId,
+      remoteWebUrl,
+    });
+  }
 }

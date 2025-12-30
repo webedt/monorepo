@@ -123,39 +123,59 @@ export class GitHubProjectsService {
       statusFilter,
     });
 
-    const result = await this.graphql<ListItemsResponse>(LIST_ITEMS_QUERY, {
-      projectId,
-    });
+    const allItems: ProjectItem[] = [];
+    let cursor: string | null = null;
 
-    if (!result.node?.items) {
-      return [];
+    // Paginate through all items (100 per page, max 100 per GitHub API limit)
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const result: ListItemsResponse = await this.graphql<ListItemsResponse>(LIST_ITEMS_QUERY, {
+        projectId,
+        cursor,
+      });
+
+      if (!result.node?.items) {
+        break;
+      }
+
+      const { pageInfo, nodes } = result.node.items;
+
+      for (const item of nodes) {
+        const statusField = item.fieldValues?.nodes?.find(
+          (fv: { field?: { name: string } } | null) => fv?.field?.name === 'Status'
+        );
+
+        const content = item.content;
+        allItems.push({
+          id: item.id,
+          contentId: content?.id || '',
+          contentType: (content?.__typename || 'DraftIssue') as 'Issue' | 'PullRequest' | 'DraftIssue',
+          title: content?.title || 'Draft',
+          status: statusField?.name,
+          statusOptionId: statusField?.optionId,
+          number: content?.number,
+          state: content?.state,
+          body: content?.body,
+          labels: content?.labels?.nodes?.map((l: { name: string }) => l.name) || [],
+        } as ProjectItem);
+      }
+
+      if (!pageInfo.hasNextPage) {
+        break;
+      }
+      cursor = pageInfo.endCursor;
     }
 
-    const items = result.node.items.nodes.map((item) => {
-      const statusField = item.fieldValues?.nodes?.find(
-        (fv) => fv?.field?.name === 'Status'
-      );
-
-      const content = item.content;
-      return {
-        id: item.id,
-        contentId: content?.id || '',
-        contentType: (content?.__typename || 'DraftIssue') as 'Issue' | 'PullRequest' | 'DraftIssue',
-        title: content?.title || 'Draft',
-        status: statusField?.name,
-        statusOptionId: statusField?.optionId,
-        number: content?.number,
-        state: content?.state,
-        body: content?.body,
-        labels: content?.labels?.nodes?.map((l) => l.name) || [],
-      } as ProjectItem;
+    logger.debug('Listed project items', {
+      component: 'GitHubProjectsService',
+      totalItems: allItems.length,
     });
 
     if (statusFilter) {
-      return items.filter((item) => item.status === statusFilter);
+      return allItems.filter((item) => item.status === statusFilter);
     }
 
-    return items;
+    return allItems;
   }
 
   async getStatusField(projectId: string): Promise<StatusField> {
@@ -358,10 +378,14 @@ const UPDATE_ITEM_FIELD_MUTATION = `
 `;
 
 const LIST_ITEMS_QUERY = `
-  query ListItems($projectId: ID!) {
+  query ListItems($projectId: ID!, $cursor: String) {
     node(id: $projectId) {
       ... on ProjectV2 {
-        items(first: 100) {
+        items(first: 100, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           nodes {
             id
             content {
@@ -482,6 +506,10 @@ interface UpdateItemResponse {
 interface ListItemsResponse {
   node: {
     items: {
+      pageInfo: {
+        hasNextPage: boolean;
+        endCursor: string | null;
+      };
       nodes: Array<{
         id: string;
         content: {

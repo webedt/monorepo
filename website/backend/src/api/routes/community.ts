@@ -23,6 +23,86 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Community
+ *     description: Community discussions, reviews, and participation
+ */
+
+/**
+ * @openapi
+ * /api/community/posts:
+ *   get:
+ *     tags: [Community]
+ *     summary: Get community posts
+ *     description: Retrieve published community posts with pagination and filtering
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [discussion, review, guide, artwork, announcement]
+ *         description: Filter by post type
+ *       - in: query
+ *         name: gameId
+ *         schema:
+ *           type: string
+ *         description: Filter by game ID
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           default: createdAt
+ *         description: Sort field
+ *       - in: query
+ *         name: order
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Sort order
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Number of posts to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of posts to skip
+ *     responses:
+ *       200:
+ *         description: Posts retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     posts:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     offset:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get community posts (public)
 router.get('/posts', async (req: Request, res: Response) => {
   try {
@@ -94,6 +174,54 @@ router.get('/posts', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/community/posts/{id}:
+ *   get:
+ *     tags: [Community]
+ *     summary: Get single post with comments
+ *     description: Retrieve a single post with its comments
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Post ID
+ *     responses:
+ *       200:
+ *         description: Post retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     title:
+ *                       type: string
+ *                     content:
+ *                       type: string
+ *                     type:
+ *                       type: string
+ *                     author:
+ *                       type: object
+ *                     game:
+ *                       type: object
+ *                     comments:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get single post with comments
 router.get('/posts/:id', async (req: Request, res: Response) => {
   try {
@@ -164,6 +292,73 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/community/posts:
+ *   post:
+ *     tags: [Community]
+ *     summary: Create a post
+ *     description: Create a new community post (requires authentication)
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - type
+ *               - title
+ *               - content
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 enum: [discussion, review, guide, artwork, announcement]
+ *                 description: Post type
+ *               title:
+ *                 type: string
+ *                 description: Post title
+ *               content:
+ *                 type: string
+ *                 description: Post content
+ *               gameId:
+ *                 type: string
+ *                 description: Associated game ID (optional)
+ *               rating:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 5
+ *                 description: Rating (required for reviews)
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Image URLs (optional)
+ *     responses:
+ *       200:
+ *         description: Post created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     post:
+ *                       type: object
+ *       400:
+ *         description: Bad request - invalid input
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Create a post (requires auth)
 router.post('/posts', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -268,6 +463,64 @@ router.post('/posts', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/community/posts/{id}:
+ *   patch:
+ *     tags: [Community]
+ *     summary: Update a post
+ *     description: Update an existing post (requires authentication and ownership)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Post ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Updated post title
+ *               content:
+ *                 type: string
+ *                 description: Updated post content
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Updated image URLs
+ *     responses:
+ *       200:
+ *         description: Post updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     post:
+ *                       type: object
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: Access denied - not post owner
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Update a post
 router.patch('/posts/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -315,6 +568,46 @@ router.patch('/posts/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/community/posts/{id}:
+ *   delete:
+ *     tags: [Community]
+ *     summary: Delete a post
+ *     description: Delete a post (requires authentication and ownership or admin)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Post ID
+ *     responses:
+ *       200:
+ *         description: Post deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: Access denied - not post owner or admin
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a post
 router.delete('/posts/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -355,6 +648,61 @@ router.delete('/posts/:id', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+/**
+ * @openapi
+ * /api/community/posts/{id}/comments:
+ *   post:
+ *     tags: [Community]
+ *     summary: Add a comment
+ *     description: Add a comment to a post (requires authentication)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Post ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - content
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 description: Comment content
+ *               parentId:
+ *                 type: string
+ *                 description: Parent comment ID for nested replies
+ *     responses:
+ *       200:
+ *         description: Comment added successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     comment:
+ *                       type: object
+ *       400:
+ *         description: Bad request - content required or post locked
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Add a comment
 router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -432,6 +780,46 @@ router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Respon
   }
 });
 
+/**
+ * @openapi
+ * /api/community/comments/{id}:
+ *   delete:
+ *     tags: [Community]
+ *     summary: Delete a comment
+ *     description: Delete a comment (requires authentication and ownership or admin)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Comment ID
+ *     responses:
+ *       200:
+ *         description: Comment deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: Access denied - not comment owner or admin
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Delete a comment
 router.delete('/comments/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -486,6 +874,63 @@ router.delete('/comments/:id', requireAuth, async (req: Request, res: Response) 
   }
 });
 
+/**
+ * @openapi
+ * /api/community/posts/{id}/vote:
+ *   post:
+ *     tags: [Community]
+ *     summary: Vote on a post
+ *     description: Upvote, downvote, or remove vote from a post (requires authentication)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Post ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - vote
+ *             properties:
+ *               vote:
+ *                 type: integer
+ *                 enum: [1, -1, 0]
+ *                 description: Vote value (1=upvote, -1=downvote, 0=remove)
+ *     responses:
+ *       200:
+ *         description: Vote recorded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     upvotes:
+ *                       type: integer
+ *                     downvotes:
+ *                       type: integer
+ *                     userVote:
+ *                       type: integer
+ *       400:
+ *         description: Bad request - invalid vote value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Vote on a post
 router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -585,6 +1030,63 @@ router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) 
   }
 });
 
+/**
+ * @openapi
+ * /api/community/comments/{id}/vote:
+ *   post:
+ *     tags: [Community]
+ *     summary: Vote on a comment
+ *     description: Upvote, downvote, or remove vote from a comment (requires authentication)
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Comment ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - vote
+ *             properties:
+ *               vote:
+ *                 type: integer
+ *                 enum: [1, -1, 0]
+ *                 description: Vote value (1=upvote, -1=downvote, 0=remove)
+ *     responses:
+ *       200:
+ *         description: Vote recorded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     upvotes:
+ *                       type: integer
+ *                     downvotes:
+ *                       type: integer
+ *                     userVote:
+ *                       type: integer
+ *       400:
+ *         description: Bad request - invalid vote value
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Vote on a comment
 router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -680,6 +1182,53 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
   }
 });
 
+/**
+ * @openapi
+ * /api/community/users/{userId}/posts:
+ *   get:
+ *     tags: [Community]
+ *     summary: Get user's posts
+ *     description: Retrieve all published posts by a specific user
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Number of posts to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of posts to skip
+ *     responses:
+ *       200:
+ *         description: User posts retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     posts:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get user's posts
 router.get('/users/:userId/posts', async (req: Request, res: Response) => {
   try {
@@ -719,6 +1268,66 @@ router.get('/users/:userId/posts', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/community/games/{gameId}/reviews:
+ *   get:
+ *     tags: [Community]
+ *     summary: Get reviews for a game
+ *     description: Retrieve all published reviews for a specific game
+ *     parameters:
+ *       - in: path
+ *         name: gameId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Game ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Number of reviews to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of reviews to skip
+ *     responses:
+ *       200:
+ *         description: Game reviews retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     reviews:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           title:
+ *                             type: string
+ *                           content:
+ *                             type: string
+ *                           rating:
+ *                             type: integer
+ *                           author:
+ *                             type: object
+ *                           upvotes:
+ *                             type: integer
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 // Get reviews for a game
 router.get('/games/:gameId/reviews', async (req: Request, res: Response) => {
   try {
