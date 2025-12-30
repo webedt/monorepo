@@ -61,7 +61,7 @@ const createMessageSchema = {
     type: z.enum(['user', 'assistant', 'system', 'error'], {
       errorMap: () => ({ message: 'Invalid message type. Must be one of: user, assistant, system, error' }),
     }),
-    content: z.string().min(1, 'Content is required'),
+    content: z.string().trim().min(1, 'Content is required'),
   }),
 };
 
