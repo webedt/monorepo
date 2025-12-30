@@ -5,6 +5,7 @@
 
 import { randomBytes, createHash } from 'crypto';
 import { SNIPPET_LANGUAGES, SNIPPET_CATEGORIES } from '../../db/index.js';
+import { logger } from '../logging/index.js';
 import type { SnippetLanguage, SnippetCategory } from '../../db/index.js';
 
 // =============================================================================
@@ -133,49 +134,6 @@ export function isValidShareToken(token: unknown): token is string {
 }
 
 /**
- * Check if a share token has weak entropy patterns
- * Detects common weak patterns like sequential, repeated, or predictable tokens
- *
- * @param token - The share token to check
- * @returns An object indicating if the token is weak and why
- */
-export function checkShareTokenEntropy(token: string): { isWeak: boolean; reason?: string } {
-  if (!isValidShareToken(token)) {
-    return { isWeak: true, reason: 'Invalid token format' };
-  }
-
-  // Check for repeated characters (more than 50% same character)
-  const charCounts = new Map<string, number>();
-  for (const char of token) {
-    charCounts.set(char, (charCounts.get(char) || 0) + 1);
-  }
-  const maxRepeat = Math.max(...charCounts.values());
-  if (maxRepeat > token.length * 0.5) {
-    return { isWeak: true, reason: 'Token has excessive character repetition' };
-  }
-
-  // Check for sequential patterns (e.g., "abcdefgh" or "12345678")
-  let sequentialCount = 0;
-  for (let i = 1; i < token.length; i++) {
-    if (token.charCodeAt(i) === token.charCodeAt(i - 1) + 1) {
-      sequentialCount++;
-    }
-  }
-  if (sequentialCount > token.length * 0.4) {
-    return { isWeak: true, reason: 'Token has sequential patterns' };
-  }
-
-  // Check character diversity (should have reasonable variety)
-  const uniqueChars = charCounts.size;
-  const minUniqueChars = Math.min(10, Math.floor(token.length * 0.3));
-  if (uniqueChars < minUniqueChars) {
-    return { isWeak: true, reason: 'Token lacks character diversity' };
-  }
-
-  return { isWeak: false };
-}
-
-/**
  * Calculate the expiration date for a share token
  *
  * @param expiresInDays - Number of days until expiration (default: 7)
@@ -194,26 +152,46 @@ export function calculateShareTokenExpiration(expiresInDays?: number): Date {
 }
 
 /**
+ * Track if we've already warned about missing IP_HASH_SALT to avoid log spam
+ */
+let ipHashSaltWarned = false;
+
+/**
  * Get the IP hash salt from environment variable or use default
  * The salt should be set via IP_HASH_SALT environment variable for production deployments
  * to ensure consistent hashing across restarts while keeping it configurable
  */
 function getIpHashSalt(): string {
-  return process.env.IP_HASH_SALT || 'webedt-share-audit-default';
+  const salt = process.env.IP_HASH_SALT;
+  if (!salt && !ipHashSaltWarned) {
+    ipHashSaltWarned = true;
+    logger.warn('IP_HASH_SALT environment variable not set, using default salt. Set this in production for consistent IP hashing.', {
+      component: 'ShareTokenSecurity',
+    });
+  }
+  return salt || 'webedt-share-audit-default';
 }
 
 /**
  * Hash an IP address for privacy-preserving logging
  * Uses SHA-256 to anonymize IPs while still allowing pattern detection
  *
+ * Security note: We truncate to 16 hex characters (64 bits) which is sufficient
+ * for audit logging purposes. This provides:
+ * - Enough uniqueness to detect access patterns from same IPs
+ * - Reduced storage overhead compared to full 64-char hashes
+ * - Birthday collision probability of ~1 in 4 billion at 100k unique IPs
+ *
+ * For security-critical decisions, use the full hash instead.
+ *
  * @param ipAddress - The IP address to hash
  * @param salt - Optional salt for the hash (defaults to IP_HASH_SALT env var or fallback)
- * @returns A truncated hash of the IP address
+ * @returns A truncated hash of the IP address (16 hex characters / 64 bits)
  */
 export function hashIpAddress(ipAddress: string, salt?: string): string {
   const effectiveSalt = salt ?? getIpHashSalt();
   const hash = createHash('sha256');
   hash.update(effectiveSalt + ipAddress);
-  // Return first 16 characters of hex hash (still unique enough for pattern detection)
+  // Return first 16 characters of hex hash (64 bits - sufficient for audit pattern detection)
   return hash.digest('hex').substring(0, 16);
 }

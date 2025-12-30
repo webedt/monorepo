@@ -43,33 +43,32 @@ function getClientIp(req: Request): string {
 
 /**
  * Log share token access for audit trail
+ * Uses fire-and-forget pattern to avoid blocking requests
  */
-async function logShareAccess(
+function logShareAccess(
   sessionId: string,
   shareToken: string,
   accessType: ShareTokenAccessType,
   req: Request,
   success: boolean,
   failureReason?: ShareTokenFailureReason
-): Promise<void> {
-  try {
-    await shareTokenAccessLogService.logAccess({
-      sessionId,
-      shareToken,
-      accessType,
-      ipAddress: getClientIp(req),
-      userAgent: req.headers['user-agent'],
-      success,
-      failureReason,
-    });
-  } catch (error) {
-    // Log error but don't block the request
+): void {
+  // Fire-and-forget: don't await, use .catch() for error handling
+  void shareTokenAccessLogService.logAccess({
+    sessionId,
+    shareToken,
+    accessType,
+    ipAddress: getClientIp(req),
+    userAgent: req.headers['user-agent'],
+    success,
+    failureReason,
+  }).catch((error) => {
     logger.error('Failed to log share token access', error as Error, {
       component: 'Sessions',
       sessionId,
       accessType,
     });
-  }
+  });
 }
 
 const router = Router();
@@ -139,14 +138,14 @@ router.get('/shared/:token', shareTokenValidationRateLimiter, async (req: Reques
       const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
         : authResult.statusCode === 404 ? 'not_found' : 'invalid';
       if (session) {
-        await logShareAccess(session.id, shareToken, 'view', req, false, failureReason);
+        logShareAccess(session.id, shareToken, 'view', req, false, failureReason);
       }
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
 
     // Log successful access
-    await logShareAccess(session.id, shareToken, 'view', req, true);
+    logShareAccess(session.id, shareToken, 'view', req, true);
 
     // Get preview URL if applicable
     const previewUrl = await getPreviewUrlFromSession(session);
@@ -215,14 +214,14 @@ router.get('/shared/:token/events', shareTokenValidationRateLimiter, async (req:
       const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
         : authResult.statusCode === 404 ? 'not_found' : 'invalid';
       if (session) {
-        await logShareAccess(session.id, shareToken, 'events', req, false, failureReason);
+        logShareAccess(session.id, shareToken, 'events', req, false, failureReason);
       }
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
 
     // Log successful access
-    await logShareAccess(session.id, shareToken, 'events', req, true);
+    logShareAccess(session.id, shareToken, 'events', req, true);
 
     // Get non-deleted events ordered by timestamp
     const sessionEvents = await db
@@ -288,14 +287,14 @@ router.get('/shared/:token/events/stream', shareTokenValidationRateLimiter, asyn
       const failureReason: ShareTokenFailureReason = authResult.statusCode === 410 ? 'expired'
         : authResult.statusCode === 404 ? 'not_found' : 'invalid';
       if (session) {
-        await logShareAccess(session.id, shareToken, 'stream', req, false, failureReason);
+        logShareAccess(session.id, shareToken, 'stream', req, false, failureReason);
       }
       res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
 
     // Log successful access
-    await logShareAccess(session.id, shareToken, 'stream', req, true);
+    logShareAccess(session.id, shareToken, 'stream', req, true);
 
     // Check if session is actively streaming
     const isActive = sessionEventBroadcaster.isSessionActive(session.id);

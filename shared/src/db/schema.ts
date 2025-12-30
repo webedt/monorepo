@@ -1217,7 +1217,7 @@ export const shareTokenAccessLog = pgTable('share_token_access_log', {
   accessType: text('access_type').notNull(), // 'view' | 'events' | 'stream'
   ipAddress: text('ip_address'), // Requester IP (hashed for privacy)
   userAgent: text('user_agent'), // Browser/client info
-  country: text('country'), // Geo-location (if available)
+  country: text('country'), // Reserved for future geo-location lookup (e.g., MaxMind GeoIP)
   success: boolean('success').notNull().default(true), // Whether access was granted
   failureReason: text('failure_reason'), // If !success: 'expired' | 'invalid' | 'rate_limited'
   createdAt: timestamp('created_at').defaultNow().notNull(),

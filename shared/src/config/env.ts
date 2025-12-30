@@ -266,6 +266,9 @@ const envSchema = z.object({
   // File endpoints rate limiting
   RATE_LIMIT_FILE_WINDOW_MS: integerWithDefault(60000),
   RATE_LIMIT_FILE_MAX: integerWithDefault(100),
+  // Share token endpoints rate limiting (stricter to prevent enumeration)
+  RATE_LIMIT_SHARE_TOKEN_WINDOW_MS: integerWithDefault(60000),
+  RATE_LIMIT_SHARE_TOKEN_MAX: integerWithDefault(10),
   // Rate limiting options
   SKIP_RATE_LIMITING: booleanSchema,
   RATE_LIMIT_SKIP_ADMINS: optionalBoolean(true),
@@ -479,6 +482,8 @@ export const RATE_LIMIT_SSE_WINDOW_MS = parsedEnv.RATE_LIMIT_SSE_WINDOW_MS ?? 60
 export const RATE_LIMIT_SSE_MAX = parsedEnv.RATE_LIMIT_SSE_MAX ?? 10;
 export const RATE_LIMIT_FILE_WINDOW_MS = parsedEnv.RATE_LIMIT_FILE_WINDOW_MS ?? 60000;
 export const RATE_LIMIT_FILE_MAX = parsedEnv.RATE_LIMIT_FILE_MAX ?? 100;
+export const RATE_LIMIT_SHARE_TOKEN_WINDOW_MS = parsedEnv.RATE_LIMIT_SHARE_TOKEN_WINDOW_MS ?? 60000;
+export const RATE_LIMIT_SHARE_TOKEN_MAX = parsedEnv.RATE_LIMIT_SHARE_TOKEN_MAX ?? 10;
 export const SKIP_RATE_LIMITING = parsedEnv.SKIP_RATE_LIMITING ?? false;
 export const RATE_LIMIT_SKIP_ADMINS = parsedEnv.RATE_LIMIT_SKIP_ADMINS ?? true;
 export const RATE_LIMIT_CB_DEGRADATION = parsedEnv.RATE_LIMIT_CB_DEGRADATION ?? 0.5;
@@ -1049,6 +1054,8 @@ export const config = {
   RATE_LIMIT_SSE_MAX,
   RATE_LIMIT_FILE_WINDOW_MS,
   RATE_LIMIT_FILE_MAX,
+  RATE_LIMIT_SHARE_TOKEN_WINDOW_MS,
+  RATE_LIMIT_SHARE_TOKEN_MAX,
   SKIP_RATE_LIMITING,
   RATE_LIMIT_SKIP_ADMINS,
   RATE_LIMIT_CB_DEGRADATION,
