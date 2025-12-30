@@ -20,9 +20,12 @@ export interface ApiSuccessResponse<T = unknown> {
 
 /**
  * Standard error response format
+ * Includes both structured error object and top-level message for backward compatibility
  */
 export interface ApiErrorResponse {
   success: false;
+  /** Top-level error message for backward compatibility with clients expecting { error: string } */
+  message: string;
   error: {
     message: string;
     code?: string;
@@ -84,6 +87,7 @@ export function errorResponse(message: string, code?: string, requestId?: string
   const correlationId = requestId || getCorrelationId();
   return {
     success: false,
+    message, // Top-level for backward compatibility
     error: {
       message,
       ...(code && { code }),
@@ -109,6 +113,7 @@ export function validationErrorResponse(
   const correlationId = requestId || getCorrelationId();
   return {
     success: false,
+    message, // Top-level for backward compatibility
     error: {
       message,
       code: ApiErrorCode.VALIDATION_ERROR,

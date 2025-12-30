@@ -230,7 +230,8 @@ router.post('/games/:gameId/slots/:slotNumber', async (req: Request, res: Respon
     const err = error as Error;
     if (err.message.includes('quota exceeded')) {
       logger.warn('Upload save quota exceeded', { component: 'CloudSaves', userId: (req as AuthRequest).user!.id });
-      sendError(res, err.message, 413);
+      // HTTP 507 (Insufficient Storage) is semantically correct for quota exceeded
+      sendError(res, err.message, 507);
       return;
     }
     logger.error('Upload save error', err, { component: 'CloudSaves' });

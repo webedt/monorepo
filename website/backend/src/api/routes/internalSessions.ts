@@ -161,7 +161,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const response = await client.listSessions(limit, before);
 
     sendSuccess(res, {
-      data: response.data.map(session => ({
+      sessions: response.data.map(session => ({
         sessionId: session.id,
         status: session.session_status,
         title: session.title,

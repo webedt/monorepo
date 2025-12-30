@@ -206,7 +206,7 @@ router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
       count: orderedIds.length,
     });
 
-    sendSuccess(res, null);
+    sendSuccess(res, { message: 'Collections reordered' });
   } catch (error) {
     logger.error('Reorder collections error', error as Error, { component: 'Collections' });
     sendInternalError(res, 'Failed to reorder collections');
@@ -474,7 +474,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       userId: authReq.user!.id,
     });
 
-    sendSuccess(res, null);
+    sendSuccess(res, { message: 'Collection deleted' });
   } catch (error) {
     logger.error('Delete collection error', error as Error, { component: 'Collections' });
     sendInternalError(res, 'Failed to delete collection');
@@ -627,7 +627,7 @@ router.delete('/:id/sessions/:sessionId', requireAuth, async (req: Request, res:
       userId: authReq.user!.id,
     });
 
-    sendSuccess(res, null);
+    sendSuccess(res, { message: 'Session removed from collection' });
   } catch (error) {
     logger.error('Remove session from collection error', error as Error, { component: 'Collections' });
     sendInternalError(res, 'Failed to remove session from collection');

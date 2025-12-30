@@ -67,7 +67,7 @@ router.put('/presence', async (req: Request, res: Response) => {
         },
       });
 
-    sendSuccess(res, null);
+    sendSuccess(res, { updated: true });
   } catch (error) {
     logger.error('workspace', 'Failed to update presence', { error });
     sendInternalError(res, 'Failed to update presence');
@@ -151,7 +151,7 @@ router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Respon
 
     await db.delete(workspacePresence).where(eq(workspacePresence.id, id));
 
-    sendSuccess(res, null);
+    sendSuccess(res, { removed: true });
   } catch (error) {
     logger.error('workspace', 'Failed to delete presence', { error });
     sendInternalError(res, 'Failed to delete presence');
