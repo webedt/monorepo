@@ -18,7 +18,6 @@ import { logger } from '@webedt/shared';
 import {
   sendSuccess,
   sendError,
-  sendValidationError,
   sendUnauthorized,
   sendInternalError,
   validateRequest,

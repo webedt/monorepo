@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, logger } from '@webedt/shared';
 // Note: Encryption/decryption is now automatic via Drizzle custom column types
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -43,7 +43,7 @@ const router = Router();
 router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    let codexAuth = req.body.codexAuth || req.body;
+    const codexAuth = req.body.codexAuth || req.body;
 
     // Validate Codex auth structure - must have either apiKey or accessToken
     if (!codexAuth || (!codexAuth.apiKey && !codexAuth.accessToken)) {
@@ -65,7 +65,10 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       data: { message: 'Codex authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Codex auth error:', error);
+    logger.error('Update Codex auth error', error as Error, {
+      component: 'UserProvidersRoutes',
+      operation: 'updateCodexAuth',
+    });
     res.status(500).json({ success: false, error: 'Failed to update Codex authentication' });
   }
 });
@@ -100,7 +103,10 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
       data: { message: 'Codex authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Codex auth error:', error);
+    logger.error('Remove Codex auth error', error as Error, {
+      component: 'UserProvidersRoutes',
+      operation: 'removeCodexAuth',
+    });
     res.status(500).json({ success: false, error: 'Failed to remove Codex authentication' });
   }
 });
@@ -145,7 +151,7 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
 router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    let geminiAuth = req.body.geminiAuth || req.body;
+    const geminiAuth = req.body.geminiAuth || req.body;
 
     // Support both camelCase (our format) and snake_case (Gemini CLI format)
     const accessToken = geminiAuth.accessToken || geminiAuth.access_token;
@@ -181,7 +187,10 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       data: { message: 'Gemini OAuth authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Gemini auth error:', error);
+    logger.error('Update Gemini auth error', error as Error, {
+      component: 'UserProvidersRoutes',
+      operation: 'updateGeminiAuth',
+    });
     res.status(500).json({ success: false, error: 'Failed to update Gemini authentication' });
   }
 });
@@ -216,7 +225,10 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Gemini authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Gemini auth error:', error);
+    logger.error('Remove Gemini auth error', error as Error, {
+      component: 'UserProvidersRoutes',
+      operation: 'removeGeminiAuth',
+    });
     res.status(500).json({ success: false, error: 'Failed to remove Gemini authentication' });
   }
 });

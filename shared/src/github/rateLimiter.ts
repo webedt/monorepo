@@ -35,7 +35,7 @@ export interface RateLimitState {
   retryAfter: number | null;
 }
 
-export interface RateLimiterConfig {
+export interface GitHubRateLimiterConfig {
   /** Minimum delay between mutations in ms (default: 1000) */
   mutationDelayMs?: number;
   /** Max mutations per minute (default: 60 - being conservative below GitHub's 80) */
@@ -46,7 +46,7 @@ export interface RateLimiterConfig {
   primaryLimitBuffer?: number;
 }
 
-const DEFAULT_CONFIG: Required<RateLimiterConfig> = {
+const DEFAULT_CONFIG: Required<GitHubRateLimiterConfig> = {
   mutationDelayMs: 1000,
   maxMutationsPerMinute: 60,
   maxMutationsPerHour: 400,
@@ -55,7 +55,7 @@ const DEFAULT_CONFIG: Required<RateLimiterConfig> = {
 
 export class GitHubRateLimiter {
   private state: RateLimitState;
-  private config: Required<RateLimiterConfig>;
+  private config: Required<GitHubRateLimiterConfig>;
   private requestQueue: Array<{
     resolve: () => void;
     reject: (err: Error) => void;
@@ -63,7 +63,7 @@ export class GitHubRateLimiter {
   }> = [];
   private processing = false;
 
-  constructor(config: RateLimiterConfig = {}) {
+  constructor(config: GitHubRateLimiterConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     const now = Date.now();
     this.state = {

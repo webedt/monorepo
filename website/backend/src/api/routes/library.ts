@@ -35,7 +35,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, eq, and, desc } from '@webedt/shared';
+import { db, games, userLibrary, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -394,7 +394,7 @@ router.get('/', async (req: Request, res: Response) => {
       switch (sort) {
         case 'title':
           return sortOrder * a.game.title.localeCompare(b.game.title);
-        case 'lastPlayed':
+        case 'lastPlayed': {
           const playedA = a.libraryItem.lastPlayedAt
             ? new Date(a.libraryItem.lastPlayedAt).getTime()
             : 0;
@@ -402,16 +402,18 @@ router.get('/', async (req: Request, res: Response) => {
             ? new Date(b.libraryItem.lastPlayedAt).getTime()
             : 0;
           return sortOrder * (playedA - playedB);
+        }
         case 'playtime':
           return (
             sortOrder *
             (a.libraryItem.playtimeMinutes - b.libraryItem.playtimeMinutes)
           );
         case 'acquiredAt':
-        default:
+        default: {
           const acqA = new Date(a.libraryItem.acquiredAt).getTime();
           const acqB = new Date(b.libraryItem.acquiredAt).getTime();
           return sortOrder * (acqA - acqB);
+        }
       }
     });
 

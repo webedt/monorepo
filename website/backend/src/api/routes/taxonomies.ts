@@ -17,7 +17,6 @@ import {
   eq,
   and,
   asc,
-  desc,
   inArray,
   logger,
   isValidHexColor,

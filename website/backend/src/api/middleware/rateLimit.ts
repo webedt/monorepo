@@ -193,7 +193,8 @@ export function getRateLimitDashboard(): {
   storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
   circuitBreakers: Record<string, { state: string; failures: number }>;
 } {
-  const storeStats: Record<RateLimitTier, { keys: number; hits: number; blocked: number }> = {} as any;
+  // Initialize empty store stats object, will be populated below
+  const storeStats = {} as Record<RateLimitTier, { keys: number; hits: number; blocked: number }>;
 
   for (const [tier, store] of Object.entries(stores)) {
     storeStats[tier as RateLimitTier] = store.getStats();
@@ -279,8 +280,10 @@ function recordRateLimitHit(tier: RateLimitTier, path: string, ip: string, userI
 
 /**
  * Record a request (for metrics)
+ * @param _tier - Rate limit tier (reserved for future per-tier metrics)
  */
-function recordRequest(tier: RateLimitTier): void {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function recordRequest(_tier: RateLimitTier): void {
   rateLimitMetrics.totalRequests++;
 }
 
@@ -427,12 +430,14 @@ function createEnhancedRateLimiter(
 
   const options: Partial<Options> = {
     windowMs,
-    max: (req: Request) => getEffectiveMaxRequests(tier, maxRequests),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    max: (_req: Request) => getEffectiveMaxRequests(tier, maxRequests),
     standardHeaders: true, // Return rate limit info in headers
     legacyHeaders: false, // Disable X-RateLimit-* headers
     skip: createSkipFunction(tier),
     handler: createRateLimitHandler(tier, store),
-    store: store as any, // express-rate-limit store interface
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    store: store as any, // express-rate-limit store interface compatibility
     message: {
       success: false,
       error: 'Too many requests. Please try again later.',

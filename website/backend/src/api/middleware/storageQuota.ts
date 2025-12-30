@@ -11,6 +11,7 @@ import type { AuthRequest } from './auth.js';
  * Extend Express Request to include storageSize
  */
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       storageSize?: number;
@@ -206,6 +207,7 @@ export function trackStorageUsage() {
     // Store original send function
     const originalSend = res.send.bind(res);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     res.send = function (body: any): Response {
       // Only track if request was successful and we have size info
       const size = req.storageSize;

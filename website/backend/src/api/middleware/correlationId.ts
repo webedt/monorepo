@@ -33,6 +33,7 @@ const MAX_CORRELATION_ID_LENGTH = 128;
  * Regex pattern to match control characters that could affect log parsing
  * Matches ASCII control characters (0x00-0x1F) and DEL (0x7F)
  */
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS_REGEX = /[\x00-\x1f\x7f]/g;
 
 /**
@@ -63,6 +64,7 @@ function sanitizeCorrelationId(value: string): string | undefined {
  * Extends Express Request with correlation tracking data
  */
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       /**

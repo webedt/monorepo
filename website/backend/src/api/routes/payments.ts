@@ -479,6 +479,7 @@ router.post(
 
       // Get raw body - Express body-parser must be configured to preserve raw body
       // Signature verification requires the raw body; JSON.stringify() won't work
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rawBody = (req as any).rawBody;
       if (!rawBody) {
         logger.warn('Stripe webhook missing raw body - configure express.raw() middleware', {
@@ -584,6 +585,7 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
 
     // Get raw body - prefer rawBody from middleware, fall back to JSON.stringify for compatibility
     // Note: For production, configure express.raw() middleware to preserve raw body
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawBody = (req as any).rawBody || JSON.stringify(req.body);
 
     // Construct signature string for verification (pipe-delimited format expected by paypalProvider)

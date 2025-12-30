@@ -349,7 +349,7 @@ router.get('/browse', async (req: Request, res: Response) => {
     const offset = parseInt(req.query.offset as string) || 0;
 
     // Build query - start with published games only
-    let baseQuery = db
+    const baseQuery = db
       .select()
       .from(games)
       .where(eq(games.status, 'published'));
@@ -410,10 +410,11 @@ router.get('/browse', async (req: Request, res: Response) => {
         case 'downloads':
           return sortOrder * (a.downloadCount - b.downloadCount);
         case 'releaseDate':
-        default:
+        default: {
           const dateA = a.releaseDate ? new Date(a.releaseDate).getTime() : 0;
           const dateB = b.releaseDate ? new Date(b.releaseDate).getTime() : 0;
           return sortOrder * (dateA - dateB);
+        }
       }
     });
 

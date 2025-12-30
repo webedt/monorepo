@@ -13,7 +13,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { ServiceProvider, ASessionQueryService, ASessionAuthorizationService, logger, createLazyServiceContainer } from '@webedt/shared';
+import { ServiceProvider, ASessionQueryService, ASessionAuthorizationService, logger } from '@webedt/shared';
 
 import type { ChatSession, SessionMiddlewareServices } from '@webedt/shared';
 import type { AuthRequest } from './auth.js';

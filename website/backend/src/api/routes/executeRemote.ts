@@ -100,19 +100,6 @@ function truncateContent(content: unknown, maxLength: number = 500): string {
   return str.substring(0, maxLength) + `... (truncated, total length: ${str.length})`;
 }
 
-/**
- * Extract text from userRequest
- */
-function extractPrompt(userRequest: string | UserRequestContent[]): string {
-  if (typeof userRequest === 'string') {
-    return userRequest;
-  }
-
-  return userRequest
-    .filter(b => b.type === 'text')
-    .map(b => b.text || '')
-    .join('\n');
-}
 
 /**
  * Extract image attachments from userRequest for storage
@@ -154,7 +141,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
   try {
     // Parse parameters
     const params = req.method === 'POST' ? req.body : req.query;
-    let { userRequest, websiteSessionId, github } = params;
+    const { userRequest, websiteSessionId } = params;
+    let { github } = params;
 
     // Parse github if string
     if (typeof github === 'string') {
@@ -291,8 +279,6 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // Create or load chat session
     const chatSessionId = websiteSessionId || uuidv4();
     // Keep original userRequest (string or content blocks) for API calls
-    // Only extract text-only version for title generation and storage
-    const textPrompt = extractPrompt(userRequest);
     const serializedRequest = serializeUserRequest(userRequest);
 
     if (websiteSessionId) {

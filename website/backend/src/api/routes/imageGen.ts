@@ -70,6 +70,7 @@ async function generateWithOpenAICompatible(
   imageData?: string
 ): Promise<{ success: boolean; imageData?: string; error?: string }> {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const messages: any[] = [];
 
     if (imageData) {
@@ -166,6 +167,7 @@ async function generateWithGoogle(
     // Extract just the model name from the full identifier
     const modelName = model.replace('google/', '');
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parts: any[] = [];
 
     if (imageData) {
@@ -223,6 +225,7 @@ async function generateWithGoogle(
     }
 
     // Check for text response
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const textPart = candidates[0]?.content?.parts?.find((p: any) => p.text);
     if (textPart?.text) {
       return { success: false, error: 'Model returned text instead of image: ' + textPart.text.substring(0, 200) };
@@ -312,7 +315,7 @@ async function generateWithGoogle(
 router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { prompt, imageData, selection, provider: requestedProvider, model: requestedModel } = req.body as ImageGenerationRequest;
+    const { prompt, imageData, provider: requestedProvider, model: requestedModel } = req.body as ImageGenerationRequest;
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
       res.status(400).json({

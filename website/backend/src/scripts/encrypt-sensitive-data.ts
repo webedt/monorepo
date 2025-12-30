@@ -133,6 +133,7 @@ async function migrateUsers(): Promise<MigrationStats> {
         }
 
         // Determine which fields need encryption
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const fieldsToEncrypt: Record<string, any> = {};
 
         if (user.githubAccessToken && !isEncrypted(user.githubAccessToken)) {
@@ -176,6 +177,7 @@ async function migrateUsers(): Promise<MigrationStats> {
           const encryptedFields = encryptUserFields(fieldsToEncrypt);
           await db
             .update(users)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .set(encryptedFields as any)
             .where(eq(users.id, user.id));
         }

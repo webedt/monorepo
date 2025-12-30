@@ -27,7 +27,7 @@ import {
 import { logger, runWithCorrelation } from '@webedt/shared';
 
 // Import database - initializeDatabase runs migrations and schema updates
-import { waitForDatabase, initializeDatabase } from '@webedt/shared';
+import { initializeDatabase } from '@webedt/shared';
 
 // Import routes
 import executeRemoteRoutes from './api/routes/executeRemote.js';
@@ -90,7 +90,7 @@ import {
 } from '@webedt/shared';
 
 // Import background sync service
-import { startBackgroundSync, stopBackgroundSync } from '@webedt/shared';
+import { startBackgroundSync } from '@webedt/shared';
 
 /**
  * Clean up orphaned sessions that are stuck in 'running' status
@@ -140,7 +140,7 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
           .from(events)
           .where(eq(events.chatSessionId, session.id));
 
-        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+        const completedEvents = allEvents.filter(e => (e.eventData as { type?: string } | null)?.type === 'completed');
 
         // Check if session has any events at all (worker started processing)
         const totalEvents = allEvents.length;
@@ -514,14 +514,9 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
-// Error handler
-app.use(
-  (
-    err: Error,
-    req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
-  ) => {
+// Error handler - Express requires 4 params for error middleware
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
     const errorMessage = err instanceof Error ? err.message : String(err);
     const correlationId = req.correlationId;
 

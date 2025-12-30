@@ -10,6 +10,7 @@ import type { User, Session } from 'lucia';
 // Extend Express Request type to include auth properties
 // Note: Using 'authSession' to avoid conflict with express-session's 'session'
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: User | null;

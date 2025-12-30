@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, logger } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 
@@ -72,7 +72,10 @@ router.get('/spending-limits', requireAuth, async (req: Request, res: Response) 
       },
     });
   } catch (error) {
-    console.error('Get spending limits error:', error);
+    logger.error('Get spending limits error', error as Error, {
+      component: 'UserSpendingRoutes',
+      operation: 'getSpendingLimits',
+    });
     res.status(500).json({ success: false, error: 'Failed to get spending limits' });
   }
 });
@@ -203,7 +206,10 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
       data: { message: 'Spending limits updated successfully' },
     });
   } catch (error) {
-    console.error('Update spending limits error:', error);
+    logger.error('Update spending limits error', error as Error, {
+      component: 'UserSpendingRoutes',
+      operation: 'updateSpendingLimits',
+    });
     res.status(500).json({ success: false, error: 'Failed to update spending limits' });
   }
 });
@@ -241,7 +247,10 @@ router.post('/spending-limits/reset', requireAuth, async (req: Request, res: Res
       data: { message: 'Monthly spending reset successfully' },
     });
   } catch (error) {
-    console.error('Reset spending error:', error);
+    logger.error('Reset spending error', error as Error, {
+      component: 'UserSpendingRoutes',
+      operation: 'resetSpending',
+    });
     res.status(500).json({ success: false, error: 'Failed to reset spending' });
   }
 });
