@@ -142,6 +142,7 @@ export class DatabaseConnection {
           const delay = calculateBackoffDelay(attempt, {
             baseDelayMs: this.config.baseRetryDelayMs,
             maxDelayMs: this.config.maxRetryDelayMs,
+            jitterMode: 'positive',
           });
           this.emitEvent('error', { attempt, nextRetryMs: delay }, lastError.message);
           await sleep(delay);
@@ -231,6 +232,7 @@ export class DatabaseConnection {
         const delay = calculateBackoffDelay(attempt, {
           baseDelayMs: this.config.baseRetryDelayMs,
           maxDelayMs: this.config.maxRetryDelayMs,
+          jitterMode: 'positive',
         });
         await sleep(delay);
       }

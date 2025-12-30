@@ -3,8 +3,6 @@ import { getErrorCode, getStatusCode, asNetworkError } from '../errorTypes.js';
 import { RETRY } from '../../config/constants.js';
 import { sleep, calculateBackoffDelay as calculateBackoff } from '../timing.js';
 
-import type { BackoffConfig } from '../timing.js';
-
 export interface RetryConfig {
   maxRetries: number;
   baseDelayMs: number;

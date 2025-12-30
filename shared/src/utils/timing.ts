@@ -9,6 +9,13 @@
 import { RETRY } from '../config/constants.js';
 
 /**
+ * Jitter mode for backoff calculations.
+ * - 'bidirectional': Jitter can increase or decrease delay (±factor)
+ * - 'positive': Jitter only increases delay (0 to +factor)
+ */
+export type JitterMode = 'bidirectional' | 'positive';
+
+/**
  * Configuration for backoff delay calculations.
  */
 export interface BackoffConfig {
@@ -22,6 +29,8 @@ export interface BackoffConfig {
   useJitter: boolean;
   /** Jitter factor as a fraction of delay (default: 0.3 = 30%) */
   jitterFactor: number;
+  /** Jitter mode: 'bidirectional' (±factor) or 'positive' (0 to +factor). Default: 'bidirectional' */
+  jitterMode: JitterMode;
 }
 
 const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
@@ -30,6 +39,7 @@ const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
   backoffMultiplier: RETRY.DEFAULT.BACKOFF_MULTIPLIER,
   useJitter: true,
   jitterFactor: RETRY.DEFAULT.JITTER_FACTOR,
+  jitterMode: 'bidirectional',
 };
 
 /**
@@ -120,26 +130,31 @@ export function calculateBackoffDelay(
 
   // Apply jitter if enabled
   if (finalConfig.useJitter) {
-    delay = addJitter(delay, finalConfig.jitterFactor);
-    // Ensure delay doesn't go below half of base delay
-    delay = Math.max(delay, finalConfig.baseDelayMs * 0.5);
+    if (finalConfig.jitterMode === 'positive') {
+      delay = addPositiveJitter(delay, finalConfig.jitterFactor);
+    } else {
+      delay = addJitter(delay, finalConfig.jitterFactor);
+      // Ensure delay doesn't go below half of base delay (only for bidirectional)
+      delay = Math.max(delay, finalConfig.baseDelayMs * 0.5);
+    }
   }
 
   return Math.floor(delay);
 }
 
 /**
- * Sleep with jitter applied to the duration.
+ * Sleep with positive jitter applied to the duration.
  *
- * Convenience function that combines sleep() and addJitter().
+ * Convenience function that combines sleep() and addPositiveJitter().
+ * The actual sleep duration will be between ms and ms * (1 + jitterFactor).
  *
  * @param ms - Base duration to sleep in milliseconds
- * @param jitterFactor - Jitter factor (default: 0.3 = ±30%)
+ * @param jitterFactor - Jitter factor (default: 0.3 = +0-30%)
  * @returns Promise that resolves after the jittered duration
  *
  * @example
  * ```typescript
- * await sleepWithJitter(1000); // Waits 700-1300ms
+ * await sleepWithJitter(1000); // Waits 1000-1300ms
  * ```
  */
 export async function sleepWithJitter(
