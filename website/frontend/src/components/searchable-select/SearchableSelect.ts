@@ -496,7 +496,7 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     this.filteredOptions = [...options];
 
     // Clear selection if current value is no longer in options
-    if (this.selectedOption && !options.find(o => o.value === this.selectedOption!.value)) {
+    if (this.selectedOption && !options.find(o => o.value === this.selectedOption?.value)) {
       this.selectedOption = null;
       this.updateTriggerText();
     }

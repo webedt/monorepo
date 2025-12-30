@@ -40,7 +40,7 @@ class EditorSettingsStore {
   private listeners: Set<EditorSettingsListener> = new Set();
 
   constructor() {
-    this.settings = editorSettingsStorage.get();
+    this.settings = editorSettingsStorage.get() as EditorSettings;
   }
 
   private saveToStorage(): void {

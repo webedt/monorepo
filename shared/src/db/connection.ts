@@ -11,6 +11,7 @@
 import pg from 'pg';
 
 import { TIMEOUTS, LIMITS, RETRY, INTERVALS, CONTEXT_RETRY } from '../config/constants.js';
+import { sleep, calculateBackoffDelay } from '../utils/timing.js';
 
 const { Pool } = pg;
 
@@ -138,9 +139,13 @@ export class DatabaseConnection {
         this.stats.consecutiveFailures++;
 
         if (attempt < this.config.maxRetries) {
-          const delay = this.calculateBackoffDelay(attempt);
+          const delay = calculateBackoffDelay(attempt, {
+            baseDelayMs: this.config.baseRetryDelayMs,
+            maxDelayMs: this.config.maxRetryDelayMs,
+            jitterMode: 'positive',
+          });
           this.emitEvent('error', { attempt, nextRetryMs: delay }, lastError.message);
-          await this.sleep(delay);
+          await sleep(delay);
         }
       }
     }
@@ -224,30 +229,17 @@ export class DatabaseConnection {
         this.emitEvent('reconnect', { attempt });
         return;
       } catch (error) {
-        const delay = this.calculateBackoffDelay(attempt);
-        await this.sleep(delay);
+        const delay = calculateBackoffDelay(attempt, {
+          baseDelayMs: this.config.baseRetryDelayMs,
+          maxDelayMs: this.config.maxRetryDelayMs,
+          jitterMode: 'positive',
+        });
+        await sleep(delay);
       }
     }
 
     this.reconnecting = false;
     this.emitEvent('disconnect', { reason: 'max_retries_exceeded' });
-  }
-
-  /**
-   * Calculate exponential backoff delay
-   */
-  private calculateBackoffDelay(attempt: number): number {
-    const exponentialDelay = this.config.baseRetryDelayMs * Math.pow(2, attempt - 1);
-    const jitter = Math.random() * 0.3 * exponentialDelay;
-    const delay = Math.min(exponentialDelay + jitter, this.config.maxRetryDelayMs);
-    return Math.floor(delay);
-  }
-
-  /**
-   * Sleep for specified milliseconds
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -422,8 +414,11 @@ export async function withRetry<T>(
       }
 
       // Wait with exponential backoff
-      const delay = baseDelayMs * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      const delay = calculateBackoffDelay(attempt, {
+        baseDelayMs,
+        useJitter: false,
+      });
+      await sleep(delay);
     }
   }
 

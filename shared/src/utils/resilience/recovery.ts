@@ -1,10 +1,12 @@
 import { logger } from '../logging/logger.js';
 import { retryWithBackoff, RETRY_CONFIGS } from './retry.js';
-import type { RetryConfig } from './retry.js';
+import { sleep } from '../timing.js';
 import { circuitBreakerRegistry } from './circuitBreaker.js';
-import type { CircuitBreaker } from './circuitBreaker.js';
 import { metrics } from '../monitoring/metrics.js';
 import { getErrorCode, getStatusCode, getRetryAfterHeader } from '../errorTypes.js';
+
+import type { RetryConfig } from './retry.js';
+import type { CircuitBreaker } from './circuitBreaker.js';
 
 export type RecoveryStrategy =
   | 'retry'
@@ -350,7 +352,7 @@ export async function withRecovery<T>(
       }
 
       if (recoveryResult.retryDelayMs && recoveryResult.retryDelayMs > 0) {
-        await new Promise(resolve => setTimeout(resolve, recoveryResult.retryDelayMs));
+        await sleep(recoveryResult.retryDelayMs);
       }
     }
   }

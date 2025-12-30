@@ -71,7 +71,7 @@ class AudioSourceStore {
   private audioContext: AudioContext | null = null;
 
   constructor() {
-    this.settings = audioSourceStorage.get();
+    this.settings = audioSourceStorage.get() as AudioSourceSettings;
   }
 
   private saveToStorage(): void {

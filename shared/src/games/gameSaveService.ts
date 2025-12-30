@@ -513,10 +513,12 @@ export class GameSaveService extends AGameSaveService {
     userId: string,
     callback: GamePlatformEventCallback
   ): () => void {
-    if (!this.eventSubscribers.has(userId)) {
-      this.eventSubscribers.set(userId, new Set());
+    let subscribers = this.eventSubscribers.get(userId);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.eventSubscribers.set(userId, subscribers);
     }
-    this.eventSubscribers.get(userId)!.add(callback);
+    subscribers.add(callback);
 
     return () => {
       this.eventSubscribers.get(userId)?.delete(callback);

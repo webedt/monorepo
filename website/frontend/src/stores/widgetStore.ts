@@ -129,7 +129,7 @@ class WidgetStore extends Store<WidgetState> {
   }
 
   private loadFromStorage(): void {
-    const storedLayout = widgetStorage.get();
+    const storedLayout = widgetStorage.get() as WidgetLayout;
     if (storedLayout.widgets.length > 0) {
       this.setState({ layout: storedLayout });
     }

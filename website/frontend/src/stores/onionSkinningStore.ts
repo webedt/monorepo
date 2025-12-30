@@ -61,7 +61,7 @@ class OnionSkinningStore {
   private listeners: Set<OnionSkinningListener> = new Set();
 
   constructor() {
-    this.settings = onionSkinningStorage.get();
+    this.settings = onionSkinningStorage.get() as OnionSkinningSettings;
   }
 
   private saveToStorage(): void {

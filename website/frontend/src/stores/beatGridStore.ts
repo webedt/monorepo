@@ -14,7 +14,7 @@ export interface BeatGridSettings {
   beatsPerMeasure: number;
   snapEnabled: boolean;
   gridVisible: boolean;
-  subdivisions: number; // 1 = quarter notes, 2 = eighth notes, 4 = sixteenth notes
+  subdivisions: 1 | 2 | 4; // 1 = quarter notes, 2 = eighth notes, 4 = sixteenth notes
 }
 
 export interface BeatPosition {
@@ -57,7 +57,7 @@ class BeatGridStore {
   private listeners: Set<BeatGridListener> = new Set();
 
   constructor() {
-    this.settings = beatGridStorage.get();
+    this.settings = beatGridStorage.get() as BeatGridSettings;
   }
 
   private saveToStorage(): void {
@@ -144,7 +144,7 @@ class BeatGridStore {
 
   setSubdivisions(value: number): void {
     if ([1, 2, 4].includes(value)) {
-      this.settings.subdivisions = value;
+      this.settings.subdivisions = value as 1 | 2 | 4;
       this.saveToStorage();
       this.notifyListeners();
     }
