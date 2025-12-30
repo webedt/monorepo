@@ -1,5 +1,6 @@
 import { Component, ComponentOptions } from '../base';
 import { ArrayStorage } from '../../lib/typedStorage';
+import { COMPONENT_KEYS } from '../../lib/storageKeys';
 import './universal-search.css';
 
 export type UniversalSearchSize = 'sm' | 'md' | 'lg';
@@ -66,7 +67,7 @@ export class UniversalSearch extends Component<HTMLDivElement> {
       minQueryLength: 2,
       maxResults: 10,
       showRecentSearches: true,
-      recentSearchesKey: 'universal-search-recent',
+      recentSearchesKey: COMPONENT_KEYS.UNIVERSAL_SEARCH_RECENT,
       maxRecentSearches: 5,
       ...options,
     };

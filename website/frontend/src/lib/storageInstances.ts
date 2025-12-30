@@ -6,10 +6,13 @@
  * to ensure cache consistency across the application. Each storage
  * instance maintains an in-memory cache, so multiple instances for
  * the same key will have inconsistent caches.
+ *
+ * Note: UniversalSearch creates its own ArrayStorage instance because
+ * it supports custom storage keys via the recentSearchesKey option.
  */
 
 import { SimpleStorage, ArrayStorage } from './typedStorage';
-import { UI_KEYS, COMPONENT_KEYS } from './storageKeys';
+import { UI_KEYS } from './storageKeys';
 
 /**
  * Last selected repository (owner/repo format).
@@ -27,17 +30,5 @@ export const recentReposStorage = new ArrayStorage<string>(
   {
     maxItems: 10,
     itemValidator: (item): item is string => typeof item === 'string' && item.length > 0,
-  }
-);
-
-/**
- * Universal search recent queries.
- */
-export const universalSearchRecentStorage = new ArrayStorage<string>(
-  COMPONENT_KEYS.UNIVERSAL_SEARCH_RECENT,
-  [],
-  {
-    maxItems: 5,
-    itemValidator: (item): item is string => typeof item === 'string',
   }
 );

@@ -12,9 +12,6 @@
  * 2. **Singleton Instances**: Multiple storage instances for the same key will
  *    have independent caches. Use shared instances from `storageInstances.ts`
  *    for commonly accessed keys to ensure cache consistency.
- *
- * 3. **Validation Errors**: The `set()` method silently catches validation errors
- *    and logs them to console. Check console.error for debugging.
  */
 
 import type { ZodType } from 'zod';
@@ -46,6 +43,8 @@ export class TypedStorage<T> {
   /**
    * Get the stored value, validated against the schema.
    * Returns the default value if parsing fails or data is missing.
+   * Note: This method does NOT auto-upgrade storage format. Call upgrade()
+   * explicitly if you need to persist version upgrades.
    */
   get(): T {
     if (this.cache !== null) {
@@ -60,7 +59,7 @@ export class TypedStorage<T> {
       }
 
       const parsed = JSON.parse(raw);
-      const value = this.handleVersionedData(parsed);
+      const { value } = this.handleVersionedData(parsed);
       this.cache = value;
       return value;
     } catch (error) {
@@ -72,8 +71,9 @@ export class TypedStorage<T> {
 
   /**
    * Set a new value, which is validated against the schema before storing.
+   * @returns true if the value was saved successfully, false otherwise
    */
-  set(value: T): void {
+  set(value: T): boolean {
     try {
       // Validate before storing
       const validated = this.schema.parse(value);
@@ -85,8 +85,10 @@ export class TypedStorage<T> {
 
       localStorage.setItem(this.key, JSON.stringify(wrapped));
       this.cache = validated;
+      return true;
     } catch (error) {
       console.error(`TypedStorage: Failed to save ${this.key}:`, error);
+      return false;
     }
   }
 
@@ -127,8 +129,10 @@ export class TypedStorage<T> {
 
   /**
    * Handle versioned data with migration support.
+   * Note: This method does NOT write back to storage. Use set() explicitly
+   * if you need to persist upgraded/migrated data.
    */
-  private handleVersionedData(parsed: unknown): T {
+  private handleVersionedData(parsed: unknown): { value: T; needsUpgrade: boolean } {
     // Check if data is in versioned format
     if (
       typeof parsed === 'object' &&
@@ -142,42 +146,42 @@ export class TypedStorage<T> {
       if (versioned.version === this.version) {
         const result = this.schema.safeParse(versioned.data);
         if (result.success) {
-          return result.data;
+          return { value: result.data, needsUpgrade: false };
         }
         // Schema validation failed, try to merge with defaults
-        return this.mergeWithDefaults(versioned.data);
+        const merged = this.mergeWithDefaults(versioned.data);
+        return { value: merged, needsUpgrade: merged !== this.defaultValue };
       }
 
       // Version mismatch - try migration
       if (this.migrate && versioned.version < this.version) {
         try {
           const migrated = this.migrate(versioned.data, versioned.version);
-          // Save migrated data
-          this.set(migrated);
-          return migrated;
+          return { value: migrated, needsUpgrade: true };
         } catch (error) {
           console.warn(`TypedStorage: Migration failed for ${this.key}:`, error);
         }
       }
 
       // Try to merge old data with defaults
-      return this.mergeWithDefaults(versioned.data);
+      const merged = this.mergeWithDefaults(versioned.data);
+      return { value: merged, needsUpgrade: merged !== this.defaultValue };
     }
 
     // Legacy unversioned data - try to parse directly
     const result = this.schema.safeParse(parsed);
     if (result.success) {
-      // Upgrade to versioned format
-      this.set(result.data);
-      return result.data;
+      return { value: result.data, needsUpgrade: true };
     }
 
     // Try to merge with defaults
-    return this.mergeWithDefaults(parsed);
+    const merged = this.mergeWithDefaults(parsed);
+    return { value: merged, needsUpgrade: merged !== this.defaultValue };
   }
 
   /**
    * Merge unknown data with defaults, preserving valid fields.
+   * Note: This method does NOT write back to storage.
    */
   private mergeWithDefaults(data: unknown): T {
     if (typeof data !== 'object' || data === null) {
@@ -189,12 +193,15 @@ export class TypedStorage<T> {
     const result = this.schema.safeParse(merged);
 
     if (result.success) {
-      // Save the fixed data
-      this.set(result.data);
       return result.data;
     }
 
-    // Complete parse failure - return defaults
+    // Complete parse failure - return defaults and clean up corrupt data
+    try {
+      localStorage.removeItem(this.key);
+    } catch {
+      // Ignore removal errors
+    }
     return this.defaultValue;
   }
 }
@@ -278,14 +285,26 @@ export class SimpleStorage<T extends string | number | boolean> {
     try {
       localStorage.removeItem(this.key);
       this.cache = null;
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error(`SimpleStorage: Failed to remove ${this.key}:`, error);
     }
   }
 
   clearCache(): void {
     this.cache = null;
   }
+}
+
+export interface ArrayStorageOptions<T> {
+  maxItems?: number;
+  itemValidator?: (item: unknown) => item is T;
+  /**
+   * Custom equality function for duplicate detection in push().
+   * Defaults to reference equality (===).
+   * @example
+   * compareFn: (a, b) => a.id === b.id // For objects with id property
+   */
+  compareFn?: (a: T, b: T) => boolean;
 }
 
 /**
@@ -296,38 +315,41 @@ export class ArrayStorage<T> {
   private readonly defaultValue: T[];
   private readonly maxItems: number;
   private readonly itemValidator?: (item: unknown) => item is T;
+  private readonly compareFn: (a: T, b: T) => boolean;
   private cache: T[] | null = null;
 
   constructor(
     key: string,
     defaultValue: T[] = [],
-    options: {
-      maxItems?: number;
-      itemValidator?: (item: unknown) => item is T;
-    } = {}
+    options: ArrayStorageOptions<T> = {}
   ) {
     this.key = key;
     this.defaultValue = defaultValue;
     this.maxItems = options.maxItems ?? Infinity;
     this.itemValidator = options.itemValidator;
+    this.compareFn = options.compareFn ?? ((a, b) => a === b);
   }
 
+  /**
+   * Get the stored array.
+   * @returns A shallow copy of the array to prevent external mutation.
+   */
   get(): T[] {
     if (this.cache !== null) {
-      return this.cache;
+      return [...this.cache];
     }
 
     try {
       const raw = localStorage.getItem(this.key);
       if (!raw) {
         this.cache = [...this.defaultValue];
-        return this.cache;
+        return [...this.cache];
       }
 
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) {
         this.cache = [...this.defaultValue];
-        return this.cache;
+        return [...this.cache];
       }
 
       // Filter valid items if validator provided
@@ -336,10 +358,10 @@ export class ArrayStorage<T> {
         : parsed;
 
       this.cache = items.slice(0, this.maxItems) as T[];
-      return this.cache;
+      return [...this.cache];
     } catch {
       this.cache = [...this.defaultValue];
-      return this.cache;
+      return [...this.cache];
     }
   }
 
@@ -355,13 +377,13 @@ export class ArrayStorage<T> {
 
   /**
    * Add item to front of array, removing duplicates.
-   * Note: Uses reference equality (===) for duplicate detection.
-   * For objects, use a custom solution or ensure same reference.
+   * Uses the compareFn from constructor options for duplicate detection
+   * (defaults to reference equality ===).
    */
   push(item: T): void {
     const current = this.get();
-    // Remove existing if present (reference equality), add to front
-    const filtered = current.filter(i => i !== item);
+    // Remove existing if present using compareFn, add to front
+    const filtered = current.filter(i => !this.compareFn(i, item));
     const updated = [item, ...filtered].slice(0, this.maxItems);
     this.set(updated);
   }
@@ -370,8 +392,8 @@ export class ArrayStorage<T> {
     try {
       localStorage.removeItem(this.key);
       this.cache = null;
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error(`ArrayStorage: Failed to remove ${this.key}:`, error);
     }
   }
 
@@ -401,14 +423,14 @@ export class RecordStorage<T> {
 
   get(): Record<string, T> {
     if (this.cache !== null) {
-      return this.cache;
+      return { ...this.cache };
     }
 
     try {
       const raw = localStorage.getItem(this.key);
       if (!raw) {
         this.cache = { ...this.defaultValue };
-        return this.cache;
+        return { ...this.cache };
       }
 
       const parsed = JSON.parse(raw);
@@ -417,30 +439,45 @@ export class RecordStorage<T> {
         const result = this.schema.safeParse(parsed);
         if (result.success) {
           this.cache = { ...this.defaultValue, ...result.data };
-          return this.cache;
+          return { ...this.cache };
         }
       }
 
-      // Merge with defaults
-      if (typeof parsed === 'object' && parsed !== null) {
+      // Merge with defaults - explicitly exclude arrays
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         this.cache = { ...this.defaultValue, ...(parsed as Record<string, T>) };
-        return this.cache;
+        return { ...this.cache };
       }
 
       this.cache = { ...this.defaultValue };
-      return this.cache;
+      return { ...this.cache };
     } catch {
       this.cache = { ...this.defaultValue };
-      return this.cache;
+      return { ...this.cache };
     }
   }
 
-  set(value: Record<string, T>): void {
+  /**
+   * Set the record value.
+   * If a schema was provided, validates the value before storing.
+   * @returns true if the value was saved successfully, false otherwise
+   */
+  set(value: Record<string, T>): boolean {
     try {
+      // Validate against schema if provided
+      if (this.schema) {
+        const result = this.schema.safeParse(value);
+        if (!result.success) {
+          console.error(`RecordStorage: Validation failed for ${this.key}:`, result.error);
+          return false;
+        }
+      }
       localStorage.setItem(this.key, JSON.stringify(value));
       this.cache = value;
+      return true;
     } catch (error) {
       console.error(`RecordStorage: Failed to save ${this.key}:`, error);
+      return false;
     }
   }
 
@@ -453,8 +490,8 @@ export class RecordStorage<T> {
     try {
       localStorage.removeItem(this.key);
       this.cache = null;
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error(`RecordStorage: Failed to remove ${this.key}:`, error);
     }
   }
 

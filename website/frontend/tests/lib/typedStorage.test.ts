@@ -239,9 +239,51 @@ describe('TypedStorage', () => {
       expect(storage.get()).toEqual({ name: 'legacy', count: 5 });
     });
 
-    it('should upgrade legacy unversioned data', () => {
-      // Store data without version wrapper (legacy format)
+    it('should handle migration failure gracefully', () => {
+      localStorage.setItem('test_key', JSON.stringify({
+        version: 1,
+        data: { badData: true },
+      }));
+
+      const storage = new TypedStorage({
+        key: 'test_key',
+        schema: testSchema,
+        defaultValue,
+        version: 2,
+        migrate: () => {
+          throw new Error('Migration failed');
+        },
+      });
+
+      // Should fall back to defaults
+      expect(storage.get()).toEqual(defaultValue);
+    });
+
+    it('should not write to storage on get() (no write-on-read)', () => {
+      // Store legacy unversioned data
       localStorage.setItem('test_key', JSON.stringify({ name: 'legacy', count: 10 }));
+
+      const setItemSpy = vi.spyOn(localStorage, 'setItem');
+
+      const storage = new TypedStorage({
+        key: 'test_key',
+        schema: testSchema,
+        defaultValue,
+        version: 1,
+      });
+
+      storage.get();
+
+      // get() should NOT write back to storage
+      expect(setItemSpy).not.toHaveBeenCalled();
+    });
+
+    it('should clean up corrupt data and return defaults', () => {
+      // Store data that cannot be merged with defaults
+      localStorage.setItem('test_key', JSON.stringify({
+        version: 1,
+        data: 'not an object',
+      }));
 
       const storage = new TypedStorage({
         key: 'test_key',
@@ -251,11 +293,32 @@ describe('TypedStorage', () => {
       });
 
       const result = storage.get();
-      expect(result).toEqual({ name: 'legacy', count: 10 });
+      expect(result).toEqual(defaultValue);
+    });
+  });
 
-      // Should have saved in versioned format
-      const stored = JSON.parse(localStorage.getItem('test_key') || '');
-      expect(stored.version).toBe(1);
+  describe('set() return value', () => {
+    it('should return true on successful save', () => {
+      const storage = new TypedStorage({
+        key: 'test_key',
+        schema: testSchema,
+        defaultValue,
+      });
+
+      const result = storage.set({ name: 'test', count: 1 });
+      expect(result).toBe(true);
+    });
+
+    it('should return false on validation failure', () => {
+      const storage = new TypedStorage({
+        key: 'test_key',
+        schema: testSchema,
+        defaultValue,
+      });
+
+      // @ts-expect-error - Intentionally passing invalid data
+      const result = storage.set({ name: 123, count: 'invalid' });
+      expect(result).toBe(false);
     });
   });
 
@@ -419,6 +482,62 @@ describe('ArrayStorage', () => {
 
       expect(storage.get()).toEqual(['b', 'a', 'c']);
     });
+
+    it('should return a copy from get() to prevent mutation', () => {
+      const storage = new ArrayStorage<string>('array_key');
+
+      storage.set(['a', 'b', 'c']);
+
+      const result1 = storage.get();
+      const result2 = storage.get();
+
+      // Should be equal but not the same reference
+      expect(result1).toEqual(result2);
+      expect(result1).not.toBe(result2);
+
+      // Mutating result1 should not affect storage
+      result1.push('d');
+      expect(storage.get()).toEqual(['a', 'b', 'c']);
+    });
+  });
+
+  describe('Custom compareFn', () => {
+    interface Item {
+      id: string;
+      name: string;
+    }
+
+    it('should use custom compareFn for duplicate detection', () => {
+      const storage = new ArrayStorage<Item>('items_key', [], {
+        compareFn: (a, b) => a.id === b.id,
+      });
+
+      storage.set([
+        { id: '1', name: 'First' },
+        { id: '2', name: 'Second' },
+      ]);
+
+      // Push item with same id but different name - should replace
+      storage.push({ id: '1', name: 'Updated First' });
+
+      const result = storage.get();
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual({ id: '1', name: 'Updated First' });
+      expect(result[1]).toEqual({ id: '2', name: 'Second' });
+    });
+
+    it('should use reference equality by default', () => {
+      const storage = new ArrayStorage<Item>('items_key');
+
+      const item1 = { id: '1', name: 'First' };
+      storage.set([item1]);
+
+      // Push different object with same content - should add (not replace)
+      storage.push({ id: '1', name: 'First' });
+
+      const result = storage.get();
+      expect(result).toHaveLength(2);
+    });
   });
 
   describe('Max Items', () => {
@@ -520,6 +639,64 @@ describe('RecordStorage', () => {
       const storage = new RecordStorage<number>('record_key', { fallback: 99 });
 
       expect(storage.get()).toEqual({ fallback: 99 });
+    });
+
+    it('should return default for array stored data', () => {
+      localStorage.setItem('record_key', JSON.stringify([1, 2, 3]));
+
+      const storage = new RecordStorage<number>('record_key', { fallback: 99 });
+
+      expect(storage.get()).toEqual({ fallback: 99 });
+    });
+
+    it('should return a copy from get() to prevent mutation', () => {
+      const storage = new RecordStorage<number>('record_key', { a: 1 });
+
+      storage.set({ a: 1, b: 2 });
+
+      const result1 = storage.get();
+      const result2 = storage.get();
+
+      // Should be equal but not the same reference
+      expect(result1).toEqual(result2);
+      expect(result1).not.toBe(result2);
+
+      // Mutating result1 should not affect storage
+      result1.c = 3;
+      expect(storage.get()).toEqual({ a: 1, b: 2 });
+    });
+  });
+
+  describe('Schema validation on set()', () => {
+    it('should validate and accept valid data', () => {
+      const schema = z.record(z.string(), z.number());
+      const storage = new RecordStorage<number>('record_key', {}, schema);
+
+      const result = storage.set({ a: 1, b: 2 });
+
+      expect(result).toBe(true);
+      expect(storage.get()).toEqual({ a: 1, b: 2 });
+    });
+
+    it('should reject invalid data on set()', () => {
+      const schema = z.record(z.string(), z.number());
+      const storage = new RecordStorage<number>('record_key', { default: 0 }, schema);
+
+      // @ts-expect-error - Intentionally passing invalid data
+      const result = storage.set({ a: 'not a number' });
+
+      expect(result).toBe(false);
+      // Storage should be unchanged
+      expect(storage.get()).toEqual({ default: 0 });
+    });
+
+    it('should work without schema (no validation)', () => {
+      const storage = new RecordStorage<number>('record_key', {});
+
+      const result = storage.set({ a: 1, b: 2 });
+
+      expect(result).toBe(true);
+      expect(storage.get()).toEqual({ a: 1, b: 2 });
     });
   });
 });

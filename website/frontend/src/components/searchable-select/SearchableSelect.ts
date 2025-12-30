@@ -120,11 +120,13 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     if (!this.recentValuesStorage) return;
 
     // Remove if already exists, then add to front
+    // ArrayStorage.set() handles maxItems trimming internally
     this.recentValues = this.recentValues.filter(v => v !== value);
     this.recentValues.unshift(value);
-    this.recentValues = this.recentValues.slice(0, this.options.maxRecent);
 
     this.recentValuesStorage.set(this.recentValues);
+    // Update local cache from storage (trimmed)
+    this.recentValues = this.recentValuesStorage.get();
   }
 
   private buildStructure(): void {
