@@ -5,6 +5,7 @@
 
 import { execSync } from 'child_process';
 import { platform } from 'os';
+import { GITHUB_TOKEN } from '../config/env.js';
 
 /**
  * Source of GitHub authentication token
@@ -108,9 +109,9 @@ export function getGitHubCredentials(
   }
 
   // 2. Environment variable (fast - just env lookup)
-  if (process.env.GITHUB_TOKEN) {
+  if (GITHUB_TOKEN) {
     return {
-      token: process.env.GITHUB_TOKEN,
+      token: GITHUB_TOKEN,
       source: 'environment',
     };
   }

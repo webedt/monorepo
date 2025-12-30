@@ -21,7 +21,7 @@ export interface TabContentState {
  * Undo/Redo manager for editor tabs
  * Each tab has its own independent history stack
  */
-class UndoRedoManager {
+export class UndoRedoManager {
   private stacks: Map<string, UndoRedoStack<TabContentState>> = new Map();
   private subscribers: Map<string, Set<(state: UndoRedoState<TabContentState>) => void>> = new Map();
 

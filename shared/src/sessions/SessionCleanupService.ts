@@ -5,6 +5,7 @@ import { ensureValidToken } from '../auth/claudeAuth.js';
 import { ServiceProvider } from '../services/registry.js';
 import { AClaudeWebClient } from '../claudeWeb/AClaudeWebClient.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../config/index.js';
+import { withGitHubResilience, withClaudeRemoteResilience } from '../utils/resilience/externalApiResilience.js';
 
 import { ASessionCleanupService } from './ASessionCleanupService.js';
 
@@ -20,11 +21,14 @@ export class SessionCleanupService extends ASessionCleanupService {
   ): Promise<CleanupResult> {
     try {
       const octokit = new Octokit({ auth: githubAccessToken });
-      await octokit.git.deleteRef({
-        owner,
-        repo,
-        ref: `heads/${branch}`,
-      });
+      await withGitHubResilience(
+        () => octokit.git.deleteRef({
+          owner,
+          repo,
+          ref: `heads/${branch}`,
+        }),
+        'deleteRef'
+      );
       logger.info(`Deleted GitHub branch ${owner}/${repo}/${branch}`, {
         component: 'SessionCleanupService',
       });
@@ -36,6 +40,12 @@ export class SessionCleanupService extends ASessionCleanupService {
           component: 'SessionCleanupService',
         });
         return { success: true, message: 'Branch already deleted or does not exist' };
+      }
+      if (err.message?.includes('circuit breaker')) {
+        logger.warn(`GitHub API unavailable for deleting branch ${owner}/${repo}/${branch}`, {
+          component: 'SessionCleanupService',
+        });
+        return { success: false, message: 'GitHub API temporarily unavailable' };
       }
       logger.error(`Failed to delete GitHub branch ${owner}/${repo}/${branch}`, error as Error, {
         component: 'SessionCleanupService',
@@ -67,7 +77,10 @@ export class SessionCleanupService extends ASessionCleanupService {
         baseUrl: CLAUDE_API_BASE_URL,
       });
 
-      await client.archiveSession(remoteSessionId);
+      await withClaudeRemoteResilience(
+        () => client.archiveSession(remoteSessionId),
+        'archiveSession'
+      );
       logger.info(`Successfully archived Claude Remote session ${remoteSessionId}`, {
         component: 'SessionCleanupService',
       });
@@ -85,6 +98,12 @@ export class SessionCleanupService extends ASessionCleanupService {
           component: 'SessionCleanupService',
         });
         return { success: true, message: 'Remote session already archived or does not exist' };
+      }
+      if (err.message?.includes('circuit breaker')) {
+        logger.warn(`Claude Remote API unavailable for archiving session ${remoteSessionId}`, {
+          component: 'SessionCleanupService',
+        });
+        return { success: false, message: 'Claude Remote API temporarily unavailable' };
       }
       return { success: false, message: `Failed to archive remote session: ${err.message || 'Unknown error'}` };
     }

@@ -5,7 +5,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, withTransactionOrThrow } from '../db/index.js';
+import type { TransactionContext } from '../db/index.js';
 import { paymentTransactions, paymentWebhooks, purchases, userLibrary, wishlists, games } from '../db/schema.js';
 import { logger } from '../utils/logging/logger.js';
 import { APaymentProvider } from './APaymentProvider.js';
@@ -419,24 +420,29 @@ export class PaymentService {
       .limit(1);
 
     if (transaction) {
-      await db
-        .update(paymentTransactions)
-        .set({
-          status: 'refunded',
-          updatedAt: new Date(),
-        })
-        .where(eq(paymentTransactions.id, transaction.id));
-
-      // Update purchase status if linked
-      if (transaction.purchaseId) {
-        await db
-          .update(purchases)
+      // Use transaction to ensure both updates succeed or fail together
+      await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+        await tx
+          .update(paymentTransactions)
           .set({
             status: 'refunded',
-            refundedAt: new Date(),
+            updatedAt: new Date(),
           })
-          .where(eq(purchases.id, transaction.purchaseId));
-      }
+          .where(eq(paymentTransactions.id, transaction.id));
+
+        // Update purchase status if linked
+        if (transaction.purchaseId) {
+          await tx
+            .update(purchases)
+            .set({
+              status: 'refunded',
+              refundedAt: new Date(),
+            })
+            .where(eq(purchases.id, transaction.purchaseId));
+        }
+      }, {
+        context: { operation: 'handleRefund', transactionId: transaction.id, purchaseId: transaction.purchaseId },
+      });
 
       return { success: true, transactionId: transaction.id };
     }

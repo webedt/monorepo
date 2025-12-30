@@ -29,8 +29,11 @@ export class EventSourceManager {
   private options: SSEOptions;
   private eventSource: EventSource | null = null;
   private retryCount = 0;
-  private retryTimeout: number | null = null;
+  private pendingTimeouts: number[] = [];
   private isClosed = false;
+  private lastEventId: string | null = null;
+  /** Track registered event listeners for proper cleanup */
+  private registeredListeners: Array<{ type: string; handler: EventListener }> = [];
 
   constructor(url: string, options: SSEOptions = {}) {
     this.url = url;
@@ -51,9 +54,19 @@ export class EventSourceManager {
     }
 
     this.isClosed = false;
-    console.log('[SSE] Connecting to:', this.url);
 
-    this.eventSource = new EventSource(this.url, { withCredentials: true });
+    // Include Last-Event-ID as query parameter for reliable resumption after reconnect
+    // This allows the server to resume from where the client left off
+    let connectUrl = this.url;
+    if (this.lastEventId) {
+      const separator = this.url.includes('?') ? '&' : '?';
+      connectUrl = `${this.url}${separator}lastEventId=${encodeURIComponent(this.lastEventId)}`;
+      console.log('[SSE] Reconnecting with Last-Event-ID:', this.lastEventId);
+    } else {
+      console.log('[SSE] Connecting to:', this.url);
+    }
+
+    this.eventSource = new EventSource(connectUrl, { withCredentials: true });
 
     this.eventSource.onopen = () => {
       console.log('[SSE] Connected');
@@ -62,6 +75,10 @@ export class EventSourceManager {
     };
 
     this.eventSource.onmessage = (event) => {
+      // Track last event ID for reliable resumption on reconnect
+      if (event.lastEventId) {
+        this.lastEventId = event.lastEventId;
+      }
       this.options.onMessage?.(event);
       this.handleEventData('message', event.data);
     };
@@ -88,10 +105,21 @@ export class EventSourceManager {
       'error',
     ];
 
+    // Clear any previously registered listeners
+    this.registeredListeners = [];
+
     for (const type of eventTypes) {
-      this.eventSource.addEventListener(type, (event: MessageEvent) => {
+      const handler: EventListener = (evt: Event) => {
+        const event = evt as MessageEvent;
+        // Track last event ID for reliable resumption on reconnect
+        if (event.lastEventId) {
+          this.lastEventId = event.lastEventId;
+        }
         this.handleEventData(type, event.data);
-      });
+      };
+      this.eventSource.addEventListener(type, handler);
+      // Track for cleanup
+      this.registeredListeners.push({ type, handler });
     }
   }
 
@@ -109,6 +137,16 @@ export class EventSourceManager {
   }
 
   /**
+   * Clear all pending reconnect timeouts to prevent memory leaks
+   */
+  private clearPendingTimeouts(): void {
+    for (const timeoutId of this.pendingTimeouts) {
+      clearTimeout(timeoutId);
+    }
+    this.pendingTimeouts = [];
+  }
+
+  /**
    * Handle disconnect with optional retry
    */
   private handleDisconnect(): void {
@@ -117,32 +155,49 @@ export class EventSourceManager {
     this.options.onClose?.();
 
     if (this.options.reconnect && this.retryCount < (this.options.maxRetries || 5)) {
+      // Clear any existing pending timeouts before scheduling a new one
+      // This prevents timeout stacking during rapid disconnect/reconnect cycles
+      this.clearPendingTimeouts();
+
       const delay = (this.options.retryDelay || 1000) * Math.pow(2, this.retryCount);
       console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${this.retryCount + 1})`);
 
-      this.retryTimeout = window.setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
+        // Remove this timeout from tracking since it fired
+        this.pendingTimeouts = this.pendingTimeouts.filter(id => id !== timeoutId);
         this.retryCount++;
         this.connect();
       }, delay);
+
+      // Track the new timeout
+      this.pendingTimeouts.push(timeoutId);
     }
   }
 
   /**
-   * Close the connection
+   * Close the connection and clean up all resources
    */
   close(): void {
     this.isClosed = true;
 
-    if (this.retryTimeout) {
-      clearTimeout(this.retryTimeout);
-      this.retryTimeout = null;
-    }
+    // Clear ALL pending reconnect timeouts to prevent memory leaks
+    this.clearPendingTimeouts();
 
     if (this.eventSource) {
+      // Remove all registered event listeners to prevent memory leaks
+      for (const { type, handler } of this.registeredListeners) {
+        this.eventSource.removeEventListener(type, handler);
+      }
+      this.registeredListeners = [];
+
       this.eventSource.close();
       this.eventSource = null;
       console.log('[SSE] Closed');
     }
+
+    // Reset state for potential reuse
+    this.retryCount = 0;
+    this.lastEventId = null;
   }
 
   /**

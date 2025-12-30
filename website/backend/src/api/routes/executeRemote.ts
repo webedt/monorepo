@@ -10,11 +10,12 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken, ensureValidGeminiToken, isValidGeminiAuth } from '@webedt/shared';
+import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
+import { isValidGeminiAuth, tokenRefreshService } from '@webedt/shared';
 import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
 import type { ProviderType } from '@webedt/shared';
-import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath, parseGitUrl, validateBranchName, sanitizeBranchName } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -29,6 +30,13 @@ import {
 } from '../activeStreamManager.js';
 
 const router = Router();
+
+/**
+ * @openapi
+ * tags:
+ *   - name: ExecuteRemote
+ *     description: AI-powered code execution using Anthropic's Remote Sessions API
+ */
 
 // ============================================================================
 // Types
@@ -49,21 +57,18 @@ export interface UserRequestContent {
 // ============================================================================
 
 /**
- * Extract repository owner from GitHub URL
- * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
+ * Parse and validate a repository URL, returning owner/repo or an error.
+ * Parses once and returns the result for reuse, avoiding multiple parse calls.
+ *
+ * @param repoUrl - The GitHub repository URL
+ * @returns Object with owner, repo on success, or error string on failure
  */
-function extractRepoOwner(repoUrl: string): string | null {
-  const match = repoUrl.match(/github\.com\/([^\/]+)\//);
-  return match ? match[1] : null;
-}
-
-/**
- * Extract repository name from GitHub URL
- * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
- */
-function extractRepoName(repoUrl: string): string | null {
-  const match = repoUrl.match(/\/([^\/]+?)(\.git)?$/);
-  return match ? match[1] : null;
+function parseAndValidateRepoUrl(repoUrl: string): { owner: string; repo: string } | { error: string } {
+  const result = parseGitUrl(repoUrl);
+  if (!result.isValid) {
+    return { error: result.error };
+  }
+  return { owner: result.owner, repo: result.repo };
 }
 
 /**
@@ -166,12 +171,19 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // (Anthropic Remote Sessions API doesn't support specifying a base branch anyway)
     const baseBranch = 'main';
 
-    // Extract owner and repo name from URL (for PR functionality)
+    // Validate and extract owner and repo name from URL (for PR functionality)
+    // SECURITY: Validate URL early to prevent injection attacks
+    // Parse once and reuse the result to avoid triple parsing
     let repositoryOwner: string | null = null;
     let repositoryName: string | null = null;
     if (repoUrl) {
-      repositoryOwner = extractRepoOwner(repoUrl);
-      repositoryName = extractRepoName(repoUrl);
+      const parseResult = parseAndValidateRepoUrl(repoUrl);
+      if ('error' in parseResult) {
+        res.status(400).json({ success: false, error: `Invalid repository URL: ${parseResult.error}` });
+        return;
+      }
+      repositoryOwner = parseResult.owner;
+      repositoryName = parseResult.repo;
     }
 
     logger.info('Execute Remote request received', {
@@ -217,14 +229,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       geminiAuth = userData.geminiAuth as GeminiAuth;
       try {
-        const refreshedAuth = await ensureValidGeminiToken(geminiAuth);
-        if (refreshedAuth.accessToken !== geminiAuth.accessToken) {
-          // Token was refreshed, save it
-          await db.update(users)
-            .set({ geminiAuth: refreshedAuth as unknown as typeof users.$inferInsert['geminiAuth'] })
-            .where(eq(users.id, user.id));
-          geminiAuth = refreshedAuth;
-        }
+        // Use centralized token refresh service for Gemini tokens
+        geminiAuth = await tokenRefreshService.ensureValidGeminiTokenForUser(user.id, geminiAuth);
       } catch (error) {
         logger.error('Failed to refresh Gemini token', error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Gemini token expired. Please reconnect your Gemini account.' });
@@ -246,14 +252,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       claudeAuth = userData.claudeAuth as ClaudeAuth;
       try {
-        const refreshedAuth = await ensureValidToken(claudeAuth);
-        if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
-          // Token was refreshed, save it
-          await db.update(users)
-            .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-            .where(eq(users.id, user.id));
-          claudeAuth = refreshedAuth;
-        }
+        // Use centralized token refresh service for Claude tokens
+        claudeAuth = await tokenRefreshService.ensureValidTokenForUser(user.id, claudeAuth);
       } catch (error) {
         logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
@@ -316,11 +316,25 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           });
 
           // Also extract owner/name if not already set (backward compatibility)
-          if (!repositoryOwner && repoUrl) {
-            repositoryOwner = extractRepoOwner(repoUrl);
-          }
-          if (!repositoryName && repoUrl) {
-            repositoryName = extractRepoName(repoUrl);
+          // SECURITY: Validate URL from existing session with same rigor as new URLs
+          if ((!repositoryOwner || !repositoryName) && repoUrl) {
+            const parseResult = parseAndValidateRepoUrl(repoUrl);
+            if ('error' in parseResult) {
+              // Existing session has invalid URL - this shouldn't happen but handle gracefully
+              logger.error('Existing session has invalid repository URL', {
+                component: 'ExecuteRemoteRoute',
+                chatSessionId,
+                error: parseResult.error,
+              });
+              res.status(400).json({ success: false, error: `Invalid repository URL in existing session: ${parseResult.error}` });
+              return;
+            }
+            if (!repositoryOwner) {
+              repositoryOwner = parseResult.owner;
+            }
+            if (!repositoryName) {
+              repositoryName = parseResult.repo;
+            }
           }
         }
 
@@ -389,14 +403,23 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // (e.g., during polling or reconnection), and we need to ensure each event is stored only once
     const storedEventUuids = new Set<string>();
 
+    // Get correlation ID from request for SSE events
+    const correlationId = req.correlationId;
+
     // Helper to send SSE events
     // Pass events through directly without modification - frontend handles all formatting
     // Use named SSE events so frontend can listen with addEventListener(eventType)
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
+      // Include correlation ID in event for client-side tracing
+      const eventWithCorrelation = {
+        ...event,
+        requestId: correlationId,
+      };
+
       // Send as named SSE event: "event: <type>\ndata: <json>\n\n"
-      const eventData = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+      const eventData = `event: ${event.type}\ndata: ${JSON.stringify(eventWithCorrelation)}\n\n`;
 
       // Log SSE event for debugging
       logger.info('SSE event', {
@@ -413,7 +436,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as any).uuid;
+      const eventUuid = event.uuid;
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         // Skip duplicate event
         logger.debug('Skipping duplicate event', {
@@ -428,6 +451,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         // Mark as stored to prevent future duplicates
@@ -441,15 +465,15 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Save title and branch to database immediately when generated
       // This ensures they're saved even if user disconnects
       // Only save title for NEW sessions (not on resume/subsequent messages)
-      if (!websiteSessionId && event.type === 'session_name' && (event as any).sessionName) {
+      if (!websiteSessionId && event.type === 'session_name' && event.sessionName) {
         try {
           await db.update(chatSessions)
-            .set({ userRequest: (event as any).sessionName })
+            .set({ userRequest: event.sessionName })
             .where(eq(chatSessions.id, chatSessionId));
           logger.info('Session title saved to database', {
             component: 'ExecuteRemoteRoute',
             chatSessionId,
-            title: (event as any).sessionName,
+            title: event.sessionName,
           });
         } catch (err) {
           logger.error('Failed to save session title', err, {
@@ -461,9 +485,26 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       // Also capture title from title_generation events (success status)
       // Update title for any session that receives a title_generation event
-      if (event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
-        const newTitle = (event as any).title;
-        const newBranch = (event as any).branch_name;
+      if (event.type === 'title_generation' && event.status === 'success' && event.title) {
+        const newTitle = event.title;
+        let newBranch = event.branch_name;
+
+        // SECURITY: Validate branch name to prevent path traversal attacks
+        // A malicious remote session could return a branch like '../admin'
+        if (newBranch) {
+          try {
+            validateBranchName(newBranch);
+          } catch (branchError) {
+            logger.warn('Invalid branch name received from remote session, sanitizing', {
+              component: 'ExecuteRemoteRoute',
+              chatSessionId,
+              originalBranch: newBranch,
+              error: branchError instanceof Error ? branchError.message : 'Unknown error',
+            });
+            // Sanitize the branch name to make it safe for use in paths
+            newBranch = sanitizeBranchName(newBranch);
+          }
+        }
 
         // Generate sessionPath when we have all the info needed
         // This prevents duplicate sessions by establishing the unique sessionPath early
@@ -504,18 +545,18 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       // CRITICAL: Save remoteSessionId immediately when session_created event is received
       // This prevents race conditions with background sync that could create duplicates
-      if (event.type === 'session_created' && (event as any).remoteSessionId) {
+      if (event.type === 'session_created' && event.remoteSessionId) {
         try {
           await db.update(chatSessions)
             .set({
-              remoteSessionId: (event as any).remoteSessionId,
-              remoteWebUrl: (event as any).remoteWebUrl,
+              remoteSessionId: event.remoteSessionId,
+              remoteWebUrl: event.remoteWebUrl,
             })
             .where(eq(chatSessions.id, chatSessionId));
           logger.info('Remote session ID saved to database immediately', {
             component: 'ExecuteRemoteRoute',
             chatSessionId,
-            remoteSessionId: (event as any).remoteSessionId,
+            remoteSessionId: event.remoteSessionId,
           });
 
           // Clean up any redundant pending sessions created around the same time
@@ -579,7 +620,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Send session-created event for new sessions (client needs this to track session ID)
     if (!websiteSessionId) {
-      const sessionCreatedData = { websiteSessionId: chatSessionId };
+      const sessionCreatedData = {
+        websiteSessionId: chatSessionId,
+        requestId: correlationId,
+      };
       logger.info('SSE event: session-created', {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
@@ -635,17 +679,33 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Update session with result
       const finalStatus = result.status === 'completed' ? 'completed' : 'error';
 
+      // SECURITY: Validate branch name from result to prevent path traversal
+      let safeBranch = result.branch;
+      if (safeBranch) {
+        try {
+          validateBranchName(safeBranch);
+        } catch (branchError) {
+          logger.warn('Invalid branch name in result, sanitizing', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            originalBranch: safeBranch,
+            error: branchError instanceof Error ? branchError.message : 'Unknown error',
+          });
+          safeBranch = sanitizeBranchName(safeBranch);
+        }
+      }
+
       // Generate sessionPath if we have all the info and don't have it yet
       // This is a fallback in case title_generation event didn't fire
       let finalSessionPath: string | undefined;
-      if (result.branch && repositoryOwner && repositoryName) {
-        finalSessionPath = generateSessionPath(repositoryOwner, repositoryName, result.branch);
+      if (safeBranch && repositoryOwner && repositoryName) {
+        finalSessionPath = generateSessionPath(repositoryOwner, repositoryName, safeBranch);
       }
 
       await db.update(chatSessions)
         .set({
           status: finalStatus,
-          branch: result.branch,
+          branch: safeBranch,
           remoteSessionId: result.remoteSessionId,
           remoteWebUrl: result.remoteWebUrl,
           totalCost: result.totalCost?.toString(),
@@ -658,7 +718,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionListBroadcaster.notifyStatusChanged(user.id, {
         id: chatSessionId,
         status: finalStatus,
-        branch: result.branch,
+        branch: safeBranch,
         remoteSessionId: result.remoteSessionId,
         remoteWebUrl: result.remoteWebUrl,
         totalCost: result.totalCost?.toString(),
@@ -668,7 +728,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
         status: result.status,
-        branch: result.branch,
+        branch: safeBranch,
         totalCost: result.totalCost,
       });
 
@@ -676,10 +736,11 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       const completedData = {
         websiteSessionId: chatSessionId,
         completed: true,
-        branch: result.branch,
+        branch: safeBranch,
         totalCost: result.totalCost,
         remoteSessionId: result.remoteSessionId,
         remoteWebUrl: result.remoteWebUrl,
+        requestId: correlationId,
       };
       logger.info('SSE event: completed', {
         component: 'ExecuteRemoteRoute',
@@ -770,8 +831,82 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 // Routes
 // ============================================================================
 
+/**
+ * @openapi
+ * /execute-remote:
+ *   post:
+ *     tags:
+ *       - ExecuteRemote
+ *     summary: Execute AI code task
+ *     description: |
+ *       Starts a new AI-powered code execution session or resumes an existing one.
+ *       Returns Server-Sent Events (SSE) stream with real-time execution updates.
+ *       Rate limited to 10 requests per minute.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userRequest:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: object
+ *                 description: Task prompt (text or content blocks with images)
+ *               websiteSessionId:
+ *                 type: string
+ *                 description: Existing session ID to resume
+ *               github:
+ *                 type: object
+ *                 properties:
+ *                   repoUrl:
+ *                     type: string
+ *                     description: GitHub repository URL
+ *     responses:
+ *       200:
+ *         description: SSE stream of execution events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       400:
+ *         description: Missing required parameters
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   get:
+ *     tags:
+ *       - ExecuteRemote
+ *     summary: Execute AI code task (SSE reconnect)
+ *     description: Same as POST, supports SSE reconnection with query parameters.
+ *     parameters:
+ *       - name: websiteSessionId
+ *         in: query
+ *         schema:
+ *           type: string
+ *       - name: userRequest
+ *         in: query
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 // Main execute endpoint (POST for new requests, GET for SSE reconnect)
-router.post('/', requireAuth, executeRemoteHandler);
-router.get('/', requireAuth, executeRemoteHandler);
+// Rate limited to prevent abuse of expensive AI operations (10/min per user)
+router.post('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
+router.get('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
 
 export default router;

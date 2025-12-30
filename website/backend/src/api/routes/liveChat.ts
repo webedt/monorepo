@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, liveChatMessages, users, eq, and, desc, StorageService } from '@webedt/shared';
+import { db, liveChatMessages, users, eq, and, desc, StorageService, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
 import {
   requireStorageQuota,
@@ -9,7 +9,6 @@ import {
 } from '../middleware/storageQuota.js';
 import {
   logger,
-  ServiceProvider,
   AClaudeWebClient,
   ensureValidToken,
   CLAUDE_ENVIRONMENT_ID,
@@ -20,10 +19,187 @@ import {
   sendUnauthorized,
   sendInternalError,
   ApiErrorCode,
+  requestDeduplicatorRegistry,
+  generateRequestKey,
+  simpleHash,
 } from '@webedt/shared';
 import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 
+/**
+ * Create an SSEWriter for a response with automatic heartbeat management.
+ */
+function createSSEWriter(res: Response): SSEWriter {
+  const sseHelper = ServiceProvider.get(ASseHelper);
+  return SSEWriter.create(res, sseHelper);
+}
+
 const router = Router();
+
+/**
+ * @openapi
+ * tags:
+ *   - name: LiveChat
+ *     description: Real-time AI chat on code branches
+ */
+
+/**
+ * @openapi
+ * /live-chat/{owner}/{repo}/{branch}/messages:
+ *   get:
+ *     tags:
+ *       - LiveChat
+ *     summary: Get chat messages
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *     responses:
+ *       200:
+ *         description: Messages retrieved
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   post:
+ *     tags:
+ *       - LiveChat
+ *     summary: Add message
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - role
+ *               - content
+ *             properties:
+ *               role:
+ *                 type: string
+ *               content:
+ *                 type: string
+ *               images:
+ *                 type: array
+ *     responses:
+ *       200:
+ *         description: Message added
+ *       400:
+ *         description: Missing fields
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   delete:
+ *     tags:
+ *       - LiveChat
+ *     summary: Clear messages
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Messages cleared
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /live-chat/{owner}/{repo}/{branch}/execute:
+ *   post:
+ *     tags:
+ *       - LiveChat
+ *     summary: Execute AI chat
+ *     description: Executes AI with conversation context. Returns SSE stream.
+ *     parameters:
+ *       - name: owner
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: repo
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - name: branch
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - message
+ *             properties:
+ *               message:
+ *                 type: string
+ *               images:
+ *                 type: array
+ *     responses:
+ *       200:
+ *         description: SSE stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 
 /**
  * Get and configure the Claude Web Client with the given credentials.
@@ -122,6 +298,8 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
 /**
  * POST /api/live-chat/:owner/:repo/:branch/messages
  * Add a message to a branch-based live chat
+ *
+ * Uses request deduplication to prevent duplicate messages from rapid button clicks
  */
 router.post(
   '/:owner/:repo/:branch/messages',
@@ -143,24 +321,50 @@ router.post(
         return;
       }
 
-      // Decode branch name
-      const decodedBranch = decodeURIComponent(branch);
+      // Use request deduplicator to prevent duplicate message posting from rapid clicks
+      const deduplicator = requestDeduplicatorRegistry.get('live-chat-messages', {
+        defaultTtlMs: 5000, // 5 second TTL for message posting (short window)
+      });
 
-      const message = {
-        id: uuidv4(),
-        userId,
-        owner,
-        repo,
-        branch: decodedBranch,
-        role,
-        content,
-        images: images || null,
-        createdAt: new Date(),
-      };
+      // Key includes content hash to detect identical messages
+      const contentHash = simpleHash(content);
+      const requestKey = generateRequestKey(userId, owner, repo, branch, role, contentHash);
 
-      await db.insert(liveChatMessages).values(message);
+      const { data: message, wasDeduplicated } = await deduplicator.deduplicate(
+        requestKey,
+        async () => {
+          // Decode branch name
+          const decodedBranch = decodeURIComponent(branch);
 
-      sendSuccess(res, message);
+          const newMessage = {
+            id: uuidv4(),
+            userId,
+            owner,
+            repo,
+            branch: decodedBranch,
+            role,
+            content,
+            images: images || null,
+            createdAt: new Date(),
+          };
+
+          await db.insert(liveChatMessages).values(newMessage);
+
+          return newMessage;
+        }
+      );
+
+      if (wasDeduplicated) {
+        logger.info('Live chat message was deduplicated (duplicate request detected)', {
+          component: 'LiveChat',
+          userId,
+          owner,
+          repo,
+          branch,
+        });
+      }
+
+      sendSuccess(res, { ...message, wasDeduplicated });
     } catch (error) {
       logger.error('liveChat', 'Failed to add live chat message', { error });
       sendInternalError(res, 'Failed to add message');
@@ -246,15 +450,9 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
     await db.insert(liveChatMessages).values(userMessage);
 
-    // Set up SSE response
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-
-    const sendSSE = (event: string, data: unknown) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
+    // Set up SSE response with automatic heartbeats
+    const writer = createSSEWriter(res);
+    writer.setup();
 
     // Get message history for context
     const history = await db
@@ -273,7 +471,7 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
     history.reverse();
 
-    sendSSE('connected', {
+    writer.writeNamedEvent('connected', {
       workspace: { owner, repo, branch: decodedBranch },
       messageCount: history.length,
     });
@@ -286,8 +484,8 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       .limit(1);
 
     if (!dbUser?.claudeAuth) {
-      sendSSE('error', { error: 'Claude authentication not configured. Please connect your Claude account in settings.' });
-      res.end();
+      writer.writeNamedEvent('error', { error: 'Claude authentication not configured. Please connect your Claude account in settings.' });
+      writer.end();
       return;
     }
 
@@ -298,16 +496,16 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
         ? JSON.parse(dbUser.claudeAuth)
         : dbUser.claudeAuth as ClaudeAuth;
     } catch {
-      sendSSE('error', { error: 'Invalid Claude authentication data' });
-      res.end();
+      writer.writeNamedEvent('error', { error: 'Invalid Claude authentication data' });
+      writer.end();
       return;
     }
 
     // Ensure we have a valid token
     const validAuth = await ensureValidToken(claudeAuth);
     if (!validAuth) {
-      sendSSE('error', { error: 'Claude token expired and could not be refreshed' });
-      res.end();
+      writer.writeNamedEvent('error', { error: 'Claude token expired and could not be refreshed' });
+      writer.end();
       return;
     }
 
@@ -321,8 +519,8 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       if (detectedEnvId) {
         environmentId = detectedEnvId;
       } else {
-        sendSSE('error', { error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first.' });
-        res.end();
+        writer.writeNamedEvent('error', { error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first.' });
+        writer.end();
         return;
       }
     }
@@ -376,12 +574,12 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
               // Content could be string or array of content blocks
               if (typeof eventMessage.content === 'string') {
                 assistantContent += eventMessage.content;
-                sendSSE('assistant_message', { content: eventMessage.content, partial: true });
+                writer.writeNamedEvent('assistant_message', { content: eventMessage.content, partial: true });
               } else if (Array.isArray(eventMessage.content)) {
                 for (const block of eventMessage.content) {
                   if (block && typeof block === 'object' && 'type' in block && block.type === 'text' && 'text' in block) {
                     assistantContent += block.text;
-                    sendSSE('assistant_message', { content: block.text, partial: true });
+                    writer.writeNamedEvent('assistant_message', { content: block.text, partial: true });
                   }
                 }
               }
@@ -390,7 +588,7 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
           // Forward relevant events to client
           if (eventType === 'tool_use' || eventType === 'tool_result') {
-            sendSSE('tool_event', event);
+            writer.writeNamedEvent('tool_event', event as Record<string, unknown>);
           }
         }
       );
@@ -420,7 +618,7 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
       await db.insert(liveChatMessages).values(assistantMessage);
 
-      sendSSE('completed', {
+      writer.writeNamedEvent('completed', {
         messageId: assistantMessage.id,
         status: result.status,
         branch: result.branch,
@@ -436,17 +634,18 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
         branch: decodedBranch,
       });
 
-      sendSSE('error', { error: errorMessage });
+      writer.writeNamedEvent('error', { error: errorMessage });
     }
 
-    res.end();
+    writer.end();
   } catch (error) {
     logger.error('liveChat', 'Failed to execute live chat', { error });
     if (!res.headersSent) {
       sendInternalError(res, 'Failed to execute');
     } else {
       // SSE already started - send error in event format
-      res.write(`event: error\ndata: ${JSON.stringify({ error: 'Execution failed' })}\n\n`);
+      const sseHelper = ServiceProvider.get(ASseHelper);
+      sseHelper.writeNamedEvent(res, 'error', { error: 'Execution failed' });
       res.end();
     }
   }

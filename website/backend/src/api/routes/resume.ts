@@ -11,13 +11,52 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events, eq, and, or, asc } from '@webedt/shared';
+import { db, chatSessions, events, eq, and, or, asc, gt } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { sseRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
+
+/**
+ * @openapi
+ * tags:
+ *   - name: Resume
+ *     description: Session event replay and live streaming (deprecated - use Sessions API)
+ */
+
+/**
+ * @openapi
+ * /resume/resume/{sessionId}:
+ *   get:
+ *     tags:
+ *       - Resume
+ *     summary: Replay session events (deprecated)
+ *     description: |
+ *       DEPRECATED: Use GET /api/sessions/:id/events/stream instead.
+ *       Replays stored events and subscribes to live events for running sessions.
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: SSE stream of session events
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
 
 /**
  * GET /resume/:sessionId
@@ -34,16 +73,22 @@ const router = Router();
  * 3. Replay stored events from database
  * 4. Subscribe to live events if session is still running
  */
-router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response) => {
+router.get('/resume/:sessionId', requireAuth, sseRateLimiter, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { sessionId } = req.params;
+
+  // Support Last-Event-ID for reliable resumption after reconnection
+  // Client can provide this via query param or header
+  const lastEventId = (req.query.lastEventId as string) || req.headers['last-event-id'] as string;
+  const lastEventDbId = lastEventId ? parseInt(lastEventId, 10) : null;
 
   try {
     logger.info('Resume request received', {
       component: 'ResumeRoute',
       sessionId,
-      userId: user.id
+      userId: user.id,
+      lastEventId: lastEventId || 'none',
     });
 
     // Load session from database - support both UUID and sessionPath lookups
@@ -67,6 +112,7 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
     }
 
     const session = existingSessions[0];
+    const correlationId = req.correlationId;
 
     logger.info('Session found', {
       component: 'ResumeRoute',
@@ -74,12 +120,13 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       status: session.status
     });
 
-    // Setup SSE response
+    // Setup SSE response with correlation ID header
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
+      'X-Accel-Buffering': 'no',
+      'X-Request-ID': correlationId,
     });
 
     // Send submission preview event immediately so user sees their request was received
@@ -97,6 +144,7 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       message: previewText,
       source: 'internal-api-server:/resume',
       timestamp: new Date().toISOString(),
+      requestId: correlationId,
       data: {
         sessionId: session.id,
         sessionName,
@@ -164,26 +212,38 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
     }
 
     // Replay stored events from database
-    const storedEvents = await db
-      .select()
-      .from(events)
-      .where(eq(events.chatSessionId, session.id))
-      .orderBy(asc(events.id));
+    // If lastEventId is provided, resume from that event (skip already-received events)
+    const eventQuery = lastEventDbId && !isNaN(lastEventDbId)
+      ? db
+          .select()
+          .from(events)
+          .where(and(eq(events.chatSessionId, session.id), gt(events.id, lastEventDbId)))
+          .orderBy(asc(events.id))
+      : db
+          .select()
+          .from(events)
+          .where(eq(events.chatSessionId, session.id))
+          .orderBy(asc(events.id));
+
+    const storedEvents = await eventQuery;
 
     logger.info('Replaying stored events', {
       component: 'ResumeRoute',
       sessionId: session.id,
-      eventCount: storedEvents.length
+      eventCount: storedEvents.length,
+      fromEventId: lastEventDbId || 'start',
     });
 
-    // Send replay start marker
+    // Send replay start marker with event ID for tracking
+    res.write(`id: replay_start\n`);
     res.write(`data: ${JSON.stringify({
       type: 'replay_start',
       totalEvents: storedEvents.length,
+      resumedFromEventId: lastEventDbId || null,
       timestamp: new Date().toISOString()
     })}\n\n`);
 
-    // Replay each event
+    // Replay each event with event ID for Last-Event-ID tracking
     for (const event of storedEvents) {
       // Add replay flag to distinguish from live events
       const eventData = {
@@ -192,13 +252,17 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
         _originalTimestamp: event.timestamp
       };
 
+      // Include event ID so client can track for reliable resumption
+      res.write(`id: ${event.id}\n`);
       res.write(`data: ${JSON.stringify(eventData)}\n\n`);
     }
 
     // Send replay end marker
+    res.write(`id: replay_end\n`);
     res.write(`data: ${JSON.stringify({
       type: 'replay_end',
       totalEvents: storedEvents.length,
+      lastEventId: storedEvents.length > 0 ? storedEvents[storedEvents.length - 1].id : null,
       timestamp: new Date().toISOString()
     })}\n\n`);
 
@@ -216,7 +280,8 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       userRequest: session.userRequest,
       createdAt: session.createdAt,
       completedAt: session.completedAt,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      requestId: correlationId,
     })}\n\n`);
 
     // For running sessions, subscribe to live events from the broadcaster
@@ -317,9 +382,48 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
 });
 
 /**
- * GET /sessions/:sessionId/events
- *
- * Get all stored events for a session (non-SSE, JSON response)
+ * @openapi
+ * /resume/sessions/{sessionId}/events:
+ *   get:
+ *     tags:
+ *       - Resume
+ *     summary: Get session events
+ *     description: Returns all stored events for a session as JSON (non-SSE).
+ *     parameters:
+ *       - name: sessionId
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Events retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     events:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *                     sessionId:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
 router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;

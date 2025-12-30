@@ -16,7 +16,37 @@ export type {
   ExecutionEvent,
   ExecutionEventType,
   ExecutionEventCallback,
+  ProviderCapabilities,
+  // Discriminated union types for type-safe event handling
+  TypedExecutionEvent,
+  ConnectedEvent,
+  MessageEvent,
+  AssistantMessageEvent,
+  SessionNameEvent,
+  SessionCreatedEvent,
+  TitleGenerationEvent,
+  CompletedEvent,
+  ErrorEvent,
+  InputPreviewEvent,
+  InterruptedEvent,
+  UserEvent,
+  AssistantEvent,
+  ToolUseEvent,
+  ToolResultEvent,
+  ResultEvent,
+  EnvManagerLogEvent,
+  SystemEvent,
+  TextEvent,
+  MessageStartEvent,
+  MessageDeltaEvent,
+  MessageCompleteEvent,
 } from './types.js';
+
+// Export abstract base class for providers
+export { AExecutionProvider } from './types.js';
+
+// Export type guard and exhaustive check helpers
+export { isEventType, assertNeverEventType } from './types.js';
 export type { SelfHostedWorkerConfig } from './selfHostedWorkerProvider.js';
 export type { GeminiResumeParams } from './geminiProvider.js';
 export type { CodexExecuteParams, CodexResumeParams } from './codexRemoteProvider.js';

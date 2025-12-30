@@ -11,6 +11,78 @@ import { logCapture, logger } from '@webedt/shared';
 const router = Router();
 
 /**
+ * @openapi
+ * tags:
+ *   - name: Logs
+ *     description: Server log debugging (development only)
+ */
+
+/**
+ * @openapi
+ * /logs/logs:
+ *   get:
+ *     tags:
+ *       - Logs
+ *     summary: Get server logs
+ *     security: []
+ *     parameters:
+ *       - name: level
+ *         in: query
+ *         schema:
+ *           type: string
+ *           enum: [debug, info, warn, error]
+ *       - name: component
+ *         in: query
+ *         schema:
+ *           type: string
+ *       - name: sessionId
+ *         in: query
+ *         schema:
+ *           type: string
+ *       - name: since
+ *         in: query
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *           maximum: 1000
+ *     responses:
+ *       200:
+ *         description: Logs retrieved
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ *   delete:
+ *     tags:
+ *       - Logs
+ *     summary: Clear logs
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Logs cleared
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
+ * @openapi
+ * /logs/logs/status:
+ *   get:
+ *     tags:
+ *       - Logs
+ *     summary: Get log capture status
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Status retrieved
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+
+/**
  * GET /api/logs
  * Returns captured server logs with optional filtering
  *

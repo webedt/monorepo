@@ -15,6 +15,9 @@ import {
   ClaudeWebClient,
   getGitHubCredentials,
   getClaudeCredentials,
+  shouldRefreshClaudeToken,
+  DaemonTokenRefreshService,
+  GitHubRateLimiter,
 } from '@webedt/shared';
 
 import type { ClaudeAuth } from '@webedt/shared';
@@ -23,6 +26,20 @@ import type { ReviewIssue } from '@webedt/shared';
 import type { ProjectItem } from '@webedt/shared';
 import type { AutoTaskCommentInfo } from '@webedt/shared';
 
+/**
+ * Default poll interval: 5 minutes
+ * This is a reasonable default that balances responsiveness with rate limit considerations.
+ *
+ * GitHub rate limits:
+ * - Primary: 5,000 requests/hour (authenticated)
+ * - Secondary: 80 content-creation/min, 500/hr
+ * - GraphQL: 5,000 points/hour
+ *
+ * With a 5-minute poll interval:
+ * - ~12 cycles/hour
+ * - Each cycle makes ~10-20 API calls (varies with task count)
+ * - Well under the 5,000/hour limit
+ */
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export const daemonCommand = new Command('daemon')
@@ -35,11 +52,13 @@ export const daemonCommand = new Command('daemon')
   .option('--once', 'Run once and exit')
   .option('--max-ready <n>', 'Max tasks in Ready column', parseInt)
   .option('--max-in-progress <n>', 'Max tasks in In Progress', parseInt)
+  .option('--no-discover', 'Disable task discovery (only process existing tasks)')
   .action(async (options) => {
     const rootDir = path.resolve(options.root);
     const pollInterval = options.pollInterval || POLL_INTERVAL_MS;
     const maxReady = options.maxReady || 6;
     const maxInProgress = options.maxInProgress || 6;
+    const enableDiscovery = options.discover !== false;
 
     console.log('\nAuto-Task Daemon Starting');
     console.log('='.repeat(60));
@@ -64,6 +83,7 @@ export const daemonCommand = new Command('daemon')
     console.log(`Project: #${options.project}`);
     console.log(`Poll interval: ${pollInterval / 1000}s`);
     console.log(`Max Ready: ${maxReady}, Max In Progress: ${maxInProgress}`);
+    console.log(`Task discovery: ${enableDiscovery ? 'enabled' : 'disabled'}`);
     console.log('');
 
     // Initialize services
@@ -83,6 +103,19 @@ export const daemonCommand = new Command('daemon')
       ),
     };
 
+    console.log('Project columns:', Object.keys(projectCache.statusOptions).join(', '));
+
+    // Initialize token refresh service
+    const tokenRefreshService = new DaemonTokenRefreshService();
+
+    // Initialize rate limiter for GitHub API calls
+    const rateLimiter = new GitHubRateLimiter({
+      mutationDelayMs: 1000, // 1 second between mutations
+      maxMutationsPerMinute: 60, // Conservative (GitHub allows 80)
+      maxMutationsPerHour: 400, // Conservative (GitHub allows 500)
+      primaryLimitBuffer: 100, // Keep buffer before hitting 5000/hr limit
+    });
+
     const context: DaemonContext = {
       rootDir,
       owner,
@@ -94,6 +127,13 @@ export const daemonCommand = new Command('daemon')
       githubToken: githubCreds.token,
       maxReady,
       maxInProgress,
+      enableDiscovery,
+      tokenRefreshService,
+      pollInterval: pollInterval,
+      basePollInterval: pollInterval,
+      refreshFailureCount: 0,
+      issueCooldowns: new Map(),
+      rateLimiter,
     };
 
     // Main loop
@@ -111,6 +151,9 @@ export const daemonCommand = new Command('daemon')
 
     while (running) {
       try {
+        // Check and refresh token at start of each cycle
+        await refreshTokenIfNeeded(context);
+
         await runDaemonCycle(context);
       } catch (error) {
         console.error('Daemon cycle error:', error);
@@ -121,12 +164,42 @@ export const daemonCommand = new Command('daemon')
         break;
       }
 
-      console.log(`\nSleeping for ${pollInterval / 1000}s...`);
-      await sleep(pollInterval);
+      console.log(`\nSleeping for ${context.pollInterval / 1000}s...`);
+      await sleep(context.pollInterval);
     }
 
     console.log('\nDaemon stopped.');
   });
+
+/**
+ * Tracks cooldown state for an issue to prevent re-processing too quickly
+ */
+interface IssueCooldown {
+  /** Timestamp when the action was taken */
+  actionTime: Date;
+  /** What action was taken */
+  action: 'conflict_resolution' | 'review_started' | 'task_started' | 'rework_started';
+  /** Number of cycles we've been waiting */
+  cycleCount: number;
+  /** Session ID associated with this action (if any) */
+  sessionId?: string;
+}
+
+/** Default number of cycles to wait before re-checking an issue */
+const DEFAULT_COOLDOWN_CYCLES = 3;
+
+/**
+ * Maximum time (ms) a session can be "running" before considered stuck.
+ * This is the PRIMARY stuck detection mechanism.
+ * Set to 30 minutes to give Claude enough time to work.
+ */
+const MAX_RUNNING_TIME_MS = 30 * 60 * 1000;
+
+/**
+ * Number of failed attempts before deprioritizing an issue.
+ * After this many timeouts/failures, the issue will be moved to the bottom of backlog.
+ */
+const MAX_FAILURE_ATTEMPTS = 3;
 
 interface DaemonContext {
   rootDir: string;
@@ -143,6 +216,167 @@ interface DaemonContext {
   githubToken: string;
   maxReady: number;
   maxInProgress: number;
+  /** Whether to discover new tasks (TODOs and AI discovery) */
+  enableDiscovery: boolean;
+  /** Service for refreshing Claude tokens */
+  tokenRefreshService: DaemonTokenRefreshService;
+  /** Current poll interval (may increase with backoff on refresh failures) */
+  pollInterval: number;
+  /** Base poll interval (the original value to restore after success) */
+  basePollInterval: number;
+  /** Count of consecutive token refresh failures */
+  refreshFailureCount: number;
+  /** Tracks cooldown state for issues to prevent re-processing too quickly */
+  issueCooldowns: Map<number, IssueCooldown>;
+  /** Rate limiter for GitHub API calls */
+  rateLimiter: GitHubRateLimiter;
+}
+
+/**
+ * Execute a GitHub API call with rate limiting.
+ * @param ctx - Daemon context containing the rate limiter
+ * @param fn - Async function to execute
+ * @param isMutation - Whether this is a mutation (write) operation
+ * @returns Result of the function call
+ */
+async function withGitHubRateLimit<T>(
+  ctx: DaemonContext,
+  fn: () => Promise<T>,
+  isMutation: boolean = false
+): Promise<T> {
+  await ctx.rateLimiter.waitForSlot(isMutation);
+  try {
+    return await fn();
+  } catch (error) {
+    // Check for rate limit errors
+    if (error && typeof error === 'object' && 'status' in error) {
+      const status = (error as { status: number }).status;
+      if (status === 403 || status === 429) {
+        const headers =
+          'headers' in error ? (error as { headers: Record<string, string> }).headers : {};
+        ctx.rateLimiter.handleRateLimitError(status, headers);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Check if token needs refresh and refresh if needed.
+ * Implements exponential backoff on failures.
+ */
+async function refreshTokenIfNeeded(ctx: DaemonContext): Promise<void> {
+  if (!ctx.claudeAuth) {
+    return; // No credentials to refresh
+  }
+
+  // Check if token needs refresh
+  if (!shouldRefreshClaudeToken(ctx.claudeAuth)) {
+    // Token is still valid - reset backoff if we had failures
+    if (ctx.refreshFailureCount > 0) {
+      console.log('   Token valid, resetting poll interval');
+      ctx.pollInterval = ctx.basePollInterval;
+      ctx.refreshFailureCount = 0;
+    }
+    return;
+  }
+
+  console.log('\n--- Token Refresh ---');
+  console.log(`Token expires soon, attempting refresh...`);
+  console.log(`Source: ${ctx.claudeAuth.source || 'unknown'}`);
+
+  try {
+    const refreshedAuth = await ctx.tokenRefreshService.ensureValidToken(ctx.claudeAuth);
+
+    // Update context with new tokens
+    ctx.claudeAuth = refreshedAuth;
+
+    // Reset backoff on success
+    if (ctx.refreshFailureCount > 0) {
+      console.log('   Token refresh succeeded, resetting poll interval');
+      ctx.pollInterval = ctx.basePollInterval;
+      ctx.refreshFailureCount = 0;
+    }
+
+    const expiryDate = refreshedAuth.expiresAt ? new Date(refreshedAuth.expiresAt).toISOString() : 'unknown';
+    console.log(`   Token refreshed successfully, new expiry: ${expiryDate}`);
+  } catch (error) {
+    // Increment failure count and apply backoff
+    ctx.refreshFailureCount++;
+    const backoffMultiplier = Math.pow(2, Math.min(ctx.refreshFailureCount, 4)); // Cap at 16x
+    ctx.pollInterval = ctx.basePollInterval * backoffMultiplier;
+
+    console.warn(`   Token refresh failed (attempt ${ctx.refreshFailureCount})`);
+    console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`   Poll interval increased to ${ctx.pollInterval / 1000}s (${backoffMultiplier}x backoff)`);
+
+    // Log specific guidance based on source
+    if (ctx.claudeAuth.source === 'environment') {
+      console.warn('   Note: Tokens from environment variables cannot be auto-refreshed.');
+      console.warn('   Update CLAUDE_ACCESS_TOKEN and restart the daemon.');
+    } else if (ctx.claudeAuth.source === 'cli-option') {
+      console.warn('   Note: Tokens from CLI options cannot be auto-refreshed.');
+      console.warn('   Restart the daemon with a fresh --token value.');
+    }
+  }
+}
+
+/**
+ * Increment cycle counts for all active cooldowns
+ */
+function incrementCooldownCycles(ctx: DaemonContext): void {
+  for (const [issueNumber, cooldown] of ctx.issueCooldowns.entries()) {
+    cooldown.cycleCount++;
+
+    // Clean up old cooldowns (after 1 hour of cycles)
+    // At 5s intervals, that's 720 cycles
+    if (cooldown.cycleCount > 720) {
+      ctx.issueCooldowns.delete(issueNumber);
+    }
+  }
+}
+
+/**
+ * Check if an issue is in cooldown (should be skipped this cycle)
+ */
+function isInCooldown(ctx: DaemonContext, issueNumber: number): boolean {
+  const cooldown = ctx.issueCooldowns.get(issueNumber);
+  if (!cooldown) return false;
+
+  return cooldown.cycleCount < DEFAULT_COOLDOWN_CYCLES;
+}
+
+
+/**
+ * Set cooldown for an issue
+ */
+function setCooldown(
+  ctx: DaemonContext,
+  issueNumber: number,
+  action: IssueCooldown['action'],
+  sessionId?: string
+): void {
+  ctx.issueCooldowns.set(issueNumber, {
+    actionTime: new Date(),
+    action,
+    cycleCount: 0,
+    sessionId,
+  });
+}
+
+/**
+ * Clear cooldown for an issue (operation completed successfully)
+ */
+function clearCooldown(ctx: DaemonContext, issueNumber: number): void {
+  ctx.issueCooldowns.delete(issueNumber);
+}
+
+/**
+ * Check if a session has been running too long (30 min timeout)
+ */
+function isSessionTimedOut(startTime: Date): boolean {
+  const elapsed = Date.now() - startTime.getTime();
+  return elapsed > MAX_RUNNING_TIME_MS;
 }
 
 async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
@@ -150,27 +384,36 @@ async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
 
   console.log('\n--- Daemon Cycle ---');
   console.log(new Date().toISOString());
+  console.log(`Rate limit: ${ctx.rateLimiter.getSummary()}`);
+
+  // Increment cycle counts for all active cooldowns
+  incrementCooldownCycles(ctx);
 
   // Get current project items from GitHub (source of truth)
   console.log('\nFetching project items from GitHub...');
-  const itemsByStatus = await projectsService.getItemsByStatus(projectCache.projectId);
+  const itemsByStatus = await withGitHubRateLimit(ctx, () =>
+    projectsService.getItemsByStatus(projectCache.projectId)
+  );
 
-  // Print current state
+  // Print current state - normalize status names to lowercase for lookup
   const statusCounts: Record<string, number> = {};
+  const normalizedItemsByStatus = new Map<string, ProjectItem[]>();
   for (const [status, items] of itemsByStatus) {
-    statusCounts[status] = items.length;
+    const normalizedStatus = status.toLowerCase();
+    statusCounts[normalizedStatus] = items.length;
+    normalizedItemsByStatus.set(normalizedStatus, items);
   }
   console.log('Current status:', Object.entries(statusCounts).map(([k, v]) => `${k}:${v}`).join(' '));
 
-  // Get items by column
-  const backlog = itemsByStatus.get('backlog') || [];
-  const ready = itemsByStatus.get('ready') || [];
-  const inProgress = itemsByStatus.get('in progress') || [];
-  const inReview = itemsByStatus.get('in review') || [];
+  // Get items by column (using normalized lowercase keys)
+  const backlog = normalizedItemsByStatus.get('backlog') || [];
+  const ready = normalizedItemsByStatus.get('ready') || [];
+  const inProgress = normalizedItemsByStatus.get('in progress') || [];
+  const inReview = normalizedItemsByStatus.get('in review') || [];
 
   // Step 1: Discover new tasks (create issues, add to backlog)
   console.log('\n1. Discovering tasks...');
-  await discoverAndSync(ctx, backlog.length);
+  await discoverAndSync(ctx, backlog.length, ready.length, maxReady);
 
   // Step 2: Move backlog -> ready (top items up to maxReady)
   console.log('\n2. Moving tasks to Ready...');
@@ -189,8 +432,19 @@ async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
   await reviewCompletedTasks(ctx, inReview);
 }
 
-async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promise<void> {
-  const { rootDir, owner, repo, issuesService, projectsService, projectCache } = ctx;
+async function discoverAndSync(
+  ctx: DaemonContext,
+  backlogCount: number,
+  readyCount: number,
+  maxReady: number
+): Promise<void> {
+  const { rootDir, owner, repo, issuesService, projectsService, projectCache, claudeAuth, enableDiscovery } = ctx;
+
+  // Skip discovery if disabled
+  if (!enableDiscovery) {
+    console.log('   Task discovery disabled');
+    return;
+  }
 
   // Check throttling
   if (backlogCount > 10) {
@@ -201,37 +455,50 @@ async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promis
   const todos = await todoScanner.scan(rootDir);
 
   // Get existing issues with auto-task label
-  const existingIssues = await issuesService.listIssues(owner, repo, {
-    labels: ['auto-task'],
-    state: 'open',
-  });
+  const existingIssues = await withGitHubRateLimit(ctx, () =>
+    issuesService.listIssues(owner, repo, {
+      labels: ['auto-task'],
+      state: 'open',
+    })
+  );
   const existingTitles = new Set(existingIssues.map((i) => i.title));
 
-  // Find new tasks
+  // Find new tasks from TODO comments
   let created = 0;
   for (const todo of todos) {
     const title = `[${todo.type.toUpperCase()}] ${todo.text.slice(0, 80)}`;
     if (existingTitles.has(title)) continue;
 
     try {
-      const issue = await issuesService.createIssue(owner, repo, {
-        title,
-        body: `**File:** \`${todo.file}:${todo.line}\`\n\n${todo.text}\n\n---\n*Created by auto-task*`,
-        labels: ['auto-task', todo.type],
-      });
+      const issue = await withGitHubRateLimit(
+        ctx,
+        () =>
+          issuesService.createIssue(owner, repo, {
+            title,
+            body: `**File:** \`${todo.file}:${todo.line}\`\n\n${todo.text}\n\n---\n*Created by auto-task*`,
+            labels: ['auto-task', todo.type],
+          }),
+        true
+      );
 
-      const { itemId } = await projectsService.addItemToProject(
-        projectCache.projectId,
-        issue.nodeId
+      const { itemId } = await withGitHubRateLimit(
+        ctx,
+        () => projectsService.addItemToProject(projectCache.projectId, issue.nodeId),
+        true
       );
 
       const backlogId = projectCache.statusOptions['backlog'];
       if (backlogId) {
-        await projectsService.updateItemStatus(
-          projectCache.projectId,
-          itemId,
-          projectCache.statusFieldId,
-          backlogId
+        await withGitHubRateLimit(
+          ctx,
+          () =>
+            projectsService.updateItemStatus(
+              projectCache.projectId,
+              itemId,
+              projectCache.statusFieldId,
+              backlogId
+            ),
+          true
         );
       }
 
@@ -242,7 +509,204 @@ async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promis
     }
   }
 
-  console.log(`   Created ${created} new issues`);
+  console.log(`   Created ${created} new issues from TODOs`);
+
+  // If backlog is empty, ready queue is not full, and no TODOs found, use Claude to discover new tasks
+  const totalPending = backlogCount + readyCount;
+  if (totalPending < maxReady && created === 0 && claudeAuth) {
+    console.log(`   Backlog empty, triggering AI task discovery...`);
+    await discoverTasksWithClaude(ctx, maxReady - totalPending, existingTitles);
+  }
+}
+
+/**
+ * Use Claude to analyze the codebase and discover new tasks
+ */
+async function discoverTasksWithClaude(
+  ctx: DaemonContext,
+  numTasks: number,
+  existingTitles: Set<string>
+): Promise<void> {
+  const { owner, repo, issuesService, projectsService, projectCache, claudeAuth, githubToken } = ctx;
+
+  if (!claudeAuth) {
+    console.log('   Skipping AI discovery: No Claude credentials');
+    return;
+  }
+
+  const environmentId = process.env.CLAUDE_ENVIRONMENT_ID;
+  if (!environmentId) {
+    console.log('   Skipping AI discovery: CLAUDE_ENVIRONMENT_ID not set');
+    return;
+  }
+
+  const claudeClient = new ClaudeWebClient({
+    accessToken: claudeAuth.accessToken,
+    environmentId,
+  });
+
+  let sessionId: string | undefined;
+
+  try {
+    const gitUrl = `https://github.com/${owner}/${repo}`;
+
+    const prompt = `Analyze this codebase and suggest ${numTasks} high-value tasks that would improve the project.
+
+Focus on:
+1. Code quality improvements (refactoring, removing duplication)
+2. Missing features based on existing patterns
+3. Test coverage gaps
+4. Documentation improvements
+5. Performance optimizations
+6. Security improvements
+
+For each task, provide:
+- A clear, actionable title (prefix with [SPEC] for features, [TODO] for improvements, [BUG] for fixes)
+- A brief description of what needs to be done
+- Why it would be valuable
+
+Format your response as a JSON array:
+\`\`\`json
+[
+  {
+    "title": "[SPEC] Feature name:: Brief description",
+    "body": "Detailed description of what needs to be done and why it's valuable."
+  }
+]
+\`\`\`
+
+Note: Existing tasks are: ${Array.from(existingTitles).slice(0, 20).join(', ')}
+Do NOT suggest tasks that duplicate these existing ones.`;
+
+    console.log('   Starting AI task discovery session...');
+    const result = await claudeClient.createSession({
+      prompt,
+      gitUrl,
+      title: 'Auto-task discovery',
+    });
+    sessionId = result.sessionId;
+
+    console.log(`   Discovery session: ${result.webUrl}`);
+
+    // Wait for the session to complete (with timeout)
+    const maxWaitMs = 5 * 60 * 1000; // 5 minutes
+    const startTime = Date.now();
+    let sessionComplete = false;
+    let lastResult: string | undefined;
+
+    while (!sessionComplete && Date.now() - startTime < maxWaitMs) {
+      await sleep(10000); // Check every 10 seconds
+
+      const session = await claudeClient.getSession(sessionId);
+      if (session.session_status === 'idle' || session.session_status === 'completed') {
+        sessionComplete = true;
+        // Get the session events to find the response
+        const events = await claudeClient.getEvents(sessionId);
+        for (const event of events.data.reverse()) {
+          if (event.type === 'result' || event.type === 'assistant') {
+            const content = typeof event.message?.content === 'string'
+              ? event.message.content
+              : Array.isArray(event.message?.content)
+                ? event.message.content.map((c: { text?: string }) => c.text || '').join('')
+                : '';
+            if (content.includes('[')) {
+              lastResult = content;
+              break;
+            }
+          }
+        }
+      } else if (session.session_status === 'failed' || session.session_status === 'archived') {
+        console.log(`   Discovery session ${session.session_status}`);
+        return;
+      }
+    }
+
+    if (!sessionComplete) {
+      console.log('   Discovery session timed out');
+      return;
+    }
+
+    // Parse the response
+    if (!lastResult) {
+      console.log('   No tasks discovered');
+      return;
+    }
+
+    // Extract JSON from the response
+    const jsonMatch = lastResult.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      console.log('   Could not parse discovery response');
+      return;
+    }
+
+    let tasks: Array<{ title: string; body: string }>;
+    try {
+      tasks = JSON.parse(jsonMatch[1]);
+    } catch {
+      console.log('   Invalid JSON in discovery response');
+      return;
+    }
+
+    // Create issues for discovered tasks
+    let created = 0;
+    for (const task of tasks) {
+      if (existingTitles.has(task.title)) continue;
+
+      try {
+        const issue = await withGitHubRateLimit(
+          ctx,
+          () =>
+            issuesService.createIssue(owner, repo, {
+              title: task.title,
+              body: `${task.body}\n\n---\n*Discovered by auto-task AI*`,
+              labels: ['auto-task', 'ai-discovered'],
+            }),
+          true
+        );
+
+        const { itemId } = await withGitHubRateLimit(
+          ctx,
+          () => projectsService.addItemToProject(projectCache.projectId, issue.nodeId),
+          true
+        );
+
+        const backlogId = projectCache.statusOptions['backlog'];
+        if (backlogId) {
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              projectsService.updateItemStatus(
+                projectCache.projectId,
+                itemId,
+                projectCache.statusFieldId,
+                backlogId
+              ),
+            true
+          );
+        }
+
+        console.log(`   Created AI-discovered issue #${issue.number}: ${task.title.slice(0, 50)}...`);
+        existingTitles.add(task.title);
+        created++;
+      } catch (error) {
+        console.error(`   Failed to create issue: ${error}`);
+      }
+    }
+
+    console.log(`   Created ${created} AI-discovered issues`);
+  } catch (error) {
+    console.error(`   AI discovery failed: ${error}`);
+  } finally {
+    // Always archive the discovery session when finished (success, failure, or timeout)
+    if (sessionId) {
+      try {
+        await claudeClient.archiveSession(sessionId);
+        console.log(`   Discovery session archived`);
+      } catch {
+        // Ignore archive errors
+      }
+    }
+  }
 }
 
 async function moveBacklogToReady(
@@ -251,7 +715,7 @@ async function moveBacklogToReady(
   readyCount: number,
   maxReady: number
 ): Promise<void> {
-  const { projectsService, projectCache } = ctx;
+  const { projectsService, projectCache, issuesService, owner, repo } = ctx;
 
   const slotsAvailable = maxReady - readyCount;
 
@@ -260,12 +724,38 @@ async function moveBacklogToReady(
     return;
   }
 
-  // Sort by issue number (lower = older = higher priority) since we don't have priority stored
-  // Could also sort by labels or other criteria
-  const toMove = backlog
-    .filter((item) => item.contentType === 'Issue' && item.number)
-    .sort((a, b) => (a.number || 0) - (b.number || 0))
-    .slice(0, slotsAvailable);
+  // Filter to issues only
+  const backlogIssues = backlog.filter((item) => item.contentType === 'Issue' && item.number);
+
+  if (backlogIssues.length === 0) {
+    console.log('   No items in backlog');
+    return;
+  }
+
+  // Get failure counts for backlog items (from GitHub comments)
+  const issueFailureCounts = new Map<number, number>();
+  for (const item of backlogIssues) {
+    if (!item.number) continue;
+    try {
+      const taskInfo = await withGitHubRateLimit(ctx, () =>
+        issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+      );
+      issueFailureCounts.set(item.number, taskInfo?.failureCount || 0);
+    } catch {
+      issueFailureCounts.set(item.number, 0);
+    }
+  }
+
+  // Sort by: 1) failure count (lower first), 2) issue number (lower = older = higher priority)
+  // This ensures items that keep failing get deprioritized
+  const sorted = backlogIssues.sort((a, b) => {
+    const failA = issueFailureCounts.get(a.number!) || 0;
+    const failB = issueFailureCounts.get(b.number!) || 0;
+    if (failA !== failB) return failA - failB; // Lower failures first
+    return (a.number || 0) - (b.number || 0); // Then by issue number
+  });
+
+  const toMove = sorted.slice(0, slotsAvailable);
 
   const readyId = projectCache.statusOptions['ready'];
   if (!readyId) {
@@ -274,14 +764,20 @@ async function moveBacklogToReady(
   }
 
   for (const item of toMove) {
+    const failures = issueFailureCounts.get(item.number!) || 0;
     try {
-      await projectsService.updateItemStatus(
-        projectCache.projectId,
-        item.id,
-        projectCache.statusFieldId,
-        readyId
+      await withGitHubRateLimit(
+        ctx,
+        () =>
+          projectsService.updateItemStatus(
+            projectCache.projectId,
+            item.id,
+            projectCache.statusFieldId,
+            readyId
+          ),
+        true
       );
-      console.log(`   Moved #${item.number} to Ready`);
+      console.log(`   Moved #${item.number} to Ready${failures > 0 ? ` (${failures} prior failures)` : ''}`);
     } catch (error) {
       console.error(`   Failed to move task: ${error}`);
     }
@@ -337,19 +833,28 @@ async function startTasks(
 
     try {
       // Update status in GitHub Project
-      await projectsService.updateItemStatus(
-        projectCache.projectId,
-        item.id,
-        projectCache.statusFieldId,
-        inProgressId
+      await withGitHubRateLimit(
+        ctx,
+        () =>
+          projectsService.updateItemStatus(
+            projectCache.projectId,
+            item.id,
+            projectCache.statusFieldId,
+            inProgressId
+          ),
+        true
       );
 
       // Get issue details for prompt
-      const issue = await issuesService.getIssue(owner, repo, item.number);
+      const issue = await withGitHubRateLimit(ctx, () =>
+        issuesService.getIssue(owner, repo, item.number!)
+      );
       const gitUrl = `https://github.com/${owner}/${repo}`;
 
       // Check if this is a re-work by looking at previous comments
-      const previousInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      const previousInfo = await withGitHubRateLimit(ctx, () =>
+        issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+      );
       const isRework = previousInfo?.branchName && previousInfo?.prNumber;
 
       console.log(`   Starting #${item.number}: ${item.title.slice(0, 40)}...`);
@@ -409,12 +914,19 @@ async function startTasks(
 
       console.log(`   View at: ${webUrl}`);
 
+      // Set cooldown immediately so checkInProgressTasks doesn't timeout this session prematurely
+      setCooldown(ctx, item.number, isRework ? 'rework_started' : 'task_started', sessionId);
+
       // Add comment to issue with session link (this IS our session tracking)
       const commentBody = isRework && previousInfo
         ? `### 🔄 Re-work\n\nAddressing code review feedback (resuming session).\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${previousInfo.branchName}\`\n**PR:** #${previousInfo.prNumber}`
         : `### 🤖 Auto-Task Started\n\nClaude is working on this issue.\n\n**Session:** [View in Claude](${webUrl})`;
 
-      await issuesService.addComment(owner, repo, item.number, commentBody);
+      await withGitHubRateLimit(
+        ctx,
+        () => issuesService.addComment(owner, repo, item.number!, commentBody),
+        true
+      );
 
     } catch (error) {
       console.error(`   Failed to start task: ${error}`);
@@ -559,7 +1071,9 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
     if (!item.number) continue;
 
     // Get session info from GitHub comments
-    const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+    const taskInfo = await withGitHubRateLimit(ctx, () =>
+      issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+    );
     if (!taskInfo?.sessionId) {
       console.log(`   #${item.number}: No session ID found in comments, skipping`);
       continue;
@@ -602,11 +1116,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
               console.log(`   Failed to create PR, moving to backlog`);
 
               if (backlogId) {
-                await projectsService.updateItemStatus(
-                  projectCache.projectId,
-                  item.id,
-                  projectCache.statusFieldId,
-                  backlogId
+                await withGitHubRateLimit(
+                  ctx,
+                  () =>
+                    projectsService.updateItemStatus(
+                      projectCache.projectId,
+                      item.id,
+                      projectCache.statusFieldId,
+                      backlogId
+                    ),
+                  true
                 );
               }
               continue;
@@ -617,21 +1136,38 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
 
           // Move to In Review
           if (inReviewId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              inReviewId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  inReviewId
+                ),
+              true
             );
           }
           console.log(`   Moved to In Review`);
 
-          // Add comment to issue with branch/PR info (for future lookups)
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}\n\nThe PR is now being reviewed.`
+          // Extract implementation summary from the session
+          const implementationSummary = extractImplementationSummary(events.data);
+
+          // Add comment to issue with branch/PR info and implementation summary
+          const summarySection = implementationSummary
+            ? `\n\n<details>\n<summary>Implementation Details</summary>\n\n${implementationSummary}\n\n</details>`
+            : '';
+
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}${summarySection}\n\nThe PR is now being reviewed.`
+              ),
+            true
           );
         } else {
           // No branch created - session failed to produce output
@@ -646,40 +1182,60 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           console.log(`   ${errorMsg}, moving back to backlog`);
 
           if (backlogId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              backlogId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  backlogId
+                ),
+              true
             );
           }
 
           // Add failure comment
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ⚠️ Session Issue\n\n${errorMsg}\n\nTask moved back to backlog and will be retried.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ⚠️ Session Issue\n\n${errorMsg}\n\nTask moved back to backlog and will be retried.`
+              ),
+            true
           );
         }
       } else if (session.session_status === 'failed') {
         console.log(`   Session failed, moving back to backlog`);
 
         if (backlogId) {
-          await projectsService.updateItemStatus(
-            projectCache.projectId,
-            item.id,
-            projectCache.statusFieldId,
-            backlogId
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              projectsService.updateItemStatus(
+                projectCache.projectId,
+                item.id,
+                projectCache.statusFieldId,
+                backlogId
+              ),
+            true
           );
         }
 
         // Add failure comment
-        await issuesService.addComment(
-          owner,
-          repo,
-          item.number,
-          `### ❌ Session Failed\n\nThe Claude session failed to complete.\n\nTask moved back to backlog and will be retried.`
+        await withGitHubRateLimit(
+          ctx,
+          () =>
+            issuesService.addComment(
+              owner,
+              repo,
+              item.number!,
+              `### ❌ Session Failed\n\nThe Claude session failed to complete.\n\nTask moved back to backlog and will be retried.`
+            ),
+          true
         );
       } else if (session.session_status === 'archived') {
         // Session was archived - check if there's a PR to review
@@ -689,11 +1245,16 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           // Has PR - move to In Review
           console.log(`   PR #${taskInfo.prNumber} exists, moving to In Review`);
           if (inReviewId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              inReviewId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  inReviewId
+                ),
+              true
             );
           }
         } else {
@@ -701,24 +1262,94 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           console.log(`   No PR found, moving to Ready for re-work`);
           const readyId = projectCache.statusOptions['ready'];
           if (readyId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              readyId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  readyId
+                ),
+              true
             );
           }
 
           // Add comment about archived session
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### ⚠️ Session Archived\n\nThe Claude session was archived before completing.\n\nTask moved to Ready for a new attempt.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ⚠️ Session Archived\n\nThe Claude session was archived before completing.\n\nTask moved to Ready for a new attempt.`
+              ),
+            true
           );
         }
       } else {
-        console.log(`   Still running...`);
+        // Session is still running - check for timeout
+        // Use cooldown actionTime (when we started tracking) rather than comment time
+        // Comment time may be from a previous attempt
+        const cooldown = ctx.issueCooldowns.get(item.number);
+
+        // Track this session in cooldown if not already tracked
+        if (!cooldown) {
+          setCooldown(ctx, item.number, 'task_started', taskInfo.sessionId);
+          console.log(`   Still running (just started tracking)...`);
+          return; // Give it at least one cycle before checking timeout
+        }
+
+        const trackingStartTime = cooldown.actionTime;
+
+        // Check if stuck (30 min timeout only - cycles are just for cooldown)
+        if (isSessionTimedOut(trackingStartTime)) {
+          const elapsed = Math.round((Date.now() - trackingStartTime.getTime()) / 60000);
+          console.log(`   Session timed out (running for ${elapsed} min), interrupting and moving to backlog`);
+
+          // Interrupt the stuck session
+          try {
+            await claudeClient.interruptSession(taskInfo.sessionId);
+            console.log(`   Interrupted session ${taskInfo.sessionId}`);
+          } catch (interruptError) {
+            console.log(`   Failed to interrupt: ${interruptError}`);
+          }
+
+          // Move back to backlog for retry
+          if (backlogId) {
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  backlogId
+                ),
+              true
+            );
+          }
+
+          // Clear cooldown so it gets picked up fresh
+          clearCooldown(ctx, item.number);
+
+          // Add comment about timeout
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### ⏱️ Session Timeout\n\nThe Claude session was running for ${elapsed} minutes without completing.\n\nSession interrupted and task moved back to backlog for retry.\n\n**Previous Session:** ${taskInfo.sessionId}`
+              ),
+            true
+          );
+        } else {
+          const elapsed = Math.round((Date.now() - trackingStartTime.getTime()) / 60000);
+          console.log(`   Still running (${elapsed} min elapsed, timeout at 30 min)...`);
+        }
       }
     } catch (error) {
       console.error(`   Error checking task: ${error}`);
@@ -772,6 +1403,56 @@ function extractBranchFromEvents(
       for (const pattern of patterns) {
         const match = content.match(pattern);
         if (match) return match[1];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract a summary of what was implemented from the session events.
+ * Looks for the final assistant message that summarizes the work done.
+ */
+function extractImplementationSummary(events: ClaudeSessionEvent[]): string | undefined {
+  // Look for the last assistant/result message that contains implementation details
+  // Go in reverse to find the most recent summary
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type === 'result' || event.type === 'assistant') {
+      let content = '';
+      if (typeof event.message?.content === 'string') {
+        content = event.message.content;
+      } else if (Array.isArray(event.message?.content)) {
+        content = event.message.content
+          .map((c: { text?: string }) => c.text || '')
+          .join('');
+      }
+
+      // Skip very short messages or tool results
+      if (content.length < 100) continue;
+
+      // Look for summary-like content (implementation complete, changes made, etc.)
+      const summaryIndicators = [
+        /(?:completed|finished|implemented|done|pushed|created|added)/i,
+        /(?:changes|modifications|updates|fixes)/i,
+        /(?:branch|PR|pull request)/i,
+      ];
+
+      const hasSummaryContent = summaryIndicators.some(pattern => pattern.test(content));
+      if (hasSummaryContent) {
+        // Truncate if too long, keeping the most relevant part
+        if (content.length > 2000) {
+          // Try to find a natural break point
+          const lines = content.split('\n');
+          let truncated = '';
+          for (const line of lines) {
+            if (truncated.length + line.length > 1800) break;
+            truncated += line + '\n';
+          }
+          return truncated.trim() + '\n\n*[truncated]*';
+        }
+        return content;
       }
     }
   }
@@ -877,11 +1558,92 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
     inReview.map(async (item) => {
       if (!item.number) return;
 
+      // Check cooldown - skip if we recently took action on this issue
+      if (isInCooldown(ctx, item.number)) {
+        const cooldown = ctx.issueCooldowns.get(item.number);
+        console.log(`   #${item.number}: In cooldown (${cooldown?.action}, cycle ${cooldown?.cycleCount}/${DEFAULT_COOLDOWN_CYCLES})`);
+        return;
+      }
+
       // Get task info from GitHub comments to find PR number
-      const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      const taskInfo = await withGitHubRateLimit(ctx, () =>
+        issuesService.getLatestAutoTaskInfo(owner, repo, item.number!)
+      );
       if (!taskInfo?.prNumber) {
         console.log(`   #${item.number}: No PR found in comments, skipping review`);
         return;
+      }
+
+      // Check if a conflict resolution or rework is in progress
+      if (taskInfo.type === 'conflict' || taskInfo.type === 'rework') {
+        // Check if session is still running or stuck
+        if (taskInfo.sessionId) {
+          const claudeClient = new ClaudeWebClient({
+            accessToken: claudeAuth.accessToken,
+            environmentId,
+          });
+
+          try {
+            const session = await claudeClient.getSession(taskInfo.sessionId);
+            console.log(`   #${item.number}: ${taskInfo.type} session status: ${session.session_status}`);
+
+            if (session.session_status === 'running') {
+              // Get or create cooldown to track when we started waiting
+              let cooldown = ctx.issueCooldowns.get(item.number);
+              if (!cooldown) {
+                setCooldown(ctx, item.number, 'conflict_resolution', taskInfo.sessionId);
+                cooldown = ctx.issueCooldowns.get(item.number)!;
+              }
+
+              // Check if timed out (30 min since we started tracking)
+              if (isSessionTimedOut(cooldown.actionTime)) {
+                const elapsed = Math.round((Date.now() - cooldown.actionTime.getTime()) / 60000);
+                console.log(`   #${item.number}: Session timed out (${elapsed} min), interrupting`);
+
+                // Interrupt the stuck session
+                try {
+                  await claudeClient.interruptSession(taskInfo.sessionId);
+                  console.log(`   Interrupted session ${taskInfo.sessionId}`);
+                } catch (interruptError) {
+                  console.log(`   Failed to interrupt: ${interruptError}`);
+                }
+
+                // Clear cooldown so it gets processed next cycle as a fresh task
+                clearCooldown(ctx, item.number);
+
+                // Add comment about restart
+                await withGitHubRateLimit(
+                  ctx,
+                  () =>
+                    issuesService.addComment(
+                      owner,
+                      repo,
+                      item.number!,
+                      `### ⚠️ Session Timeout\n\nThe ${taskInfo.type} session was running for ${elapsed} minutes without completing.\n\n**Previous Session:** ${taskInfo.sessionId}`
+                    ),
+                  true
+                );
+                return;
+              }
+
+              // Still running, not timed out yet
+              const elapsed = Math.round((Date.now() - cooldown.actionTime.getTime()) / 60000);
+              console.log(`   Still running (${elapsed} min elapsed, timeout at 30 min)...`);
+              return;
+            } else if (session.session_status === 'idle' || session.session_status === 'completed') {
+              // Session finished - clear cooldown and continue with review
+              console.log(`   ${taskInfo.type} session completed, proceeding with review`);
+              clearCooldown(ctx, item.number);
+            } else {
+              // Session failed or archived
+              console.log(`   ${taskInfo.type} session ${session.session_status}, clearing and retrying`);
+              clearCooldown(ctx, item.number);
+            }
+          } catch (error) {
+            console.log(`   Session check failed: ${error}, proceeding with review`);
+            clearCooldown(ctx, item.number);
+          }
+        }
       }
 
       try {
@@ -946,16 +1708,25 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
             console.log(`   PR merged successfully`);
 
             if (doneId) {
-              await projectsService.updateItemStatus(
-                projectCache.projectId,
-                item.id,
-                projectCache.statusFieldId,
-                doneId
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  projectsService.updateItemStatus(
+                    projectCache.projectId,
+                    item.id,
+                    projectCache.statusFieldId,
+                    doneId
+                  ),
+                true
               );
             }
 
             // Close the issue (should auto-close from PR, but ensure it)
-            await issuesService.closeIssue(owner, repo, item.number);
+            await withGitHubRateLimit(
+              ctx,
+              () => issuesService.closeIssue(owner, repo, item.number!),
+              true
+            );
             console.log(`   Moved to Done, issue closed`);
 
             // Archive the Claude session now that work is complete
@@ -972,12 +1743,21 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               }
             }
 
-            // Add completion comment
-            await issuesService.addComment(
-              owner,
-              repo,
-              item.number,
-              `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
+            // Add completion comment with review summary
+            const reviewSummarySection = result.summary
+              ? `\n\n<details>\n<summary>Review Summary</summary>\n\n${result.summary}\n\n</details>`
+              : '';
+
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                issuesService.addComment(
+                  owner,
+                  repo,
+                  item.number!,
+                  `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.${reviewSummarySection}\n\nThis issue is now closed.`
+                ),
+              true
             );
           } else if (mergeResult.hasConflicts) {
             // Has merge conflicts - needs resolution
@@ -987,30 +1767,48 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               // Claude is fixing conflicts - add comment with new session
               console.log(`   Conflict resolution session started`);
 
-              await issuesService.addComment(
-                owner,
-                repo,
-                item.number,
-                `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
+              // Set cooldown to prevent re-processing while conflict resolution runs
+              setCooldown(ctx, item.number, 'conflict_resolution', mergeResult.sessionId);
+
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  issuesService.addComment(
+                    owner,
+                    repo,
+                    item.number!,
+                    `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
+                  ),
+                true
               );
             } else {
               // Failed to start conflict resolution - move back to ready
               console.log(`   Moving back to Ready for manual conflict resolution`);
 
               if (readyId) {
-                await projectsService.updateItemStatus(
-                  projectCache.projectId,
-                  item.id,
-                  projectCache.statusFieldId,
-                  readyId
+                await withGitHubRateLimit(
+                  ctx,
+                  () =>
+                    projectsService.updateItemStatus(
+                      projectCache.projectId,
+                      item.id,
+                      projectCache.statusFieldId,
+                      readyId
+                    ),
+                  true
                 );
               }
 
-              await issuesService.addComment(
-                owner,
-                repo,
-                item.number,
-                `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  issuesService.addComment(
+                    owner,
+                    repo,
+                    item.number!,
+                    `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+                  ),
+                true
               );
             }
           } else {
@@ -1020,20 +1818,30 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
 
             // Move back to Ready so it gets picked up again
             if (readyId) {
-              await projectsService.updateItemStatus(
-                projectCache.projectId,
-                item.id,
-                projectCache.statusFieldId,
-                readyId
+              await withGitHubRateLimit(
+                ctx,
+                () =>
+                  projectsService.updateItemStatus(
+                    projectCache.projectId,
+                    item.id,
+                    projectCache.statusFieldId,
+                    readyId
+                  ),
+                true
               );
             }
 
             // Add comment explaining the merge failure
-            await issuesService.addComment(
-              owner,
-              repo,
-              item.number,
-              `### ⚠️ Merge Failed\n\nPR #${taskInfo.prNumber} could not be merged.\n\n**Reason:** ${mergeResult.reason}\n\nMoving back to Ready for re-work. The issue will be picked up in the next cycle to resolve the problem.`
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                issuesService.addComment(
+                  owner,
+                  repo,
+                  item.number!,
+                  `### ⚠️ Merge Failed\n\nPR #${taskInfo.prNumber} could not be merged.\n\n**Reason:** ${mergeResult.reason}\n\nMoving back to Ready for re-work. The issue will be picked up in the next cycle to resolve the problem.`
+                ),
+              true
             );
           }
         } else {
@@ -1041,11 +1849,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           console.log(`   Review rejected, moving back to Ready for re-work`);
 
           if (readyId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              readyId
+            await withGitHubRateLimit(
+              ctx,
+              () =>
+                projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  readyId
+                ),
+              true
             );
           }
 
@@ -1053,11 +1866,16 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           const issuesText = formatReviewIssuesForComment(result.issues);
 
           // Add comment about review rejection WITH the actual issues
-          await issuesService.addComment(
-            owner,
-            repo,
-            item.number,
-            `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
+          await withGitHubRateLimit(
+            ctx,
+            () =>
+              issuesService.addComment(
+                owner,
+                repo,
+                item.number!,
+                `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
+              ),
+            true
           );
         }
       } catch (error) {
@@ -1115,16 +1933,43 @@ async function checkAndMergePR(
       if (branchName && environmentId) {
         try {
           const gitUrl = `https://github.com/${owner}/${repo}`;
-          const conflictPrompt = `The branch "${branchName}" has merge conflicts with the main branch.
+          const conflictPrompt = `URGENT: The branch "${branchName}" has merge conflicts with the main branch that MUST be resolved before the PR can be merged.
 
-Please:
-1. Fetch the latest changes from origin
-2. Merge the main branch into this branch
-3. Resolve any merge conflicts carefully, preserving the intended functionality
-4. Commit the merge resolution
-5. Push the updated branch
+## Steps to resolve:
 
-Be careful to understand both sides of the conflicts before resolving them.`;
+1. First, make sure you're on the correct branch:
+   \`\`\`
+   git checkout ${branchName}
+   \`\`\`
+
+2. Fetch the latest changes:
+   \`\`\`
+   git fetch origin
+   \`\`\`
+
+3. Merge main into this branch (this will show conflicts):
+   \`\`\`
+   git merge origin/main
+   \`\`\`
+
+4. Git will show you which files have conflicts. For each conflicted file:
+   - Open the file and find the conflict markers (<<<<<<, =======, >>>>>>>)
+   - Understand what changes came from main vs this branch
+   - Resolve the conflict by keeping the correct code (usually combining both changes appropriately)
+   - Remove the conflict markers
+   - Save the file
+
+5. After resolving all conflicts:
+   \`\`\`
+   git add .
+   git commit -m "Merge main and resolve conflicts"
+   git push origin ${branchName}
+   \`\`\`
+
+## Important:
+- Do NOT skip this task - the PR cannot be merged until conflicts are resolved
+- Make sure to actually run the git commands and resolve the conflicts
+- After pushing, verify that the push succeeded`;
 
           const claudeClient = new ClaudeWebClient({
             accessToken: claudeAuth.accessToken,

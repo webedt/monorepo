@@ -21,6 +21,7 @@ import {
   type ConnectionStats,
   type DatabaseHealthCheckResult,
 } from './connection.js';
+import { TIMEOUTS, LIMITS, RETRY, CONTEXT_RETRY } from '../config/constants.js';
 import {
   runMigrations,
   validateSchema,
@@ -31,6 +32,14 @@ import {
   type MigrationResult,
   type SchemaValidationResult,
 } from './migrations.js';
+import {
+  DATABASE_URL,
+  QUIET_DB,
+  DEBUG_SQL,
+  NODE_ENV,
+  SKIP_MIGRATIONS,
+  BACKUP_DIR,
+} from '../config/env.js';
 
 const { Pool } = pg;
 
@@ -48,14 +57,14 @@ let initializationError: Error | null = null;
 let initializationPromise: Promise<void> | null = null;
 
 // Skip verbose logging if QUIET_DB is set (for CLI commands)
-const quietMode = process.env.QUIET_DB === 'true';
+const quietMode = QUIET_DB;
 
 /**
  * Get or create the database pool (lazy initialization)
  */
 function ensurePool(): pg.Pool {
   if (!_pool) {
-    if (!process.env.DATABASE_URL) {
+    if (!DATABASE_URL) {
       throw new Error(
         'DATABASE_URL environment variable is required. PostgreSQL is the only supported database.\n' +
         'Set DATABASE_URL in your environment:\n' +
@@ -68,11 +77,11 @@ function ensurePool(): pg.Pool {
     }
 
     _pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-      ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
+      connectionString: DATABASE_URL,
+      max: LIMITS.DATABASE.MAX_CONNECTIONS,
+      idleTimeoutMillis: TIMEOUTS.DATABASE.IDLE,
+      connectionTimeoutMillis: TIMEOUTS.DATABASE.CONNECTION,
+      ssl: DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
     });
   }
   return _pool;
@@ -86,29 +95,35 @@ function getDbInstance(): NodePgDatabase<typeof schema> {
     const pool = ensurePool();
     _db = drizzle(pool, {
       schema,
-      logger: process.env.NODE_ENV === 'development' && process.env.DEBUG_SQL === 'true'
+      logger: NODE_ENV === 'development' && DEBUG_SQL
     });
   }
   return _db;
 }
 
+/**
+ * Create a lazy-initialization proxy for database objects.
+ * Uses dynamic property access which requires type assertions.
+ * This is a deliberate use of Record<string, unknown> for proxy forwarding.
+ */
+function createLazyProxy<T extends object>(getTarget: () => T): T {
+  return new Proxy({} as T, {
+    get(_, prop) {
+      const target = getTarget();
+      // Proxy handlers require dynamic access; cast is unavoidable but safe
+      // since we forward all property access to the actual target
+      const targetRecord = target as unknown as Record<string | symbol, unknown>;
+      const value = targetRecord[prop];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 // Create proxies for backward compatibility
 // These will lazily initialize the pool/db on first access
-export const pool: pg.Pool = new Proxy({} as pg.Pool, {
-  get(_, prop) {
-    const realPool = ensurePool();
-    const value = (realPool as any)[prop];
-    return typeof value === 'function' ? value.bind(realPool) : value;
-  },
-});
+export const pool: pg.Pool = createLazyProxy(ensurePool);
 
-export const db: NodePgDatabase<typeof schema> = new Proxy({} as NodePgDatabase<typeof schema>, {
-  get(_, prop) {
-    const realDb = getDbInstance();
-    const value = (realDb as any)[prop];
-    return typeof value === 'function' ? value.bind(realDb) : value;
-  },
-});
+export const db: NodePgDatabase<typeof schema> = createLazyProxy(getDbInstance);
 
 // Re-export schema tables (these don't need DB connection)
 export const { users, sessions, chatSessions, messages, events } = schema;
@@ -194,15 +209,15 @@ async function doInitialize(): Promise<void> {
     console.log('  ✅ Database connection established');
 
     // Run migrations unless skipped
-    const skipMigrations = process.env.SKIP_MIGRATIONS === 'true';
+    const skipMigrations = SKIP_MIGRATIONS;
 
     if (!skipMigrations) {
       console.log('');
       console.log('Running database migrations...');
 
-      const migrationResult = await runMigrations(process.env.DATABASE_URL!, {
-        backup: process.env.NODE_ENV === 'production',
-        backupDir: process.env.BACKUP_DIR || '/tmp/db-backups',
+      const migrationResult = await runMigrations(DATABASE_URL!, {
+        backup: NODE_ENV === 'production',
+        backupDir: BACKUP_DIR,
       });
 
       if (!migrationResult.success) {
@@ -244,6 +259,10 @@ async function doInitialize(): Promise<void> {
       }
     }
 
+    if (schemaUpdate.duplicatesRemoved > 0) {
+      console.log(`  Cleaned up duplicate events: ${schemaUpdate.duplicatesRemoved} removed`);
+    }
+
     if (schemaUpdate.indexesCreated.length > 0) {
       console.log('  Created indexes:');
       for (const idx of schemaUpdate.indexesCreated) {
@@ -258,7 +277,7 @@ async function doInitialize(): Promise<void> {
       }
     }
 
-    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0) {
+    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0 && schemaUpdate.duplicatesRemoved === 0) {
       console.log('  ✅ Schema is up to date');
     }
 
@@ -271,7 +290,7 @@ async function doInitialize(): Promise<void> {
       console.error('');
       console.error(formatSchemaErrors(validation));
 
-      if (process.env.NODE_ENV === 'production') {
+      if (NODE_ENV === 'production') {
         console.warn('⚠️  Schema validation failed - some features may not work correctly');
       }
     } else if (validation.warnings.length > 0) {
@@ -287,12 +306,12 @@ async function doInitialize(): Promise<void> {
     await showDatabaseStats();
 
     // Set up connection manager for health checks
-    connectionManager = createConnection(process.env.DATABASE_URL!, {
-      maxConnections: 1,
+    connectionManager = createConnection(DATABASE_URL!, {
+      maxConnections: 1,  // Health checks only need 1 connection
       minConnections: 0,
-      maxRetries: 3,
-      baseRetryDelayMs: 1000,
-      maxRetryDelayMs: 10000,
+      maxRetries: RETRY.DEFAULT.MAX_ATTEMPTS,
+      baseRetryDelayMs: RETRY.DEFAULT.BASE_DELAY_MS,
+      maxRetryDelayMs: CONTEXT_RETRY.DB_HEALTH_CHECK.MAX_DELAY_MS,
     });
 
     console.log('');
@@ -357,7 +376,7 @@ export function getConnectionStats(): ConnectionStats | null {
     totalCount: _pool.totalCount,
     idleCount: _pool.idleCount,
     waitingCount: _pool.waitingCount,
-    maxConnections: 20,
+    maxConnections: LIMITS.DATABASE.MAX_CONNECTIONS,
     healthy: true,
     lastHealthCheck: null,
     consecutiveFailures: 0,
@@ -521,6 +540,9 @@ export type {
 
 // Re-export table definitions from schema
 export {
+  // Organization role utilities
+  isOrganizationRole,
+  ORGANIZATION_ROLES,
   liveChatMessages,
   workspacePresence,
   workspaceEvents,
@@ -598,6 +620,16 @@ export {
   type DatabaseHealthCheckResult,
 } from './connection.js';
 
+// Re-export transaction utilities
+export {
+  withTransaction,
+  withTransactionOrThrow,
+  createTransactionHelper,
+  type TransactionContext,
+  type TransactionOptions,
+  type TransactionResult,
+} from './transaction.js';
+
 // Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds
 // Consumers should import these from @webedt/shared instead of drizzle-orm directly
 export {
@@ -622,3 +654,17 @@ export {
   between,
   exists,
 } from 'drizzle-orm';
+
+// Re-export encrypted column types for schema definition
+export {
+  encryptedText,
+  encryptedJsonColumn,
+} from './encryptedColumns.js';
+
+// Re-export auth data types (canonical definitions from authTypes.ts)
+export type {
+  ClaudeAuthData,
+  CodexAuthData,
+  GeminiAuthData,
+  ImageAiKeysData,
+} from './authTypes.js';

@@ -1,8 +1,20 @@
+/**
+ * Claude CLI Command
+ * Claude execution environments (Claude Remote Sessions)
+ *
+ * Uses constructor injection pattern for better testability.
+ * Services can be injected via factory functions instead of ServiceProvider.get().
+ */
+
 import { Command } from 'commander';
-import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, AEventFormatter, getClaudeCredentials } from '@webedt/shared';
+import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, createLazyServiceContainer, getClaudeCredentials } from '@webedt/shared';
 import { handleCommandError } from '../utils/errorHandler.js';
 
-import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
+import type { ClaudeSessionEvent as SessionEvent, ClaudeCliServices } from '@webedt/shared';
+import type { AClaudeWebClient, AEventFormatter } from '@webedt/shared';
+
+// Lazy container for backward compatibility
+const lazyContainer = createLazyServiceContainer();
 
 /**
  * Verbose mode utilities for CLI output
@@ -143,9 +155,10 @@ async function getClientConfig(options: { token?: string; environment?: string; 
 }
 
 // Helper to get and configure client
+// Uses lazy container instead of ServiceProvider.get() for better testability
 async function getClient(options: { token?: string; environment?: string; org?: string; silent?: boolean }): Promise<AClaudeWebClient> {
   const config = await getClientConfig(options);
-  const client = ServiceProvider.get(AClaudeWebClient);
+  const client = lazyContainer.claudeWebClient;
   client.configure({
     accessToken: config.accessToken,
     environmentId: config.environmentId,
@@ -154,8 +167,9 @@ async function getClient(options: { token?: string; environment?: string; org?: 
 }
 
 // Format event for display using the shared EventFormatter service
+// Uses lazy container instead of ServiceProvider.get() for better testability
 function formatEvent(event: SessionEvent): string {
-  const formatter = ServiceProvider.get(AEventFormatter);
+  const formatter = lazyContainer.eventFormatter;
   return formatter.formatEvent(event as Record<string, unknown>);
 }
 
@@ -380,7 +394,7 @@ webCommand
         },
         (event) => {
           eventCount++;
-          verboseLog(`Event #${eventCount}:`, event.type, event.type === 'tool_use' ? `(${(event as any).name})` : '');
+          verboseLog(`Event #${eventCount}:`, event.type, event.type === 'tool_use' && event.name ? `(${event.name})` : '');
 
           if (options.jsonl) {
             console.log(JSON.stringify(event));
@@ -424,10 +438,10 @@ webCommand
 
       // Verbose summary
       verboseLog('\n[VERBOSE] Execution Summary:');
-      verboseLog('  Input tokens:', (result as any).inputTokens || 'N/A');
-      verboseLog('  Output tokens:', (result as any).outputTokens || 'N/A');
+      verboseLog('  Input tokens:', result.inputTokens ?? 'N/A');
+      verboseLog('  Output tokens:', result.outputTokens ?? 'N/A');
       verboseLog('  Total events:', eventCount);
-      verboseLog('  Session created at:', (result as any).createdAt || 'N/A');
+      verboseLog('  Session created at:', result.createdAt ?? 'N/A');
     } catch (error) {
       verboseError('Execution failed:', error);
       handleCommandError(error, 'executing session', { json: options.json });

@@ -1,7 +1,20 @@
+/**
+ * Sessions CLI Command
+ * Session lifecycle operations
+ *
+ * Uses constructor injection pattern for better testability.
+ * Services can be injected via lazy container instead of ServiceProvider.get().
+ */
+
 import { Command } from 'commander';
-import { db, chatSessions, events, messages, users, ServiceProvider, ASession, ATokenRefreshService } from '@webedt/shared';
-import type { ClaudeAuth, ExecutionEvent } from '@webedt/shared';
+import { db, chatSessions, events, messages, users, createLazyServiceContainer, withTransactionOrThrow } from '@webedt/shared';
+
+import type { ClaudeAuth, ExecutionEvent, TransactionContext } from '@webedt/shared';
+
 import { eq, desc, and, lt, sql, count } from 'drizzle-orm';
+
+// Lazy container for backward compatibility
+const lazyContainer = createLazyServiceContainer();
 
 export const sessionsCommand = new Command('sessions')
   .description('Session lifecycle operations');
@@ -133,14 +146,17 @@ sessionsCommand
         process.exit(0);
       }
 
-      // Delete events first
-      await db.delete(events).where(eq(events.chatSessionId, sessionId));
+      // Use transaction to ensure all deletes succeed or fail together
+      await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+        // Delete events first
+        await tx.delete(events).where(eq(events.chatSessionId, sessionId));
 
-      // Delete messages
-      await db.delete(messages).where(eq(messages.chatSessionId, sessionId));
+        // Delete messages
+        await tx.delete(messages).where(eq(messages.chatSessionId, sessionId));
 
-      // Delete session
-      await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+        // Delete session
+        await tx.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+      });
 
       console.log(`Session ${sessionId} deleted successfully.`);
     } catch (error) {
@@ -212,17 +228,21 @@ sessionsCommand
       }
 
       console.log('\nDeleting...');
-      let deleted = 0;
 
-      for (const session of sessionsToDelete) {
-        // Delete events first
-        await db.delete(events).where(eq(events.chatSessionId, session.id));
-        // Delete messages
-        await db.delete(messages).where(eq(messages.chatSessionId, session.id));
-        // Delete session
-        await db.delete(chatSessions).where(eq(chatSessions.id, session.id));
-        deleted++;
-      }
+      // Use transaction to ensure all deletes for all sessions succeed or fail together
+      const deleted = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+        let count = 0;
+        for (const session of sessionsToDelete) {
+          // Delete events first
+          await tx.delete(events).where(eq(events.chatSessionId, session.id));
+          // Delete messages
+          await tx.delete(messages).where(eq(messages.chatSessionId, session.id));
+          // Delete session
+          await tx.delete(chatSessions).where(eq(chatSessions.id, session.id));
+          count++;
+        }
+        return count;
+      });
 
       console.log(`\nDeleted ${deleted} session(s).`);
     } catch (error) {
@@ -396,7 +416,7 @@ sessionsCommand
       let claudeAuth = userData.claudeAuth as ClaudeAuth;
 
       try {
-        const tokenService = ServiceProvider.get(ATokenRefreshService);
+        const tokenService = lazyContainer.tokenRefreshService;
         claudeAuth = await tokenService.ensureValidTokenForUser(options.user, claudeAuth);
         log('Token validated (refreshed if needed)');
       } catch (error) {
@@ -419,7 +439,7 @@ sessionsCommand
       log('-'.repeat(80));
 
       // Get session service
-      const session = ServiceProvider.get(ASession);
+      const session = lazyContainer.sessionService;
 
       // Event handler for logging
       const handleEvent = async (event: ExecutionEvent) => {
@@ -509,7 +529,7 @@ sessionsCommand
 
       // Refresh token if needed using TokenRefreshService
       try {
-        const tokenService = ServiceProvider.get(ATokenRefreshService);
+        const tokenService = lazyContainer.tokenRefreshService;
         claudeAuth = await tokenService.ensureValidTokenForUser(dbSession.userId, claudeAuth);
         log('Token validated (refreshed if needed)');
       } catch (error) {
@@ -528,7 +548,7 @@ sessionsCommand
       log('-'.repeat(80));
 
       // Get session service
-      const session = ServiceProvider.get(ASession);
+      const session = lazyContainer.sessionService;
 
       // Event handler for logging
       const handleEvent = async (event: ExecutionEvent) => {

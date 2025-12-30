@@ -3,6 +3,11 @@
  * Manages onion skinning preferences for frame-by-frame animation
  */
 
+import { z } from 'zod';
+
+import { STORE_KEYS } from '../lib/storageKeys';
+import { TypedStorage } from '../lib/typedStorage';
+
 export interface OnionSkinningSettings {
   enabled: boolean;
   showPrevious: boolean;
@@ -18,7 +23,18 @@ export interface OnionSkinningSettings {
 
 type OnionSkinningListener = (settings: OnionSkinningSettings) => void;
 
-const STORAGE_KEY = 'webedt_onion_skinning';
+const OnionSkinningSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  showPrevious: z.boolean().default(true),
+  showNext: z.boolean().default(true),
+  previousCount: z.number().min(1).max(10).default(2),
+  nextCount: z.number().min(1).max(10).default(2),
+  previousOpacity: z.number().min(0).max(1).default(0.3),
+  nextOpacity: z.number().min(0).max(1).default(0.3),
+  previousColor: z.string().default('#ff0000'),
+  nextColor: z.string().default('#0000ff'),
+  useColors: z.boolean().default(false),
+});
 
 const DEFAULT_SETTINGS: OnionSkinningSettings = {
   enabled: false,
@@ -33,33 +49,23 @@ const DEFAULT_SETTINGS: OnionSkinningSettings = {
   useColors: false,
 };
 
+const onionSkinningStorage = new TypedStorage({
+  key: STORE_KEYS.ONION_SKINNING,
+  schema: OnionSkinningSettingsSchema,
+  defaultValue: DEFAULT_SETTINGS,
+  version: 1,
+});
+
 class OnionSkinningStore {
   private settings: OnionSkinningSettings;
   private listeners: Set<OnionSkinningListener> = new Set();
 
   constructor() {
-    this.settings = this.loadFromStorage();
-  }
-
-  private loadFromStorage(): OnionSkinningSettings {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return { ...DEFAULT_SETTINGS, ...parsed };
-      }
-    } catch (error) {
-      console.error('Failed to load onion skinning settings:', error);
-    }
-    return { ...DEFAULT_SETTINGS };
+    this.settings = onionSkinningStorage.get();
   }
 
   private saveToStorage(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
-    } catch (error) {
-      console.error('Failed to save onion skinning settings:', error);
-    }
+    onionSkinningStorage.set(this.settings);
   }
 
   private notifyListeners(): void {

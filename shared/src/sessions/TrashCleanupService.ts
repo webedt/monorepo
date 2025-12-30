@@ -1,4 +1,5 @@
-import { db, chatSessions, events, messages } from '../db/index.js';
+import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
+import type { TransactionContext } from '../db/index.js';
 import { eq, lt, and, isNotNull } from 'drizzle-orm';
 import { logger } from '../utils/logging/logger.js';
 import { StorageService } from '../storage/StorageService.js';
@@ -58,28 +59,38 @@ export class TrashCleanupService extends ATrashCleanupService {
     sessionId: string
   ): Promise<DeleteSessionResult> {
     try {
-      // Delete events first (foreign key constraint)
-      const deletedEvents = await db
-        .delete(events)
-        .where(eq(events.chatSessionId, sessionId))
-        .returning();
+      // Use transaction to ensure atomicity - either all deletes succeed or none do
+      const result = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+        // Delete events first (foreign key constraint)
+        const deletedEvents = await tx
+          .delete(events)
+          .where(eq(events.chatSessionId, sessionId))
+          .returning();
 
-      // Delete messages
-      const deletedMessages = await db
-        .delete(messages)
-        .where(eq(messages.chatSessionId, sessionId))
-        .returning();
+        // Delete messages
+        const deletedMessages = await tx
+          .delete(messages)
+          .where(eq(messages.chatSessionId, sessionId))
+          .returning();
 
-      // Delete the session
-      await db
-        .delete(chatSessions)
-        .where(eq(chatSessions.id, sessionId));
+        // Delete the session
+        await tx
+          .delete(chatSessions)
+          .where(eq(chatSessions.id, sessionId));
+
+        return {
+          eventsDeleted: deletedEvents.length,
+          messagesDeleted: deletedMessages.length,
+        };
+      }, {
+        context: { operation: 'deleteSessionPermanently', sessionId },
+      });
 
       return {
         success: true,
-        message: `Deleted session with ${deletedEvents.length} events and ${deletedMessages.length} messages`,
-        eventsDeleted: deletedEvents.length,
-        messagesDeleted: deletedMessages.length,
+        message: `Deleted session with ${result.eventsDeleted} events and ${result.messagesDeleted} messages`,
+        eventsDeleted: result.eventsDeleted,
+        messagesDeleted: result.messagesDeleted,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
