@@ -172,6 +172,15 @@ export class MidiPlayer {
 
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
+    } else if (this.audioContext.state === 'closed') {
+      // Audio context was closed, need to reinitialize
+      this.audioContext = null;
+      this.masterGain = null;
+      this.init();
+      if (!this.audioContext || !this.masterGain) {
+        console.warn('Failed to reinitialize audio context');
+        return;
+      }
     }
 
     if (this.state.isPlaying && !this.state.isPaused) return;
@@ -547,8 +556,12 @@ export class MidiPlayer {
       // Check for end of playback
       if (currentTime >= this.state.duration) {
         if (this.options.loop) {
-          this.seek(0);
-          this.play();
+          // Seamless loop: reset playback without stopping
+          this.stopAllNotes();
+          this.playbackStartTime = this.audioContext!.currentTime;
+          this.scheduleNotes(0);
+          this.updateState({ currentTime: 0, progress: 0 });
+          this.emit({ type: 'loop' });
         } else {
           this.stop();
           this.emit({ type: 'end' });

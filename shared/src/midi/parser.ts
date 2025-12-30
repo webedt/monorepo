@@ -178,7 +178,8 @@ export class MidiParser {
     let trackName: string | undefined;
 
     // Note tracking for duration calculation
-    const activeNotes: Map<string, { event: MidiEvent; startTime: number }> = new Map();
+    // Use array to handle overlapping notes (same note played before previous ends)
+    const activeNotes: Map<string, { event: MidiEvent; startTime: number }[]> = new Map();
     const notes: MidiNoteEvent[] = [];
 
     while (this.position < endPosition) {
@@ -198,24 +199,32 @@ export class MidiParser {
         // Track note on/off for duration calculation
         if (event.type === 'noteOn' && event.velocity > 0) {
           const key = `${event.channel}-${event.note}`;
-          activeNotes.set(key, { event, startTime: absoluteTime });
+          const existing = activeNotes.get(key) || [];
+          existing.push({ event, startTime: absoluteTime });
+          activeNotes.set(key, existing);
         } else if (event.type === 'noteOff' || (event.type === 'noteOn' && event.velocity === 0)) {
           const key = `${event.channel}-${event.note}`;
-          const activeNote = activeNotes.get(key);
-          if (activeNote && activeNote.event.type === 'noteOn') {
-            const noteEvent = activeNote.event;
-            const duration = absoluteTime - activeNote.startTime;
-            notes.push({
-              note: noteEvent.note,
-              noteName: this.midiNoteToName(noteEvent.note),
-              velocity: noteEvent.velocity,
-              channel: noteEvent.channel,
-              startTime: activeNote.startTime,
-              duration,
-              startTimeSeconds: 0, // Will be calculated later
-              durationSeconds: 0, // Will be calculated later
-            });
-            activeNotes.delete(key);
+          const activeList = activeNotes.get(key);
+          if (activeList && activeList.length > 0) {
+            // Get the earliest note (FIFO) to pair with this note-off
+            const activeNote = activeList.shift()!;
+            if (activeList.length === 0) {
+              activeNotes.delete(key);
+            }
+            if (activeNote.event.type === 'noteOn') {
+              const noteEvent = activeNote.event;
+              const duration = absoluteTime - activeNote.startTime;
+              notes.push({
+                note: noteEvent.note,
+                noteName: this.midiNoteToName(noteEvent.note),
+                velocity: noteEvent.velocity,
+                channel: noteEvent.channel,
+                startTime: activeNote.startTime,
+                duration,
+                startTimeSeconds: 0, // Will be calculated later
+                durationSeconds: 0, // Will be calculated later
+              });
+            }
           }
         }
 
@@ -437,16 +446,28 @@ export class MidiParser {
 
       case 0x58: // Time Signature
         baseEvent.subtype = 'timeSignature';
-        baseEvent.numerator = data[0];
-        baseEvent.denominator = Math.pow(2, data[1]);
-        baseEvent.metronome = data[2];
-        baseEvent.thirtyseconds = data[3];
+        if (data.length >= 4) {
+          baseEvent.numerator = data[0];
+          baseEvent.denominator = Math.pow(2, data[1]);
+          baseEvent.metronome = data[2];
+          baseEvent.thirtyseconds = data[3];
+        } else {
+          // Malformed time signature event, use defaults
+          baseEvent.numerator = 4;
+          baseEvent.denominator = 4;
+        }
         break;
 
       case 0x59: // Key Signature
         baseEvent.subtype = 'keySignature';
-        baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
-        baseEvent.scale = data[1];
+        if (data.length >= 2) {
+          baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
+          baseEvent.scale = data[1];
+        } else {
+          // Malformed key signature event, use defaults (C major)
+          baseEvent.key = 0;
+          baseEvent.scale = 0;
+        }
         break;
 
       case 0x7f: // Sequencer Specific

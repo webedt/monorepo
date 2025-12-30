@@ -43,6 +43,7 @@ export type MidiPlayerEvent =
   | { type: 'tempoChange'; bpm: number }
   | { type: 'noteOn'; note: MidiNoteEvent; track: number }
   | { type: 'noteOff'; note: MidiNoteEvent; track: number }
+  | { type: 'loop' }
   | { type: 'end' };
 
 /**
