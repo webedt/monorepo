@@ -57,7 +57,18 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, wishlists, eq, and, desc } from '@webedt/shared';
+import {
+  db,
+  games,
+  userLibrary,
+  wishlists,
+  eq,
+  and,
+  desc,
+  sql,
+  parseOffsetPagination,
+  buildLegacyPaginatedResponse,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -345,8 +356,7 @@ router.get('/browse', async (req: Request, res: Response) => {
       free,
     } = req.query;
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
+    const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
     // Build query - start with published games only
     let baseQuery = db
@@ -354,8 +364,15 @@ router.get('/browse', async (req: Request, res: Response) => {
       .from(games)
       .where(eq(games.status, 'published'));
 
-    // Fetch all published games first, then filter in memory
-    // (Drizzle doesn't easily support JSON array contains)
+    // NOTE: We fetch all published games and filter in-memory due to:
+    // 1. JSON array containment queries (genre/tag filters) require raw SQL
+    // 2. Text search across multiple fields needs in-memory processing
+    // 3. Complex multi-field sorting with dynamic order
+    //
+    // For large catalogs (10k+ games), consider:
+    // - Using PostgreSQL-specific JSON operators (@> for containment)
+    // - Implementing a search service (Elasticsearch/Meilisearch)
+    // - Adding database indexes on frequently-filtered columns
     let allGames = await baseQuery;
 
     // Apply filters
@@ -419,18 +436,12 @@ router.get('/browse', async (req: Request, res: Response) => {
 
     // Paginate
     const total = allGames.length;
-    const paginatedGames = allGames.slice(offset, offset + limit);
+    const paginatedGames = allGames.slice(
+      pagination.offset,
+      pagination.offset + pagination.limit
+    );
 
-    res.json({
-      success: true,
-      data: {
-        games: paginatedGames,
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    });
+    res.json(buildLegacyPaginatedResponse(paginatedGames, total, pagination, 'games'));
   } catch (error) {
     logger.error('Browse games error', error as Error, { component: 'Store' });
     res.status(500).json({ success: false, error: 'Failed to browse games' });
@@ -845,8 +856,10 @@ router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Respon
 router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
-    const wishlistItems = await db
+    // Get paginated wishlist items using SQL LIMIT/OFFSET
+    const paginatedItems = await db
       .select({
         wishlistItem: wishlists,
         game: games,
@@ -854,16 +867,29 @@ router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
       .from(wishlists)
       .innerJoin(games, eq(wishlists.gameId, games.id))
       .where(eq(wishlists.userId, authReq.user!.id))
-      .orderBy(desc(wishlists.addedAt));
+      .orderBy(desc(wishlists.addedAt))
+      .limit(pagination.limit)
+      .offset(pagination.offset);
+
+    // Get total count using efficient SQL COUNT
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(wishlists)
+      .where(eq(wishlists.userId, authReq.user!.id));
+
+    const total = count;
 
     res.json({
       success: true,
       data: {
-        items: wishlistItems.map((item) => ({
+        items: paginatedItems.map((item) => ({
           ...item.wishlistItem,
           game: item.game,
         })),
-        total: wishlistItems.length,
+        total,
+        limit: pagination.limit,
+        offset: pagination.offset,
+        hasMore: pagination.offset + pagination.limit < total,
       },
     });
   } catch (error) {

@@ -1193,6 +1193,10 @@ router.get('/users/:userId/posts', async (req: Request, res: Response) => {
           ...post,
           author: formatAuthor(post.author),
         })),
+        total: result.meta.total,
+        limit: result.meta.limit,
+        offset: result.meta.offset,
+        hasMore: result.meta.hasMore,
       },
     });
   } catch (error) {
@@ -1285,6 +1289,10 @@ router.get('/games/:gameId/reviews', async (req: Request, res: Response) => {
           ...review,
           author: formatAuthor(review.author),
         })),
+        total: result.meta.total,
+        limit: result.meta.limit,
+        offset: result.meta.offset,
+        hasMore: result.meta.hasMore,
       },
     });
   } catch (error) {
