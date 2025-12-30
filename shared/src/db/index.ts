@@ -668,3 +668,26 @@ export type {
   GeminiAuthData,
   ImageAiKeysData,
 } from './authTypes.js';
+
+// Re-export DataLoader utilities for query batching and N+1 prevention
+export {
+  DataLoader,
+  BatchContext,
+  createResultMap,
+  createResultMapBy,
+  groupBy,
+  groupByFn,
+  coalesceQueries,
+  type DataLoaderOptions,
+} from './dataLoader.js';
+
+// Re-export query logging utilities for development
+export {
+  QueryLogger,
+  getQueryLogger,
+  createRequestLogger,
+  createQueryLoggerMiddleware,
+  type QueryLogEntry,
+  type QueryAnalysis,
+  type QueryLoggerOptions,
+} from './queryLogger.js';

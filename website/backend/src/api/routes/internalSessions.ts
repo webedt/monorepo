@@ -46,6 +46,7 @@ import {
   CLAUDE_ORG_UUID,
   CLAUDE_COOKIES,
   OPENROUTER_API_KEY,
+  getEventType,
 } from '@webedt/shared';
 import {
   registerActiveStream,
@@ -136,7 +137,7 @@ async function storeEvent(chatSessionId: string, eventData: Record<string, unkno
       eventData,
     });
   } catch (error) {
-    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: (eventData as any).type });
+    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: getEventType(eventData) });
   }
 }
 

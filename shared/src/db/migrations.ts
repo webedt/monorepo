@@ -68,7 +68,7 @@ const EXPECTED_TABLES = [
     requiredColumns: [
       'id', 'user_id', 'session_path', 'repository_owner', 'repository_name',
       'user_request', 'status', 'created_at', 'remote_session_id', 'remote_web_url',
-      'total_cost', 'issue_number'
+      'total_cost', 'issue_number', 'version'
     ]
   },
   {
@@ -544,7 +544,8 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       worker_last_activity TIMESTAMP,
       favorite BOOLEAN NOT NULL DEFAULT FALSE,
       share_token TEXT UNIQUE,
-      share_expires_at TIMESTAMP
+      share_expires_at TIMESTAMP,
+      version INTEGER NOT NULL DEFAULT 1
     );
 
     -- Messages table
@@ -756,6 +757,7 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'chat_sessions.favorite': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS favorite BOOLEAN NOT NULL DEFAULT FALSE',
   'chat_sessions.share_token': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE',
   'chat_sessions.share_expires_at': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_expires_at TIMESTAMP',
+  'chat_sessions.version': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1',
   // events columns
   'events.uuid': 'ALTER TABLE events ADD COLUMN IF NOT EXISTS uuid TEXT',
   // users columns
