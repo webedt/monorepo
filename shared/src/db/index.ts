@@ -708,3 +708,31 @@ export {
   type QueryAnalysis,
   type QueryLoggerOptions,
 } from './queryLogger.js';
+
+// Re-export composable query helpers
+export {
+  // Pagination helpers
+  getPaginationParams,
+  buildPaginationMeta,
+  buildPaginatedResponse,
+  buildListResponse,
+  // Condition builders
+  combineConditions,
+  // Sorting helpers
+  orderByCreatedAtDesc,
+  orderByAsc,
+  orderByDesc,
+  // Count helpers
+  countExpression,
+  // Types - Note: PaginatedResult is not re-exported here as it conflicts with sessions/ASessionQueryService
+  // Import from ./queryHelpers.js or use the one from sessions if needed
+  type PaginationOptions,
+  type PaginationMeta,
+  type SortOptions,
+  type ListOptions,
+  type FindByUserOptions,
+  type ListApiResponse,
+} from './queryHelpers.js';
+
+// Re-export entity-specific query helpers
+export * from './queries/index.js';
