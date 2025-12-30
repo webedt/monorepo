@@ -13,46 +13,6 @@ import type { AuthRequest } from '../../middleware/auth.js';
 const router = Router();
 
 /**
- * Maximum concurrent GitHub API requests to avoid rate limiting
- */
-const MAX_CONCURRENT_REQUESTS = 10;
-
-/**
- * Execute async tasks with concurrency limiting
- */
-async function withConcurrencyLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = [];
-  const executing: Promise<void>[] = [];
-
-  for (const item of items) {
-    const promise = fn(item).then((result) => {
-      results.push(result);
-    });
-
-    executing.push(promise as unknown as Promise<void>);
-
-    if (executing.length >= limit) {
-      await Promise.race(executing);
-      // Remove completed promises
-      const completed = executing.filter((p) => {
-        let resolved = false;
-        p.then(() => { resolved = true; }).catch(() => { resolved = true; });
-        return !resolved;
-      });
-      executing.length = 0;
-      executing.push(...completed);
-    }
-  }
-
-  await Promise.all(executing);
-  return results;
-}
-
-/**
  * Resolve file SHA from GitHub. Returns undefined if file doesn't exist.
  * Caches resolved SHAs in the provided cache map.
  */
@@ -127,38 +87,49 @@ async function commitTreeChanges(
   const baseTreeSha = commitData.tree.sha;
 
   // Create new tree with changes
+  // Note: GitHub API accepts sha: null for deletions, but Octokit types expect string.
+  // We build the tree entries with proper typing and cast at the API boundary.
+  const treeEntries = treeChanges.map((change) => {
+    if (change.content !== undefined) {
+      // New or updated file with content
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: change.type,
+        content: change.content,
+      };
+    } else if (change.sha === null) {
+      // Delete file - GitHub API accepts sha: null to remove from tree
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: change.type,
+        sha: null as string | null,
+      };
+    } else {
+      // Keep existing blob (e.g., for renames)
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: change.type,
+        sha: change.sha,
+      };
+    }
+  });
+
+  // Type assertion needed: GitHub API accepts null for sha (to delete files)
+  // but Octokit's types only allow string
   const { data: newTree } = await octokit.git.createTree({
     owner,
     repo,
     base_tree: baseTreeSha,
-    tree: treeChanges.map((change) => {
-      if (change.content !== undefined) {
-        // New or updated file with content
-        return {
-          path: change.path,
-          mode: change.mode,
-          type: change.type,
-          content: change.content,
-        };
-      } else if (change.sha === null) {
-        // Delete file by setting sha to null (omitting from tree)
-        // GitHub API requires omitting the sha field entirely for deletes
-        return {
-          path: change.path,
-          mode: change.mode,
-          type: change.type,
-          sha: null as unknown as string,
-        };
-      } else {
-        // Keep existing blob (e.g., for renames)
-        return {
-          path: change.path,
-          mode: change.mode,
-          type: change.type,
-          sha: change.sha,
-        };
-      }
-    }),
+    tree: treeEntries as Array<{
+      path?: string;
+      mode?: '100644' | '100755' | '040000' | '160000' | '120000';
+      type?: 'blob' | 'tree' | 'commit';
+      sha?: string | null;
+      content?: string;
+    }>,
   });
 
   // Create commit
@@ -438,7 +409,7 @@ router.delete('/:owner/:repo/contents/*', requireAuth, validatePathParam(), asyn
       repo,
       path,
       message: message || `Delete ${path}`,
-      sha: fileSha!,
+      sha: fileSha,
       branch,
     });
 
@@ -613,6 +584,11 @@ router.delete('/:owner/:repo/folder/*', requireAuth, validatePathParam(), async 
         sha: null, // null indicates deletion
       }));
 
+    if (treeChanges.length === 0) {
+      res.status(404).json({ success: false, error: 'No valid files to delete in folder' });
+      return;
+    }
+
     await commitTreeChanges(
       octokit,
       owner,
@@ -745,6 +721,11 @@ router.post('/:owner/:repo/rename-folder/*', requireAuth, validatePathParam(), v
         type: 'blob',
         sha: null,
       });
+    }
+
+    if (treeChanges.length === 0) {
+      res.status(404).json({ success: false, error: 'No valid files to move in folder' });
+      return;
     }
 
     await commitTreeChanges(
