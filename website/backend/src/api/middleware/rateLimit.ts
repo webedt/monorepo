@@ -651,8 +651,8 @@ export const sseRateLimiter = createEnhancedRateLimiter(
 export const shareTokenValidationRateLimiter = createEnhancedRateLimiter(
   'shareToken',
   config.shareTokenWindowMs,
-  config.shareTokenMaxRequests,
-  keyGenerator // IP-based only for public share token endpoints
+  config.shareTokenMaxRequests
+  // No custom keyGenerator - uses express-rate-limit's default IP handling for public endpoints
 );
 
 /**
