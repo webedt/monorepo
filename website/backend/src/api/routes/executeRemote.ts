@@ -9,13 +9,9 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
-import { isValidGeminiAuth, tokenRefreshService } from '@webedt/shared';
-import type { ClaudeAuth } from '@webedt/shared';
-import type { GeminiAuth } from '@webedt/shared';
-import type { ProviderType } from '@webedt/shared';
-import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath, parseGitUrl, validateBranchName, sanitizeBranchName } from '@webedt/shared';
+import { requireAuth, requireEditor, AuthRequest } from '../middleware/auth.js';
+import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -905,8 +901,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/Unauthorized'
  */
 // Main execute endpoint (POST for new requests, GET for SSE reconnect)
-// Rate limited to prevent abuse of expensive AI operations (10/min per user)
-router.post('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
-router.get('/', requireAuth, aiOperationRateLimiter, executeRemoteHandler);
+// Requires editor role or higher - users with 'user' role have limited access
+router.post('/', requireAuth, requireEditor, executeRemoteHandler);
+router.get('/', requireAuth, requireEditor, executeRemoteHandler);
 
 export default router;

@@ -4,8 +4,8 @@
  */
 
 import { Router } from 'express';
-import { z } from 'zod';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -275,9 +275,8 @@ router.post('/users', requireAdmin, validateRequest(createUserSchema), async (re
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role && !ROLE_HIERARCHY.includes(role as UserRole)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -409,9 +408,8 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role !== undefined && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role !== undefined && !ROLE_HIERARCHY.includes(role as UserRole)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
