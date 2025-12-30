@@ -456,6 +456,7 @@ export type {
   NewOrchestratorCycle,
   OrchestratorTask,
   NewOrchestratorTask,
+  UserRole,
   Organization,
   NewOrganization,
   OrganizationMember,
@@ -594,6 +595,9 @@ export {
   snippetsInCollections,
   SNIPPET_LANGUAGES,
   SNIPPET_CATEGORIES,
+  // Role utilities
+  ROLE_HIERARCHY,
+  hasRolePermission,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

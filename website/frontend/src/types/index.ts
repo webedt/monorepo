@@ -2,6 +2,30 @@
  * Core type definitions for WebEDT client
  */
 
+/**
+ * User role type - defines access levels for the platform
+ * - user: Basic user access (read-only, limited features)
+ * - editor: Full access to the editor suite for game creation
+ * - developer: Full access plus development tools and API access
+ * - admin: Full administrative access including user management
+ */
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
+/**
+ * Role hierarchy for permission checks
+ * Higher index = more permissions
+ */
+export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+
+/**
+ * Check if a role has at least the required permission level
+ */
+export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
+  const userLevel = ROLE_HIERARCHY.indexOf(userRole);
+  const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+  return userLevel >= requiredLevel;
+}
+
 // User types
 export interface User {
   id: string;
@@ -26,6 +50,7 @@ export interface User {
   autocompleteEnabled?: boolean;
   autocompleteModel?: string;
   isAdmin: boolean;
+  role: UserRole;
   createdAt: string;
 }
 
