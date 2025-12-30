@@ -22,6 +22,7 @@ import {
 export class MemoryCache {
   private cache: Map<string, CacheEntry> = new Map();
   private tags: Map<string, Set<string>> = new Map(); // tag -> keys
+  private pendingFactories: Map<string, Promise<unknown>> = new Map(); // For request coalescing
   private config: CacheConfig;
   private stats: CacheStats;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -60,6 +61,8 @@ export class MemoryCache {
           }
         });
       }, this.config.cleanupIntervalMs);
+      // Allow process to exit even if timer is running
+      this.cleanupTimer.unref();
     }
   }
 
@@ -285,16 +288,35 @@ export class MemoryCache {
     factory: () => Promise<T>,
     options?: CacheSetOptions
   ): Promise<T> {
+    // Check cache first
     const result = await this.get<T>(key);
-
     if (result.hit) {
       return result.value as T;
     }
 
-    // Execute factory and cache result
-    const value = await factory();
-    await this.set(key, value, options);
-    return value;
+    // Check if there's already a pending factory for this key (request coalescing)
+    const pending = this.pendingFactories.get(key);
+    if (pending) {
+      // Wait for the existing factory to complete
+      return pending as Promise<T>;
+    }
+
+    // Execute factory with request coalescing to prevent stampeding herd
+    const factoryPromise = (async () => {
+      try {
+        const value = await factory();
+        await this.set(key, value, options);
+        return value;
+      } finally {
+        // Clean up pending factory regardless of success/failure
+        this.pendingFactories.delete(key);
+      }
+    })();
+
+    // Track the pending factory
+    this.pendingFactories.set(key, factoryPromise);
+
+    return factoryPromise;
   }
 
   getStats(): CacheStats {
@@ -332,6 +354,8 @@ export class MemoryCache {
             this.errors.push(`Cleanup error: ${err.message}`);
           });
         }, this.config.cleanupIntervalMs);
+        // Allow process to exit even if timer is running
+        this.cleanupTimer.unref();
       }
     }
   }
@@ -390,29 +414,49 @@ export class MemoryCache {
 
   // Private helper methods
 
-  private calculateSize(value: unknown): number {
-    try {
-      // Rough size estimation using JSON stringification
-      const json = JSON.stringify(value);
-      // UTF-8 encoding: ASCII chars = 1 byte, others = 2-4 bytes
-      // Approximation: just use string length * 2 for safety
-      return json.length * 2;
-    } catch {
-      // If value can't be stringified, estimate based on type
-      if (typeof value === 'string') {
-        return value.length * 2;
-      }
-      if (typeof value === 'number') {
-        return 8;
-      }
-      if (typeof value === 'boolean') {
-        return 4;
-      }
-      if (Array.isArray(value)) {
-        return value.length * 100; // Rough estimate
-      }
-      return 1000; // Default for complex objects
+  private calculateSize(value: unknown, seen = new WeakSet<object>()): number {
+    // Handle primitives
+    if (value === null || value === undefined) {
+      return 8;
     }
+    if (typeof value === 'string') {
+      return value.length * 2;
+    }
+    if (typeof value === 'number') {
+      return 8;
+    }
+    if (typeof value === 'boolean') {
+      return 4;
+    }
+
+    // Handle objects with circular reference detection
+    if (typeof value === 'object') {
+      // Check for circular references
+      if (seen.has(value)) {
+        return 0; // Already counted this object
+      }
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        let size = 40; // Array overhead
+        for (const item of value) {
+          size += this.calculateSize(item, seen);
+        }
+        return size;
+      }
+
+      // Regular object
+      let size = 40; // Object overhead
+      for (const key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          size += key.length * 2; // Key size
+          size += this.calculateSize((value as Record<string, unknown>)[key], seen);
+        }
+      }
+      return size;
+    }
+
+    return 100; // Default for unknown types (functions, symbols, etc.)
   }
 
   private ensureCapacity(newEntrySize: number): void {
@@ -454,8 +498,17 @@ export class MemoryCache {
   }
 
   private removeFromTags(key: string): void {
-    for (const taggedKeys of this.tags.values()) {
+    const emptyTags: string[] = [];
+    for (const [tag, taggedKeys] of this.tags.entries()) {
       taggedKeys.delete(key);
+      // Track empty tag sets for cleanup
+      if (taggedKeys.size === 0) {
+        emptyTags.push(tag);
+      }
+    }
+    // Clean up empty tag sets to prevent memory leaks
+    for (const tag of emptyTags) {
+      this.tags.delete(tag);
     }
   }
 

@@ -580,30 +580,46 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const userId = authReq.user!.id;
 
-    // Try to get from cache first
-    const cacheService = ServiceProvider.get(ACacheService);
-    const cachedResult = await cacheService.getSessionList(userId) as { hit: boolean; value?: CachedSessionList };
+    // Try to get from cache first (with graceful degradation)
+    let cacheService: ACacheService | null = null;
+    try {
+      cacheService = ServiceProvider.get(ACacheService);
+      const cachedResult = await cacheService.getSessionList(userId) as { hit: boolean; value?: CachedSessionList };
 
-    if (cachedResult.hit && cachedResult.value) {
-      // Add cache header to indicate cache hit
-      res.setHeader('X-Cache', 'HIT');
-      res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
-      res.json({
-        success: true,
-        data: {
-          sessions: cachedResult.value.sessions,
-          total: cachedResult.value.total,
-        },
+      if (cachedResult.hit && cachedResult.value) {
+        // Add cache header to indicate cache hit
+        res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+        res.json({
+          success: true,
+          data: {
+            sessions: cachedResult.value.sessions,
+            total: cachedResult.value.total,
+          },
+        });
+        return;
+      }
+    } catch (cacheError) {
+      // Cache read failed, fall back to database
+      logger.warn('Cache read failed, falling back to database', {
+        component: 'Sessions',
+        error: cacheError instanceof Error ? cacheError.message : 'Unknown error',
       });
-      return;
     }
 
-    // Cache miss - fetch from database
+    // Cache miss or cache error - fetch from database
     const queryService = ServiceProvider.get(ASessionQueryService);
     const sessions = await queryService.listActive(userId);
 
-    // Cache the result
-    await cacheService.setSessionList(userId, sessions);
+    // Non-blocking cache write with error handling
+    if (cacheService) {
+      cacheService.setSessionList(userId, sessions).catch(err => {
+        logger.warn('Failed to cache session list', {
+          component: 'Sessions',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+    }
 
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');

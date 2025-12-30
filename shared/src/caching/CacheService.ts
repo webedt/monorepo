@@ -378,5 +378,5 @@ export class CacheService extends ACacheService {
   }
 }
 
-// Singleton instance for global use
-export const cacheService = new CacheService();
+// Note: Use ServiceProvider.get(ACacheService) instead of a singleton
+// This ensures proper dependency injection and testability
