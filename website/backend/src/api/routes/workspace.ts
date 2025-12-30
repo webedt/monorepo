@@ -39,7 +39,7 @@ const workspaceEventSchema = {
     eventType: z.string().min(1, 'Event type is required'),
     page: z.string().optional(),
     path: z.string().optional(),
-    payload: z.unknown().optional(),
+    payload: z.record(z.string(), z.unknown()).optional(),
   }),
 };
 

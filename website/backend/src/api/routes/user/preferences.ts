@@ -4,11 +4,33 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { z } from 'zod';
+import { db, users, eq, validateRequest } from '@webedt/shared';
 // Note: Encryption/decryption is now automatic via Drizzle custom column types
 import type { ImageAiKeysData } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
+
+// =============================================================================
+// Validation Schemas
+// =============================================================================
+
+const imageResizeSchema = {
+  body: z.object({
+    maxDimension: z.coerce.number().refine(
+      (val) => [512, 1024, 2048, 4096, 8000].includes(val),
+      { message: 'Invalid max dimension. Must be one of: 512, 1024, 2048, 4096, 8000' }
+    ),
+  }),
+};
+
+const voiceKeywordsSchema = {
+  body: z.object({
+    keywords: z.array(
+      z.string().trim().min(1, 'Keywords cannot be empty')
+    ).max(20, 'Maximum of 20 keywords allowed'),
+  }),
+};
 
 const router = Router();
 
@@ -55,19 +77,10 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
  *     tags: [User]
  *     summary: Update image resize maximum dimension
  */
-router.post('/image-resize-setting', requireAuth, async (req: Request, res: Response) => {
+router.post('/image-resize-setting', requireAuth, validateRequest(imageResizeSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { maxDimension } = req.body;
-
-    const validDimensions = [512, 1024, 2048, 4096, 8000];
-    if (!validDimensions.includes(maxDimension)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid max dimension. Must be one of: 512, 1024, 2048, 4096, 8000',
-      });
-      return;
-    }
 
     await db
       .update(users)
@@ -138,32 +151,14 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
  *     tags: [User]
  *     summary: Update voice command keywords
  */
-router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Response) => {
+router.post('/voice-command-keywords', requireAuth, validateRequest(voiceKeywordsSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { keywords } = req.body;
 
-    if (!Array.isArray(keywords)) {
-      res.status(400).json({
-        success: false,
-        error: 'Keywords must be an array',
-      });
-      return;
-    }
-
-    const normalizedKeywords = keywords
-      .filter((k: unknown): k is string => typeof k === 'string' && (k as string).trim().length > 0)
-      .map((k: string) => k.trim().toLowerCase());
-
-    const uniqueKeywords = [...new Set(normalizedKeywords)];
-
-    if (uniqueKeywords.length > 20) {
-      res.status(400).json({
-        success: false,
-        error: 'Maximum of 20 keywords allowed',
-      });
-      return;
-    }
+    // Normalize: lowercase and remove duplicates (already trimmed by Zod)
+    const normalizedKeywords = (keywords as string[]).map((k) => k.toLowerCase());
+    const uniqueKeywords = [...new Set(normalizedKeywords)] as string[];
 
     await db
       .update(users)
