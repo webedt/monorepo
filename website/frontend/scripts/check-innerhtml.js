@@ -8,6 +8,14 @@
  * content is interpolated without sanitization.
  *
  * Usage: npm run lint:security
+ *
+ * Limitations:
+ * - Multi-line template literals: The static string detection regex operates
+ *   line-by-line and may not correctly identify multi-line template literals
+ *   as safe. Files with multi-line static templates should be added to
+ *   AUDITED_FILES after manual review.
+ * - Context-sensitive analysis: This script uses pattern matching, not AST
+ *   parsing. Some edge cases may produce false positives or negatives.
  */
 
 import { readFileSync, readdirSync, statSync } from 'fs';

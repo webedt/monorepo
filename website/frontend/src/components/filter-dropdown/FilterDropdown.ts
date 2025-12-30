@@ -174,6 +174,13 @@ export class FilterDropdown extends Component<HTMLDivElement> {
     // Escape unit to prevent XSS
     const escapedUnit = this.escapeHtml(unit);
 
+    // Ensure numeric values are valid numbers to prevent HTML injection
+    const safeMin = Number(min) || 0;
+    const safeMax = Number(max) || 100;
+    const safeStep = Number(step) || 1;
+    const safeRangeMin = this.rangeValue.min != null ? Number(this.rangeValue.min) : '';
+    const safeRangeMax = this.rangeValue.max != null ? Number(this.rangeValue.max) : '';
+
     rangeContainer.innerHTML = `
       <div class="filter-dropdown__range-inputs">
         <div class="filter-dropdown__range-field">
@@ -182,11 +189,11 @@ export class FilterDropdown extends Component<HTMLDivElement> {
             type="number"
             class="filter-dropdown__range-input"
             data-range="min"
-            min="${min}"
-            max="${max}"
-            step="${step}"
-            value="${this.rangeValue.min ?? ''}"
-            placeholder="${min}"
+            min="${safeMin}"
+            max="${safeMax}"
+            step="${safeStep}"
+            value="${safeRangeMin}"
+            placeholder="${safeMin}"
           />
         </div>
         <span class="filter-dropdown__range-separator">to</span>
@@ -196,11 +203,11 @@ export class FilterDropdown extends Component<HTMLDivElement> {
             type="number"
             class="filter-dropdown__range-input"
             data-range="max"
-            min="${min}"
-            max="${max}"
-            step="${step}"
-            value="${this.rangeValue.max ?? ''}"
-            placeholder="${max}"
+            min="${safeMin}"
+            max="${safeMax}"
+            step="${safeStep}"
+            value="${safeRangeMax}"
+            placeholder="${safeMax}"
           />
         </div>
       </div>

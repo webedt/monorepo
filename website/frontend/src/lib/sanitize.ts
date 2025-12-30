@@ -75,9 +75,10 @@ export function sanitizeHtml(html: string): string {
       'class', 'id',
       'colspan', 'rowspan',
     ],
-    // Force links to open in new tab and prevent tabnapping
+    // Allow target and rel attributes on links (note: ADD_ATTR only adds to allowed list,
+    // it does not automatically set these values on elements)
     ADD_ATTR: ['target', 'rel'],
-    // Ensure links have proper rel attribute
+    // Remove dangerous event handler attributes
     FORBID_ATTR: ['onclick', 'onerror', 'onload', 'onmouseover'],
   });
 }
@@ -96,8 +97,11 @@ export function sanitizeHtml(html: string): string {
 export function sanitizeHtmlPermissive(html: string): string {
   if (!html) return '';
   return DOMPurify.sanitize(html, {
-    // Allow most tags but remove dangerous ones
-    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+    // Allow most tags but remove dangerous ones that could execute code or affect page structure
+    FORBID_TAGS: [
+      'script', 'style', 'iframe', 'object', 'embed', 'form',
+      'base', 'meta', 'link', 'noscript', 'template',
+    ],
     // Remove all event handlers
     FORBID_ATTR: ['onclick', 'onerror', 'onload', 'onmouseover', 'onfocus', 'onblur'],
   });
