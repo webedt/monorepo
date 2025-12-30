@@ -9,7 +9,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events, eq, and, asc, isNull, ServiceProvider, ASessionAuthorizationService, getPreviewUrlFromSession, logger } from '@webedt/shared';
+import { db, chatSessions, events, eq, and, asc, isNull, isNotNull, ServiceProvider, ASessionAuthorizationService, getPreviewUrlFromSession, logger } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import {
@@ -149,11 +149,14 @@ router.get('/shared/:token/events', publicShareRateLimiter, async (req: Request,
       return;
     }
 
-    // Get events ordered by timestamp
+    // Get non-deleted events ordered by timestamp
     const sessionEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, session.id))
+      .where(and(
+        eq(events.chatSessionId, session.id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     res.json({
@@ -217,11 +220,14 @@ router.get('/shared/:token/events/stream', publicShareRateLimiter, async (req: R
     const writer = createSSEWriter(res);
     writer.setup();
 
-    // Replay stored events
+    // Replay stored non-deleted events
     const storedEvents = await db
       .select()
       .from(events)
-      .where(eq(events.chatSessionId, session.id))
+      .where(and(
+        eq(events.chatSessionId, session.id),
+        isNull(events.deletedAt)
+      ))
       .orderBy(asc(events.id));
 
     for (const event of storedEvents) {

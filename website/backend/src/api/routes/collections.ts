@@ -14,6 +14,7 @@ import {
   desc,
   asc,
   sql,
+  isNull,
   withTransactionOrThrow,
   logger,
   isValidHexColor,
@@ -350,7 +351,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         sessionCount: sql<number>`(
           SELECT COUNT(*)::int
           FROM ${sessionCollections}
+          INNER JOIN ${chatSessions} ON ${sessionCollections.sessionId} = ${chatSessions.id}
           WHERE ${sessionCollections.collectionId} = ${collections.id}
+            AND ${chatSessions.deletedAt} IS NULL
         )`,
       })
       .from(collections)
@@ -792,7 +795,10 @@ router.get('/:id/sessions', requireAuth, async (req: Request, res: Response) => 
       })
       .from(sessionCollections)
       .innerJoin(chatSessions, eq(sessionCollections.sessionId, chatSessions.id))
-      .where(eq(sessionCollections.collectionId, id))
+      .where(and(
+        eq(sessionCollections.collectionId, id),
+        isNull(chatSessions.deletedAt)
+      ))
       .orderBy(desc(sessionCollections.addedAt));
 
     res.json({
