@@ -2,6 +2,9 @@
  * Core type definitions for WebEDT client
  */
 
+// User role types
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
 // User types
 export interface User {
   id: string;
@@ -26,6 +29,7 @@ export interface User {
   autocompleteEnabled?: boolean;
   autocompleteModel?: string;
   isAdmin: boolean;
+  role: UserRole;
   createdAt: string;
 }
 

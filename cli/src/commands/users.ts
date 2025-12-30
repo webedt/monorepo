@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { db, users, lucia } from '@webedt/shared';
+import { db, users, lucia, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { eq, desc } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
@@ -21,6 +22,7 @@ usersCommand
           email: users.email,
           displayName: users.displayName,
           isAdmin: users.isAdmin,
+          role: users.role,
           preferredProvider: users.preferredProvider,
           createdAt: users.createdAt,
         })
@@ -34,27 +36,29 @@ usersCommand
       }
 
       console.log('\nUsers:');
-      console.log('-'.repeat(110));
+      console.log('-'.repeat(120));
       console.log(
         'ID'.padEnd(38) +
         'Email'.padEnd(30) +
-        'Display Name'.padEnd(20) +
+        'Display Name'.padEnd(18) +
+        'Role'.padEnd(12) +
         'Admin'.padEnd(8) +
         'Provider'.padEnd(12)
       );
-      console.log('-'.repeat(110));
+      console.log('-'.repeat(120));
 
       for (const user of userList) {
         console.log(
           (user.id || '').padEnd(38) +
           (user.email || '').slice(0, 28).padEnd(30) +
-          (user.displayName || '').slice(0, 18).padEnd(20) +
+          (user.displayName || '').slice(0, 16).padEnd(18) +
+          (user.role || 'user').padEnd(12) +
           (user.isAdmin ? 'Yes' : 'No').padEnd(8) +
           (user.preferredProvider || 'claude').padEnd(12)
         );
       }
 
-      console.log('-'.repeat(110));
+      console.log('-'.repeat(120));
       console.log(`Total: ${userList.length} user(s)`);
     } catch (error) {
       console.error('Error listing users:', error);
@@ -83,6 +87,7 @@ usersCommand
       console.log(`ID:                ${user.id}`);
       console.log(`Email:             ${user.email}`);
       console.log(`Display Name:      ${user.displayName || 'N/A'}`);
+      console.log(`Role:              ${user.role || 'user'}`);
       console.log(`Is Admin:          ${user.isAdmin ? 'Yes' : 'No'}`);
       console.log(`Preferred Provider:${user.preferredProvider}`);
       console.log(`GitHub Connected:  ${user.githubId ? 'Yes' : 'No'}`);
@@ -102,8 +107,15 @@ usersCommand
   .description('Create a new user')
   .option('-d, --display-name <name>', 'User display name')
   .option('-a, --admin', 'Make user an admin')
+  .option('-r, --role <role>', `User role (${ROLE_HIERARCHY.join(', ')})`, 'user')
   .action(async (email, password, options) => {
     try {
+      // Validate role
+      if (options.role && !ROLE_HIERARCHY.includes(options.role)) {
+        console.error(`Invalid role '${options.role}'. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
+        process.exit(1);
+      }
+
       const existingUser = await db
         .select()
         .from(users)
@@ -118,19 +130,25 @@ usersCommand
       const userId = randomUUID();
       const passwordHash = await bcrypt.hash(password, 10);
 
+      // Determine role - if admin flag is set, use 'admin' role
+      const userRole: UserRole = options.admin ? 'admin' : (options.role as UserRole);
+      const userIsAdmin = options.admin || userRole === 'admin';
+
       await db.insert(users).values({
         id: userId,
         email,
         passwordHash,
         displayName: options.displayName || null,
-        isAdmin: options.admin || false,
+        isAdmin: userIsAdmin,
+        role: userRole,
         preferredProvider: 'claude',
       });
 
       console.log(`\nUser created successfully:`);
       console.log(`  ID:       ${userId}`);
       console.log(`  Email:    ${email}`);
-      console.log(`  Admin:    ${options.admin ? 'Yes' : 'No'}`);
+      console.log(`  Role:     ${userRole}`);
+      console.log(`  Admin:    ${userIsAdmin ? 'Yes' : 'No'}`);
     } catch (error) {
       console.error('Error creating user:', error);
       process.exit(1);
@@ -155,14 +173,66 @@ usersCommand
         process.exit(1);
       }
 
+      // Sync role with admin status
+      const updateData: { isAdmin: boolean; role?: UserRole } = { isAdmin: adminStatus };
+      if (adminStatus) {
+        updateData.role = 'admin';
+      } else if (user.role === 'admin') {
+        // Reset role to 'user' when removing admin status
+        updateData.role = 'user';
+      }
+
       await db
         .update(users)
-        .set({ isAdmin: adminStatus })
+        .set(updateData)
         .where(eq(users.id, userId));
 
       console.log(`User ${user.email} admin status updated to '${adminStatus}'.`);
+      if (updateData.role) {
+        console.log(`User role synced to '${updateData.role}'.`);
+      }
     } catch (error) {
       console.error('Error updating admin status:', error);
+      process.exit(1);
+    }
+  });
+
+usersCommand
+  .command('set-role <userId> <role>')
+  .description(`Set user role (${ROLE_HIERARCHY.join(', ')})`)
+  .action(async (userId, role) => {
+    try {
+      // Validate role
+      if (!ROLE_HIERARCHY.includes(role as UserRole)) {
+        console.error(`Invalid role '${role}'. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
+        process.exit(1);
+      }
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!user) {
+        console.error(`User not found: ${userId}`);
+        process.exit(1);
+      }
+
+      // Sync isAdmin with role
+      const isAdmin = role === 'admin';
+
+      await db
+        .update(users)
+        .set({ role: role as UserRole, isAdmin })
+        .where(eq(users.id, userId));
+
+      console.log(`User ${user.email} role updated to '${role}'.`);
+      if (isAdmin !== user.isAdmin) {
+        console.log(`User admin status synced to '${isAdmin}'.`);
+      }
+    } catch (error) {
+      console.error('Error updating user role:', error);
       process.exit(1);
     }
   });
