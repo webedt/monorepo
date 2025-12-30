@@ -4,7 +4,8 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -73,9 +74,8 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role && !ROLE_HIERARCHY.includes(role as UserRole)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -129,9 +129,8 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role !== undefined && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role !== undefined && !ROLE_HIERARCHY.includes(role as UserRole)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -279,12 +278,10 @@ router.get('/stats', requireAdmin, async (req, res) => {
       count: sql<number>`count(*)`,
     }).from(users).groupBy(users.role);
 
-    const roleCounts: Record<string, number> = {
-      user: 0,
-      editor: 0,
-      developer: 0,
-      admin: 0,
-    };
+    // Initialize counts using ROLE_HIERARCHY to stay in sync with schema
+    const roleCounts: Record<string, number> = Object.fromEntries(
+      ROLE_HIERARCHY.map(role => [role, 0])
+    );
     for (const stat of roleStats) {
       roleCounts[stat.role || 'user'] = Number(stat.count);
     }
