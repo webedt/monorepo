@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { logger, withGitHubResilience, ServiceProvider, ACacheService } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
+import { validatePathParam } from '../../middleware/pathValidation.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import type { CachedGitHubBranches } from '@webedt/shared';
 
@@ -244,7 +245,7 @@ router.post('/:owner/:repo/branches', requireAuth, async (req: Request, res: Res
 /**
  * Delete a branch
  */
-router.delete('/:owner/:repo/branches/*', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:owner/:repo/branches/*', requireAuth, validatePathParam({ isBranchName: true }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -304,7 +305,7 @@ router.delete('/:owner/:repo/branches/*', requireAuth, async (req: Request, res:
 /**
  * Merge base branch into feature branch
  */
-router.post('/:owner/:repo/branches/*/merge-base', requireAuth, async (req: Request, res: Response) => {
+router.post('/:owner/:repo/branches/*/merge-base', requireAuth, validatePathParam({ isBranchName: true }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
