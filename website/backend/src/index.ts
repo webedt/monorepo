@@ -75,6 +75,7 @@ import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
 import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
+import { versionConflictErrorHandler } from './api/middleware/versionConflict.js';
 
 // Import graceful shutdown
 import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
@@ -516,7 +517,6 @@ app.get('*', (req, res) => {
 
 // Version conflict error handler (handles optimistic locking errors)
 // Must be registered before the generic error handler
-import { versionConflictErrorHandler } from './api/middleware/versionConflict.js';
 app.use(versionConflictErrorHandler);
 
 // Error handler

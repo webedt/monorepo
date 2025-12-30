@@ -11,9 +11,11 @@ import {
   VersionConflictError,
   SessionNotFoundError,
   InvalidStatusTransitionError,
+  SessionLockedError,
   isVersionConflict,
   isSessionNotFound,
   isInvalidStatusTransition,
+  isSessionLocked,
 } from '@webedt/shared';
 
 /**
@@ -39,6 +41,7 @@ interface SessionLockingErrorResponse {
  * - VersionConflictError -> 409 Conflict
  * - SessionNotFoundError -> 404 Not Found
  * - InvalidStatusTransitionError -> 409 Conflict (invalid state transition)
+ * - SessionLockedError -> 423 Locked (session is locked by another transaction)
  *
  * Usage:
  * ```typescript
@@ -100,6 +103,21 @@ export const versionConflictErrorHandler: ErrorRequestHandler = (
     return;
   }
 
+  // Handle session locked errors (SKIP LOCKED detected another transaction holding the lock)
+  if (isSessionLocked(err)) {
+    const response: SessionLockingErrorResponse = {
+      success: false,
+      error: 'Session is currently being modified by another request. Please try again.',
+      code: 'SESSION_LOCKED',
+      details: {
+        sessionId: err.sessionId,
+      },
+    };
+
+    res.status(423).json(response); // 423 Locked
+    return;
+  }
+
   // Pass other errors to the next error handler
   next(err);
 };
@@ -109,7 +127,7 @@ export const versionConflictErrorHandler: ErrorRequestHandler = (
  * Useful for client-side retry logic.
  */
 export function isRetryableLockingError(error: unknown): boolean {
-  return isVersionConflict(error);
+  return isVersionConflict(error) || isSessionLocked(error);
 }
 
 /**
@@ -120,6 +138,10 @@ export function getSuggestedRetryDelay(error: unknown): number {
   if (isVersionConflict(error)) {
     // Small delay for version conflicts (likely concurrent user)
     return 100 + Math.random() * 100; // 100-200ms with jitter
+  }
+  if (isSessionLocked(error)) {
+    // Slightly longer delay for locked sessions (another transaction in progress)
+    return 200 + Math.random() * 200; // 200-400ms with jitter
   }
   return 0;
 }

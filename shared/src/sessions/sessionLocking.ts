@@ -56,6 +56,20 @@ export class SessionNotFoundError extends Error {
 }
 
 /**
+ * Error thrown when a session is locked by another transaction (with SKIP LOCKED).
+ */
+export class SessionLockedError extends Error {
+  readonly sessionId: string;
+  readonly code = 'SESSION_LOCKED';
+
+  constructor(sessionId: string) {
+    super(`Session ${sessionId} is currently locked by another transaction`);
+    this.name = 'SessionLockedError';
+    this.sessionId = sessionId;
+  }
+}
+
+/**
  * Error thrown when a status transition is not allowed.
  */
 export class InvalidStatusTransitionError extends Error {
@@ -215,6 +229,7 @@ export async function updateSessionWithOptimisticLock(
  * @param options Lock options
  * @returns The locked session data
  * @throws SessionNotFoundError if the session doesn't exist
+ * @throws SessionLockedError if skipLocked is true and the session is locked by another transaction
  */
 export async function lockSessionForUpdate(
   tx: TransactionContext,
@@ -244,6 +259,21 @@ export async function lockSessionForUpdate(
 
   const rows = result.rows;
   if (!rows || rows.length === 0) {
+    // When using SKIP LOCKED, no rows could mean either:
+    // 1. Session doesn't exist
+    // 2. Session is locked by another transaction
+    // We need to check which case it is
+    if (skipLocked) {
+      // Query without lock to check if session exists
+      const existsResult = await tx.execute(sql`
+        SELECT id FROM chat_sessions WHERE id = ${sessionId}
+      `) as { rows: unknown[] };
+
+      if (existsResult.rows && existsResult.rows.length > 0) {
+        // Session exists but is locked
+        throw new SessionLockedError(sessionId);
+      }
+    }
     throw new SessionNotFoundError(sessionId);
   }
 
@@ -312,10 +342,20 @@ export async function updateSessionStatusWithLock(
     newVersion,
   });
 
-  // Return updated session
+  // Return updated session with the new values applied
+  // This is safe because:
+  // 1. We hold a FOR UPDATE lock, so no other transaction can modify this row
+  // 2. The session data was fetched atomically with the lock
+  // 3. We only override fields that were explicitly in the update
   return {
     ...session,
-    ...update,
+    status: update.status,
+    completedAt: update.completedAt !== undefined ? update.completedAt : session.completedAt,
+    workerLastActivity: update.workerLastActivity !== undefined ? update.workerLastActivity : session.workerLastActivity,
+    totalCost: update.totalCost !== undefined ? update.totalCost : session.totalCost,
+    branch: update.branch !== undefined ? update.branch : session.branch,
+    remoteSessionId: update.remoteSessionId !== undefined ? update.remoteSessionId : session.remoteSessionId,
+    remoteWebUrl: update.remoteWebUrl !== undefined ? update.remoteWebUrl : session.remoteWebUrl,
     version: newVersion,
   };
 }
@@ -375,6 +415,13 @@ export function isSessionNotFound(error: unknown): error is SessionNotFoundError
  */
 export function isInvalidStatusTransition(error: unknown): error is InvalidStatusTransitionError {
   return error instanceof InvalidStatusTransitionError;
+}
+
+/**
+ * Helper to check if an error is a session locked error.
+ */
+export function isSessionLocked(error: unknown): error is SessionLockedError {
+  return error instanceof SessionLockedError;
 }
 
 /**

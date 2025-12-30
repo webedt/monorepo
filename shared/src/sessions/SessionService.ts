@@ -18,10 +18,7 @@ import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { CLAUDE_API_BASE_URL } from '../config/env.js';
 import { eq, desc, and, sql } from 'drizzle-orm';
-import {
-  updateSessionStatusWithLock,
-  InvalidStatusTransitionError,
-} from './sessionLocking.js';
+import { updateSessionStatusWithLock } from './sessionLocking.js';
 
 import type { TransactionContext } from '../db/index.js';
 import type {
@@ -124,6 +121,9 @@ export class SessionService extends ASession {
 
     // Use transaction to ensure session and initial message are created atomically
     // This prevents orphaned sessions if message insertion fails
+    // Note: Unlike resume(), execute() creates a NEW session, so there's no race condition
+    // with other processes - the UUID is freshly generated and unique. Locking utilities
+    // are only needed when updating existing sessions that may be accessed concurrently.
     await withTransactionOrThrow(db, async (tx: TransactionContext) => {
       await tx.insert(chatSessions).values({
         id: chatSessionId,
@@ -525,16 +525,19 @@ export class SessionService extends ASession {
       const normalizedBranch = branch ?? null;
       const normalizedSessionPath = sessionPath ?? null;
 
+      // Check if status changed (used for version increment decision)
+      const statusChanged = newStatus !== session.status;
+
       // Check if anything changed (using normalized values for consistent comparison)
       const hasChanges =
-        newStatus !== session.status ||
+        statusChanged ||
         normalizedTotalCost !== session.totalCost ||
         normalizedBranch !== session.branch ||
         normalizedSessionPath !== session.sessionPath ||
         eventsToInsert.length > 0;
 
       // Update session and insert events in a transaction for consistency
-      // Increment version on any status change to support optimistic locking
+      // Only increment version on status change (not on event-only updates)
       if (hasChanges) {
         await db.transaction(async (tx) => {
           // Batch insert new events for better performance
@@ -549,7 +552,8 @@ export class SessionService extends ASession {
             );
           }
 
-          // Update session with new values and increment version
+          // Update session with new values
+          // Increment version only when status changes to track state machine transitions
           await tx
             .update(chatSessions)
             .set({
@@ -558,7 +562,7 @@ export class SessionService extends ASession {
               branch: branch ?? undefined,
               sessionPath: sessionPath ?? undefined,
               completedAt: completedAt ?? undefined,
-              version: sql`${chatSessions.version} + 1`,
+              ...(statusChanged ? { version: sql`${chatSessions.version} + 1` } : {}),
             })
             .where(eq(chatSessions.id, sessionId));
         });

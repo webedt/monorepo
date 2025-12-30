@@ -64,9 +64,11 @@ export {
   isVersionConflict,
   isSessionNotFound,
   isInvalidStatusTransition,
+  isSessionLocked,
   VersionConflictError,
   SessionNotFoundError,
   InvalidStatusTransitionError,
+  SessionLockedError,
 } from './sessionLocking.js';
 export type {
   SessionStatus,
