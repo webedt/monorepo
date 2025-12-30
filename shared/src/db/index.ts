@@ -536,10 +536,16 @@ export type {
   NewSnippetInCollection,
   SnippetLanguage,
   SnippetCategory,
+  // User role type
+  UserRole,
 } from './schema.js';
 
 // Re-export table definitions from schema
 export {
+  // User role utilities
+  ROLE_HIERARCHY,
+  hasRolePermission,
+  isValidRole,
   // Organization role utilities
   isOrganizationRole,
   ORGANIZATION_ROLES,
