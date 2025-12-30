@@ -11,6 +11,9 @@ import {
   chatSessions,
   messages,
   events,
+  ROLE_HIERARCHY,
+  isValidRole,
+  hasRolePermission,
   type User,
   type NewUser,
   type Session,
@@ -20,7 +23,8 @@ import {
   type Message,
   type NewMessage,
   type Event,
-  type NewEvent
+  type NewEvent,
+  type UserRole
 } from '../../src/db/schema.js';
 
 describe('Database Schema', () => {
@@ -725,5 +729,82 @@ describe('Unique Constraints', () => {
     // chatSessions.sessionPath is defined as unique
     const constraint = { field: 'session_path', unique: true };
     assert.strictEqual(constraint.unique, true);
+  });
+});
+
+describe('Role Hierarchy and Permissions', () => {
+  describe('ROLE_HIERARCHY', () => {
+    it('should define correct role order', () => {
+      assert.deepStrictEqual(ROLE_HIERARCHY, ['user', 'editor', 'developer', 'admin']);
+    });
+
+    it('should have user as lowest role', () => {
+      assert.strictEqual(ROLE_HIERARCHY[0], 'user');
+    });
+
+    it('should have admin as highest role', () => {
+      assert.strictEqual(ROLE_HIERARCHY[ROLE_HIERARCHY.length - 1], 'admin');
+    });
+  });
+
+  describe('isValidRole', () => {
+    it('should return true for valid roles', () => {
+      const validRoles: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+      for (const role of validRoles) {
+        assert.strictEqual(isValidRole(role), true, `Expected ${role} to be valid`);
+      }
+    });
+
+    it('should return false for invalid roles', () => {
+      const invalidRoles = ['guest', 'superadmin', 'moderator', '', 'User', 'ADMIN'];
+      for (const role of invalidRoles) {
+        assert.strictEqual(isValidRole(role), false, `Expected ${role} to be invalid`);
+      }
+    });
+
+    it('should handle edge cases', () => {
+      // Note: These would throw TypeScript errors if passed directly, but testing runtime behavior
+      assert.strictEqual(isValidRole(''), false);
+    });
+  });
+
+  describe('hasRolePermission', () => {
+    it('should allow same role access', () => {
+      assert.strictEqual(hasRolePermission('user', 'user'), true);
+      assert.strictEqual(hasRolePermission('editor', 'editor'), true);
+      assert.strictEqual(hasRolePermission('developer', 'developer'), true);
+      assert.strictEqual(hasRolePermission('admin', 'admin'), true);
+    });
+
+    it('should allow higher role access to lower role requirements', () => {
+      // Editor can access user features
+      assert.strictEqual(hasRolePermission('editor', 'user'), true);
+      // Developer can access editor features
+      assert.strictEqual(hasRolePermission('developer', 'editor'), true);
+      assert.strictEqual(hasRolePermission('developer', 'user'), true);
+      // Admin can access all features
+      assert.strictEqual(hasRolePermission('admin', 'user'), true);
+      assert.strictEqual(hasRolePermission('admin', 'editor'), true);
+      assert.strictEqual(hasRolePermission('admin', 'developer'), true);
+    });
+
+    it('should deny lower role access to higher role requirements', () => {
+      // User cannot access editor features
+      assert.strictEqual(hasRolePermission('user', 'editor'), false);
+      assert.strictEqual(hasRolePermission('user', 'developer'), false);
+      assert.strictEqual(hasRolePermission('user', 'admin'), false);
+      // Editor cannot access developer features
+      assert.strictEqual(hasRolePermission('editor', 'developer'), false);
+      assert.strictEqual(hasRolePermission('editor', 'admin'), false);
+      // Developer cannot access admin features
+      assert.strictEqual(hasRolePermission('developer', 'admin'), false);
+    });
+
+    it('should return false for invalid roles (safe default)', () => {
+      // Invalid roles should return false (deny access)
+      assert.strictEqual(hasRolePermission('invalid' as UserRole, 'user'), false);
+      assert.strictEqual(hasRolePermission('guest' as UserRole, 'user'), false);
+      assert.strictEqual(hasRolePermission('' as UserRole, 'user'), false);
+    });
   });
 });

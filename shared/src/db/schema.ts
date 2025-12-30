@@ -12,6 +12,42 @@ import type {
   ImageAiKeysData,
 } from './encryptedColumns.js';
 
+/**
+ * User role type - defines access levels for the platform
+ * - user: Basic user access (read-only, limited features)
+ * - editor: Full access to the editor suite for game creation
+ * - developer: Full access plus development tools and API access
+ * - admin: Full administrative access including user management
+ */
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
+/**
+ * Role hierarchy for permission checks
+ * Higher index = more permissions
+ */
+export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+
+/**
+ * Check if a given string is a valid UserRole
+ */
+export function isValidRole(role: string): role is UserRole {
+  return ROLE_HIERARCHY.includes(role as UserRole);
+}
+
+/**
+ * Check if a role has at least the required permission level
+ * Returns false for invalid roles (safe default - deny access)
+ */
+export function hasRolePermission(userRole: UserRole | string, requiredRole: UserRole): boolean {
+  // Validate userRole - return false (deny access) for invalid inputs
+  if (!isValidRole(userRole)) {
+    return false;
+  }
+  const userLevel = ROLE_HIERARCHY.indexOf(userRole);
+  const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+  return userLevel >= requiredLevel;
+}
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
@@ -41,6 +77,11 @@ export const users = pgTable('users', {
   preferredModel: text('preferred_model'),
   chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
+  // User role for access control - defaults to 'user' for basic access
+  // 'editor' grants full access to the editor suite for game creation
+  // 'developer' grants full access plus development tools
+  // 'admin' grants full administrative access
+  role: text('role').$type<UserRole>().default('user').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
