@@ -144,9 +144,8 @@ export class QueryLogger {
     for (const entry of this.entries) {
       totalDuration += entry.duration;
 
-      // Track similar queries (by normalized form)
-      const normalized = this.normalizeQuery(entry.query);
-      similarQueries.set(normalized, (similarQueries.get(normalized) ?? 0) + 1);
+      // Track similar queries (already normalized when stored)
+      similarQueries.set(entry.query, (similarQueries.get(entry.query) ?? 0) + 1);
 
       // Track slow queries
       if (entry.duration >= this.options.slowQueryThresholdMs) {

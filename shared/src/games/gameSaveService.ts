@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { gameCloudSaves } from '../db/schema.js';
 import { createResultMap } from '../db/dataLoader.js';
@@ -497,8 +497,7 @@ export class GameSaveService extends AGameSaveService {
   async syncGameSaves(userId: string, gameId: string): Promise<CloudSave[]> {
     const saves = await this.getUserGameSaves(userId, gameId);
 
-    // Partition saves by sync status
-    const alreadySynced = saves.filter((s) => s.syncStatus === 'synced');
+    // Find saves that need syncing
     const needsSync = saves.filter((s) => s.syncStatus !== 'synced');
 
     if (needsSync.length === 0) {

@@ -12,8 +12,6 @@
  * - Query deduplication
  */
 
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-
 export interface DataLoaderOptions {
   /** Maximum batch size before forcing execution (default: 100) */
   maxBatchSize?: number;
