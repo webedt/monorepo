@@ -5,6 +5,7 @@
 
 import { authStore } from '../../stores/authStore';
 import { registerPage, unregisterPage } from '../../lib/hmr';
+import { ListenerRegistry } from '../../lib/listenerRegistry';
 
 export interface PageOptions {
   params?: Record<string, string>;
@@ -16,6 +17,13 @@ export abstract class Page<T extends PageOptions = PageOptions> {
   protected options: T;
   private eventListeners: Array<{ el: Element; type: string; handler: EventListener }> = [];
   private hmrId: string;
+
+  /**
+   * Registry for tracking event listeners with automatic cleanup.
+   * Use this.listeners.add() to register listeners that will be
+   * automatically removed when the page is unmounted.
+   */
+  protected readonly listeners: ListenerRegistry = new ListenerRegistry();
 
   /** Route pattern (e.g., '/chat/:id') */
   abstract readonly route: string;
@@ -76,7 +84,11 @@ export abstract class Page<T extends PageOptions = PageOptions> {
    */
   unmount(): void {
     this.onUnmount();
-    // Clean up event listeners
+
+    // Clean up all listeners registered via the ListenerRegistry
+    this.listeners.removeAll();
+
+    // Clean up legacy event listeners (for backward compatibility)
     for (const { el, type, handler } of this.eventListeners) {
       el.removeEventListener(type, handler);
     }
@@ -96,7 +108,10 @@ export abstract class Page<T extends PageOptions = PageOptions> {
     const scrollTop = this.element.scrollTop;
     const scrollLeft = this.element.scrollLeft;
 
-    // Clean up event listeners
+    // Clean up all listeners registered via the ListenerRegistry
+    this.listeners.removeAll();
+
+    // Clean up legacy event listeners
     for (const { el, type, handler } of this.eventListeners) {
       el.removeEventListener(type, handler);
     }
@@ -166,7 +181,11 @@ export abstract class Page<T extends PageOptions = PageOptions> {
   }
 
   /**
-   * Add event listener with cleanup tracking
+   * Add event listener with cleanup tracking (legacy method for backward compatibility).
+   * Prefer using this.listeners.add() or this.addListener() for new code.
+   *
+   * @deprecated Use {@link addListener}, {@link addListenerBySelector}, or
+   * {@link addListenerToAll} instead. This method will be removed in a future version.
    */
   protected on(selector: string, type: string, handler: EventListener): void {
     const el = this.$(selector);
@@ -174,6 +193,56 @@ export abstract class Page<T extends PageOptions = PageOptions> {
       el.addEventListener(type, handler);
       this.eventListeners.push({ el, type, handler });
     }
+  }
+
+  /**
+   * Add an event listener to any EventTarget with automatic cleanup.
+   * This is the recommended method for adding event listeners in pages.
+   *
+   * @example
+   * // Listen to window events
+   * this.addListener(window, 'resize', this.handleResize.bind(this));
+   *
+   * // Listen to document events
+   * this.addListener(document, 'keydown', this.handleKeydown.bind(this));
+   *
+   * // Listen to element events
+   * const button = this.$('.my-button');
+   * if (button) this.addListener(button, 'click', this.handleClick.bind(this));
+   */
+  protected addListener(
+    target: EventTarget,
+    type: string,
+    handler: EventListener,
+    options?: AddEventListenerOptions | boolean
+  ): void {
+    this.listeners.add(target, type, handler, options);
+  }
+
+  /**
+   * Add event listeners to an element found by selector.
+   * Returns true if element was found and listener was added.
+   */
+  protected addListenerBySelector(
+    selector: string,
+    type: string,
+    handler: EventListener,
+    options?: AddEventListenerOptions | boolean
+  ): boolean {
+    return this.listeners.addBySelector(this.element, selector, type, handler, options);
+  }
+
+  /**
+   * Add event listeners to all elements matching a selector.
+   * Returns the number of listeners added.
+   */
+  protected addListenerToAll(
+    selector: string,
+    type: string,
+    handler: EventListener,
+    options?: AddEventListenerOptions | boolean
+  ): number {
+    return this.listeners.addAllBySelector(this.element, selector, type, handler, options);
   }
 
   /**

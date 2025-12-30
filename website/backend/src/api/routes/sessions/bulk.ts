@@ -24,11 +24,13 @@ import {
   decryptUserFields,
   executeBatch,
   executeBulkWrite,
+  sessionSoftDeleteService,
 } from '@webedt/shared';
 import type { Request, Response } from 'express';
 import type { ClaudeAuth, BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
+import { idempotencyMiddleware } from '../../middleware/idempotency.js';
 import { sendBadRequest } from '../../middleware/sessionMiddleware.js';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { deleteGitHubBranch, archiveClaudeRemoteSession } from './helpers.js';
@@ -134,7 +136,7 @@ function createCleanupOperation(
  * in a single transaction. External cleanup operations (archive remote, delete
  * branch) are performed separately and may partially succeed.
  */
-router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-delete', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-delete' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const {
@@ -227,29 +229,35 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
 
     const validIds = validSessions.map(s => s.id);
 
-    // Execute database operations within a single atomic transaction
-    const dbResult = await executeBulkWrite(
-      db,
-      async (tx) => {
-        if (permanent) {
+    // Execute database operations
+    let dbResult: { success: boolean; error?: Error; retriesAttempted: number; durationMs: number };
+
+    if (permanent) {
+      // Permanent delete uses transaction wrapper
+      dbResult = await executeBulkWrite(
+        db,
+        async (tx) => {
           await tx.delete(chatSessions).where(inArray(chatSessions.id, validIds));
-        } else {
-          await tx
-            .update(chatSessions)
-            .set({ deletedAt: new Date() })
-            .where(inArray(chatSessions.id, validIds));
-        }
-        return { deletedCount: validIds.length };
-      },
-      {
-        operationName: permanent ? 'bulk-permanent-delete' : 'bulk-soft-delete',
-        maxRetries: DEFAULT_MAX_RETRIES,
-        context: {
-          userId: authReq.user!.id,
-          sessionCount: validIds.length,
+          return { deletedCount: validIds.length };
         },
-      }
-    );
+        {
+          operationName: 'bulk-permanent-delete',
+          maxRetries: DEFAULT_MAX_RETRIES,
+          context: {
+            userId: authReq.user!.id,
+            sessionCount: validIds.length,
+          },
+        }
+      );
+    } else {
+      // Soft delete with cascading to messages and events
+      const softDeleteResult = await sessionSoftDeleteService.softDeleteSessions(validIds);
+      dbResult = {
+        success: softDeleteResult.failureCount === 0,
+        retriesAttempted: 0,
+        durationMs: 0,
+      };
+    }
 
     if (!dbResult.success) {
       logger.error('Bulk delete database operation failed', dbResult.error, {
@@ -332,7 +340,7 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
  * The database operation is always atomic - all sessions are restored
  * in a single transaction, or none are if an error occurs.
  */
-router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-restore', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-restore' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionIds } = req.body as {
@@ -373,42 +381,8 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
 
     const validIds = sessions.map(s => s.id);
 
-    // Execute restore within a single atomic transaction
-    const dbResult = await executeBulkWrite(
-      db,
-      async (tx) => {
-        await tx
-          .update(chatSessions)
-          .set({ deletedAt: null })
-          .where(inArray(chatSessions.id, validIds));
-        return { restoredCount: validIds.length };
-      },
-      {
-        operationName: 'bulk-restore',
-        maxRetries: DEFAULT_MAX_RETRIES,
-        context: {
-          userId: authReq.user!.id,
-          sessionCount: validIds.length,
-        },
-      }
-    );
-
-    if (!dbResult.success) {
-      logger.error('Bulk restore database operation failed', dbResult.error, {
-        component: 'Sessions',
-        userId: authReq.user!.id,
-      });
-      res.status(500).json({
-        success: false,
-        error: 'Database operation failed',
-        details: dbResult.error?.message,
-        stats: {
-          retriesAttempted: dbResult.retriesAttempted,
-          durationMs: dbResult.durationMs,
-        },
-      });
-      return;
-    }
+    // Restore sessions with cascading to messages and events
+    const restoreResult = await sessionSoftDeleteService.restoreSessions(validIds);
 
     // Build per-item results
     const itemResults: BulkOperationItemResult[] = sessions.map(session => ({
@@ -417,24 +391,22 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
       message: 'Restored from trash',
     }));
 
-    logger.info(`Restored ${validIds.length} sessions`, {
+    logger.info(`Restored ${restoreResult.successCount} sessions with cascading`, {
       component: 'Sessions',
       userId: authReq.user!.id,
       count: validIds.length,
-      retriesAttempted: dbResult.retriesAttempted,
+      restoreSuccessCount: restoreResult.successCount,
+      restoreFailureCount: restoreResult.failureCount,
     });
 
     res.json({
       success: true,
       data: {
         processed: validIds.length,
-        succeeded: validIds.length,
-        failed: 0,
+        succeeded: restoreResult.successCount,
+        failed: restoreResult.failureCount,
         results: itemResults,
-        stats: {
-          durationMs: dbResult.durationMs,
-          retriesAttempted: dbResult.retriesAttempted,
-        },
+        restoreResults: restoreResult.results,
       }
     });
   } catch (error) {
@@ -449,7 +421,7 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
  *
  * This operation is always atomic - either all sessions are deleted or none.
  */
-router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
+router.delete('/deleted', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/empty-trash' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { archiveRemote = true, deleteGitBranch = false, githubToken } = req.query as {
@@ -620,7 +592,7 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
  * because they cannot be rolled back. The database operations only happen after
  * successful archive of remote sessions.
  */
-router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Response) => {
+router.post('/bulk-archive-remote', requireAuth, idempotencyMiddleware({ endpoint: '/api/sessions/bulk-archive-remote' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { sessionIds, archiveLocal = false } = req.body as {
@@ -734,27 +706,16 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
     };
 
     if (archiveLocal && successfullyArchivedIds.length > 0) {
-      dbResult = await executeBulkWrite(
-        db,
-        async (tx) => {
-          await tx
-            .update(chatSessions)
-            .set({ deletedAt: new Date() })
-            .where(inArray(chatSessions.id, successfullyArchivedIds));
-          return { deletedCount: successfullyArchivedIds.length };
-        },
-        {
-          operationName: 'bulk-archive-local-delete',
-          maxRetries: DEFAULT_MAX_RETRIES,
-          context: {
-            userId: authReq.user!.id,
-            sessionCount: successfullyArchivedIds.length,
-          },
-        }
-      );
+      // Use cascading soft-delete service
+      const softDeleteResult = await sessionSoftDeleteService.softDeleteSessions(successfullyArchivedIds);
+      dbResult = {
+        success: softDeleteResult.failureCount === 0,
+        retriesAttempted: 0,
+        durationMs: 0,
+      };
 
       // Notify session list subscribers for deleted sessions
-      if (dbResult.success) {
+      if (softDeleteResult.successCount > 0) {
         for (const sessionId of successfullyArchivedIds) {
           sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
         }
