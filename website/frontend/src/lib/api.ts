@@ -8,6 +8,10 @@
 import {
   extractApiErrorMessage,
 } from '../types';
+import {
+  IdempotencyKeys,
+  IDEMPOTENCY_KEY_HEADER,
+} from './idempotency';
 import type {
   User,
   Session,
@@ -526,6 +530,7 @@ export const sessionsApi = {
     fetchApi('/api/sessions/bulk-delete', {
       method: 'POST',
       body: { ids },
+      headers: { [IDEMPOTENCY_KEY_HEADER]: IdempotencyKeys.bulkDelete(ids) },
     }),
 
   restore: (id: string) =>
@@ -535,12 +540,14 @@ export const sessionsApi = {
     fetchApi('/api/sessions/bulk-restore', {
       method: 'POST',
       body: { ids },
+      headers: { [IDEMPOTENCY_KEY_HEADER]: IdempotencyKeys.bulkRestore(ids) },
     }),
 
   deletePermanentBulk: (ids: string[]) =>
     fetchApi('/api/sessions/bulk-delete-permanent', {
       method: 'POST',
       body: { ids },
+      headers: { [IDEMPOTENCY_KEY_HEADER]: IdempotencyKeys.bulkDelete(ids) },
     }),
 
   createCodeSession: (data: {
@@ -1140,6 +1147,7 @@ export const purchasesApi = {
     fetchApi<{ purchase: Purchase; message: string }>(`/api/purchases/${purchaseId}/refund`, {
       method: 'POST',
       body: { reason },
+      headers: { [IDEMPOTENCY_KEY_HEADER]: IdempotencyKeys.refund(purchaseId) },
     }),
 
   getStats: () =>

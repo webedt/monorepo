@@ -198,8 +198,11 @@ function getCredentialsFromKeychain(): { accessToken: string; refreshToken?: str
         };
       }
     }
-  } catch {
-    // Keychain access failed or item not found
+  } catch (error) {
+    // Keychain access failed or item not found - this is expected on non-macOS
+    // or when credentials haven't been stored yet
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.debug('getCredentialsFromKeychain: Keychain access failed:', message);
   }
 
   return null;
@@ -261,8 +264,10 @@ export async function getClaudeCredentials(
         };
       }
     }
-  } catch {
-    // File doesn't exist or is invalid, continue to next source
+  } catch (error) {
+    // File doesn't exist or is invalid - log for debugging, continue to next source
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.debug('getClaudeCredentials: Failed to read credentials file:', message);
   }
 
   // 4. macOS Keychain (Claude Code stores credentials here)

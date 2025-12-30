@@ -14,6 +14,7 @@ import { Router, Request, Response } from 'express';
 import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService, FRONTEND_URL, FRONTEND_PORT, getRawBody } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { logger } from '@webedt/shared';
 
 import type { PaymentProvider } from '@webedt/shared';
@@ -120,7 +121,7 @@ router.get('/providers', (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
+router.post('/checkout', requireAuth, idempotencyMiddleware({ endpoint: '/api/payments/checkout' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { gameId, provider = 'stripe' } = req.body;
@@ -374,7 +375,7 @@ router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Respon
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) => {
+router.post('/paypal/capture', requireAuth, idempotencyMiddleware({ endpoint: '/api/payments/paypal/capture' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { orderId } = req.body;
@@ -753,7 +754,7 @@ router.get('/transactions', requireAuth, async (req: Request, res: Response) => 
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/transactions/:transactionId/refund', requireAuth, async (req: Request, res: Response) => {
+router.post('/transactions/:transactionId/refund', requireAuth, idempotencyMiddleware({ endpoint: '/api/payments/refund' }), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { transactionId } = req.params;

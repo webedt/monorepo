@@ -536,6 +536,9 @@ export type {
   NewSnippetInCollection,
   SnippetLanguage,
   SnippetCategory,
+  // Idempotency types
+  IdempotencyKey,
+  NewIdempotencyKey,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -594,6 +597,8 @@ export {
   snippetsInCollections,
   SNIPPET_LANGUAGES,
   SNIPPET_CATEGORIES,
+  // Idempotency tables
+  idempotencyKeys,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
@@ -629,6 +634,18 @@ export {
   type TransactionOptions,
   type TransactionResult,
 } from './transaction.js';
+
+// Re-export bulk transaction utilities
+export {
+  executeBulkTransaction,
+  executeBulkWrite,
+  createBulkApiResponse,
+  type BulkItemResult,
+  type BulkTransactionResult,
+  type BulkTransactionMode,
+  type BulkTransactionConfig,
+  type BulkApiResponse,
+} from './bulkTransaction.js';
 
 // Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds
 // Consumers should import these from @webedt/shared instead of drizzle-orm directly
@@ -691,3 +708,31 @@ export {
   type QueryAnalysis,
   type QueryLoggerOptions,
 } from './queryLogger.js';
+
+// Re-export composable query helpers
+export {
+  // Pagination helpers
+  getPaginationParams,
+  buildPaginationMeta,
+  buildPaginatedResponse,
+  buildListResponse,
+  // Condition builders
+  combineConditions,
+  // Sorting helpers
+  orderByCreatedAtDesc,
+  orderByAsc,
+  orderByDesc,
+  // Count helpers
+  countExpression,
+  // Types - Note: PaginatedResult is not re-exported here as it conflicts with sessions/ASessionQueryService
+  // Import from ./queryHelpers.js or use the one from sessions if needed
+  type PaginationOptions,
+  type PaginationMeta,
+  type SortOptions,
+  type ListOptions,
+  type FindByUserOptions,
+  type ListApiResponse,
+} from './queryHelpers.js';
+
+// Re-export entity-specific query helpers
+export * from './queries/index.js';
