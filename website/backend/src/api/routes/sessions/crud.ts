@@ -7,7 +7,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, events, eq, and, asc, isNotNull, logger, generateSessionPath } from '@webedt/shared';
+import { z } from 'zod';
+import { db, chatSessions, messages, events, eq, and, asc, isNotNull, logger, generateSessionPath, validateRequest, CommonSchemas } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 
 import type { AuthRequest } from '../../middleware/auth.js';
@@ -31,6 +32,58 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractEventUuid } from '@webedt/shared';
 
 import type { SessionCrudServices, SessionMiddlewareServices } from '@webedt/shared';
+
+// =============================================================================
+// Validation Schemas
+// =============================================================================
+
+const createCodeSessionSchema = {
+  body: z.object({
+    title: z.string().trim().optional(),
+    repositoryOwner: CommonSchemas.githubOwner,
+    repositoryName: CommonSchemas.githubRepo,
+    baseBranch: CommonSchemas.githubBranch,
+    branch: CommonSchemas.githubBranch,
+  }),
+};
+
+const createEventSchema = {
+  body: z.object({
+    eventData: z.record(z.string(), z.unknown()).refine(
+      (obj) => Object.keys(obj).length > 0,
+      { message: 'Event data cannot be empty' }
+    ),
+  }),
+};
+
+const createMessageSchema = {
+  body: z.object({
+    type: z.enum(['user', 'assistant', 'system', 'error'], {
+      errorMap: () => ({ message: 'Invalid message type. Must be one of: user, assistant, system, error' }),
+    }),
+    content: z.string().min(1, 'Content is required'),
+  }),
+};
+
+const updateSessionSchema = {
+  body: z.object({
+    userRequest: z.string().trim().min(1, 'User request cannot be empty').optional(),
+    branch: z.string().trim().min(1, 'Branch cannot be empty').optional(),
+  }).refine(
+    (data) => data.userRequest || data.branch,
+    { message: 'At least one field (userRequest or branch) must be provided' }
+  ),
+};
+
+const workerStatusSchema = {
+  body: z.object({
+    status: z.enum(['completed', 'error'], {
+      errorMap: () => ({ message: 'Invalid status. Must be "completed" or "error"' }),
+    }),
+    completedAt: z.string().datetime().optional(),
+    workerSecret: z.string().min(1, 'Worker secret is required'),
+  }),
+};
 
 // =============================================================================
 // Route Factory (Recommended Pattern)
@@ -112,7 +165,7 @@ export function createCrudRoutes(
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
+router.post('/create-code-session', requireAuth, validateRequest(createCodeSessionSchema), async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const {
@@ -122,15 +175,6 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       baseBranch,
       branch,
     } = req.body;
-
-    // Validate required fields
-    if (!repositoryOwner || !repositoryName || !baseBranch || !branch) {
-      res.status(400).json({
-        success: false,
-        error: 'Missing required fields: repositoryOwner, repositoryName, baseBranch, branch',
-      });
-      return;
-    }
 
     // Generate session ID
     const sessionId = uuidv4();
@@ -383,14 +427,9 @@ router.get('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Requ
 }, { errorMessage: 'Failed to fetch session' }));
 
 // Create an event for a session
-router.post('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddleware, validateRequest(createEventSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { eventData } = req.body;
-
-  if (!eventData) {
-    sendBadRequest(res, 'Event data is required');
-    return;
-  }
 
   // Create event - extract uuid for efficient deduplication queries
   const eventUuid = extractEventUuid(eventData as Record<string, unknown>);
@@ -407,21 +446,9 @@ router.post('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddl
 }, { errorMessage: 'Failed to create event' }));
 
 // Create a message for a session
-router.post('/:id/messages', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/messages', requireAuth, validateSessionId, sessionOwnershipMiddleware, validateRequest(createMessageSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { type, content } = req.body;
-
-  if (!type || !content) {
-    sendBadRequest(res, 'Type and content are required');
-    return;
-  }
-
-  // Validate message type
-  const validTypes = ['user', 'assistant', 'system', 'error'];
-  if (!validTypes.includes(type)) {
-    sendBadRequest(res, 'Invalid message type');
-    return;
-  }
 
   // Create message
   const [newMessage] = await db
@@ -484,26 +511,17 @@ router.get('/:id/events', requireAuth, validateSessionId, sessionOwnershipMiddle
 }, { errorMessage: 'Failed to fetch events' }));
 
 // Update a chat session
-router.patch('/:id', requireAuth, validateSessionId, sessionOwnershipMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id', requireAuth, validateSessionId, sessionOwnershipMiddleware, validateRequest(updateSessionSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { userRequest, branch } = req.body;
 
-  // At least one field must be provided
-  const hasUserRequest = userRequest && typeof userRequest === 'string' && userRequest.trim().length > 0;
-  const hasBranch = branch && typeof branch === 'string' && branch.trim().length > 0;
-
-  if (!hasUserRequest && !hasBranch) {
-    sendBadRequest(res, 'At least one field (userRequest or branch) must be provided');
-    return;
-  }
-
-  // Build update object with only provided fields
+  // Build update object with only provided fields (already trimmed by schema)
   const updateData: { userRequest?: string; branch?: string } = {};
-  if (hasUserRequest) {
-    updateData.userRequest = userRequest.trim();
+  if (userRequest) {
+    updateData.userRequest = userRequest;
   }
-  if (hasBranch) {
-    updateData.branch = branch.trim();
+  if (branch) {
+    updateData.branch = branch;
   }
 
   // Update session
@@ -613,7 +631,7 @@ router.post('/:id/restore', requireAuth, validateSessionId, asyncHandler(async (
 }, { errorMessage: 'Failed to restore session' }));
 
 // Worker callback endpoint
-router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/worker-status', validateSessionId, validateRequest(workerStatusSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req as SessionRequest;
   const { status, completedAt, workerSecret } = req.body;
 
@@ -622,11 +640,6 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
   if (!expectedSecret || workerSecret !== expectedSecret) {
     logger.warn(`Invalid worker secret for session ${sessionId}`, { component: 'Sessions' });
     res.status(401).json({ success: false, error: 'Invalid worker secret' });
-    return;
-  }
-
-  if (!status || !['completed', 'error'].includes(status)) {
-    sendBadRequest(res, 'Invalid status. Must be "completed" or "error"');
     return;
   }
 
