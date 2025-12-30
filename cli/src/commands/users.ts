@@ -35,11 +35,11 @@ usersCommand
 
       // Filter by role if specified
       if (options.role) {
-        if (!validRoles.includes(options.role)) {
+        if (!validRoles.includes(options.role as UserRole)) {
           console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
           process.exit(1);
         }
-        query = query.where(eq(users.role, options.role)) as typeof query;
+        query = query.where(eq(users.role, options.role as UserRole)) as typeof query;
       }
 
       const userList = await query;
@@ -123,7 +123,7 @@ usersCommand
   .action(async (email, password, options) => {
     try {
       // Validate role if provided
-      if (options.role && !validRoles.includes(options.role)) {
+      if (options.role && !validRoles.includes(options.role as UserRole)) {
         console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
         process.exit(1);
       }
@@ -208,7 +208,7 @@ usersCommand
   .action(async (userId, role) => {
     try {
       // Validate role
-      if (!validRoles.includes(role)) {
+      if (!validRoles.includes(role as UserRole)) {
         console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
         process.exit(1);
       }

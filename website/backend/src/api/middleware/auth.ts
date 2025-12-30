@@ -96,7 +96,7 @@ export function requireRole(requiredRole: UserRole) {
       return;
     }
 
-    const userRole = req.user.role || 'user';
+    const userRole: UserRole = req.user.role ?? 'user';
     if (!hasRolePermission(userRole, requiredRole)) {
       res.status(403).json({
         success: false,
