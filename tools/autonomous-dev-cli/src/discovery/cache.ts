@@ -562,9 +562,14 @@ export class PersistentAnalysisCache {
       this.cache.delete(lruKey);
       this.stats.evictions++;
 
-      // Delete persisted file
+      // Delete persisted file (fire-and-forget with logging)
       if (this.config.persistToDisk && entry) {
-        this.deletePersistedEntry(entry.key).catch(() => {});
+        this.deletePersistedEntry(entry.key).catch((error) => {
+          logger.debug('Failed to delete persisted cache entry during LRU eviction', {
+            key: entry.key,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }
 
       logger.debug('Evicted LRU cache entry', { key: lruKey });
@@ -669,7 +674,12 @@ export class PersistentAnalysisCache {
       invalidated++;
 
       if (this.config.persistToDisk && entry) {
-        await this.deletePersistedEntry(entry.key).catch(() => {});
+        await this.deletePersistedEntry(entry.key).catch((error) => {
+          logger.debug('Failed to delete persisted cache entry during invalidation', {
+            key: entry.key,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }
     }
 
@@ -751,7 +761,12 @@ export class PersistentAnalysisCache {
             this.stats.persistReads++;
           } else {
             // Delete expired entry
-            await unlink(filePath).catch(() => {});
+            await unlink(filePath).catch((error) => {
+              logger.debug('Failed to delete expired cache file', {
+                filePath,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
           }
         } catch (error) {
           logger.debug('Failed to load cache entry', { file, error });
@@ -800,8 +815,14 @@ export class PersistentAnalysisCache {
     const filePath = this.getCacheFilePath(key);
     try {
       await unlink(filePath);
-    } catch {
-      // Ignore errors
+    } catch (error) {
+      // File might not exist or be inaccessible - log at debug level
+      // since this is a non-critical cleanup operation
+      logger.debug('Failed to delete cache file', {
+        key,
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -819,11 +840,19 @@ export class PersistentAnalysisCache {
       const files = await readdir(cacheDir);
       const jsonFiles = files.filter(f => f.endsWith('.json'));
 
-      await Promise.all(
-        jsonFiles.map(file => unlink(join(cacheDir, file)).catch(() => {}))
+      const deleteResults = await Promise.allSettled(
+        jsonFiles.map(file => unlink(join(cacheDir, file)))
       );
 
-      logger.debug('Cleared persisted cache', { filesDeleted: jsonFiles.length });
+      const failedDeletes = deleteResults.filter(r => r.status === 'rejected');
+      if (failedDeletes.length > 0) {
+        logger.debug('Some cache files failed to delete during clear', {
+          totalFiles: jsonFiles.length,
+          failedCount: failedDeletes.length,
+        });
+      }
+
+      logger.debug('Cleared persisted cache', { filesDeleted: jsonFiles.length - failedDeletes.length });
     } catch (error) {
       logger.debug('Failed to clear persisted cache', { error });
     }

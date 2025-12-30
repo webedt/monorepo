@@ -12,6 +12,7 @@
 
 import { randomUUID } from 'crypto';
 import type { GeneratedTitle, TitleGeneratorConfig, TitleGenerationEvent, TitleGenerationCallback } from './types.js';
+import { logger } from '../utils/logging/logger.js';
 
 // Constants
 const CLAUDE_AI_URL = 'https://claude.ai';
@@ -311,35 +312,53 @@ async function trySonnetSession(
           if (result) break;
         }
 
-        // Archive the temp session
-        await fetch(`${CLAUDE_API_BASE_URL}/v1/sessions/${session.id}/archive`, {
+        // Archive the temp session (fire-and-forget with logging)
+        fetch(`${CLAUDE_API_BASE_URL}/v1/sessions/${session.id}/archive`, {
           method: 'POST',
           headers: buildHeaders(accessToken, orgUuid),
           body: JSON.stringify({}),
-        }).catch(() => {});
+        }).catch((error) => {
+          logger.warn('Failed to archive temp title generation session', {
+            component: 'TitleGenerator',
+            sessionId: session.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
 
         return result;
       }
 
       if (status.session_status === 'failed') {
-        // Archive and return null
-        await fetch(`${CLAUDE_API_BASE_URL}/v1/sessions/${session.id}/archive`, {
+        // Archive and return null (fire-and-forget with logging)
+        fetch(`${CLAUDE_API_BASE_URL}/v1/sessions/${session.id}/archive`, {
           method: 'POST',
           headers: buildHeaders(accessToken, orgUuid),
           body: JSON.stringify({}),
-        }).catch(() => {});
+        }).catch((error) => {
+          logger.warn('Failed to archive temp title generation session after failure', {
+            component: 'TitleGenerator',
+            sessionId: session.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
         return null;
       }
 
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    // Timeout - archive and return null
-    await fetch(`${CLAUDE_API_BASE_URL}/v1/sessions/${session.id}/archive`, {
+    // Timeout - archive and return null (fire-and-forget with logging)
+    fetch(`${CLAUDE_API_BASE_URL}/v1/sessions/${session.id}/archive`, {
       method: 'POST',
       headers: buildHeaders(accessToken, orgUuid),
       body: JSON.stringify({}),
-    }).catch(() => {});
+    }).catch((error) => {
+      logger.warn('Failed to archive temp title generation session after timeout', {
+        component: 'TitleGenerator',
+        sessionId: session.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     return null;
   } catch {
