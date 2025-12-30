@@ -8,7 +8,6 @@
  * - Structured error reporting
  */
 
-import { drizzle } from 'drizzle-orm/node-postgres';
 import { logger } from '../utils/logging/logger.js';
 import { sleep, calculateBackoffDelay } from '../utils/timing.js';
 import { withTransaction, type TransactionContext, type TransactionOptions } from './transaction.js';
@@ -267,14 +266,8 @@ async function executeAtomicBulk<T, R>(
             });
           } catch (error) {
             // In atomic mode, any failure causes rollback
-            const err = error instanceof Error ? error : new Error(String(error));
-            results.push({
-              item,
-              success: false,
-              error: err,
-              durationMs: Date.now() - itemStart,
-            });
-            // Throw to trigger transaction rollback
+            // Rethrow to trigger transaction rollback - results will be
+            // reconstructed in the outer catch marking all items as failed
             throw error;
           }
         }

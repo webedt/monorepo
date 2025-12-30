@@ -2,9 +2,12 @@
  * Sessions Bulk Routes
  * Batch operations for managing multiple sessions at once
  *
- * All database operations are wrapped in transactions to prevent partial failures
- * and ensure data consistency. Supports both atomic (all-or-nothing) and partial
- * success modes.
+ * All database write operations are wrapped in transactions to prevent partial
+ * failures and ensure data consistency. Database operations use executeBulkWrite
+ * which performs all changes in a single atomic transaction.
+ *
+ * External API calls (Claude Remote archive, GitHub branch delete) are executed
+ * OUTSIDE of database transactions since they cannot be rolled back.
  */
 
 import { Router } from 'express';
@@ -21,10 +24,9 @@ import {
   decryptUserFields,
   executeBatch,
   executeBulkWrite,
-  executeBulkTransaction,
 } from '@webedt/shared';
 import type { Request, Response } from 'express';
-import type { ClaudeAuth, BatchOperationConfig, BulkTransactionMode, TransactionContext } from '@webedt/shared';
+import type { ClaudeAuth, BatchOperationConfig } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import { sendBadRequest } from '../../middleware/sessionMiddleware.js';
@@ -128,9 +130,9 @@ function createCleanupOperation(
  * POST /api/sessions/bulk-delete
  * Soft delete or permanently delete multiple chat sessions
  *
- * Supports two modes:
- * - atomic: All sessions are deleted in a single transaction, rolls back on any failure
- * - partial (default): Each session is deleted in its own transaction, failures are tracked individually
+ * The database operation is always atomic - all sessions are updated/deleted
+ * in a single transaction. External cleanup operations (archive remote, delete
+ * branch) are performed separately and may partially succeed.
  */
 router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -141,14 +143,12 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       archiveRemote = true,
       deleteGitBranch = false,
       githubToken,
-      atomic = false,
     } = req.body as {
       sessionIds: string[];
       permanent?: boolean;
       archiveRemote?: boolean;
       deleteGitBranch?: boolean;
       githubToken?: string;
-      atomic?: boolean;
     };
 
     // Validate sessionIds
@@ -226,9 +226,8 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
     });
 
     const validIds = validSessions.map(s => s.id);
-    const mode: BulkTransactionMode = atomic ? 'atomic' : 'partial';
 
-    // Execute database operations within transactions
+    // Execute database operations within a single atomic transaction
     const dbResult = await executeBulkWrite(
       db,
       async (tx) => {
@@ -248,7 +247,6 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         context: {
           userId: authReq.user!.id,
           sessionCount: validIds.length,
-          mode,
         },
       }
     );
@@ -296,7 +294,6 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       component: 'Sessions',
       userId: authReq.user!.id,
       count: validIds.length,
-      mode,
       cleanupSuccessCount: cleanupResult.successCount,
       cleanupFailureCount: cleanupResult.failureCount,
       dbRetries: dbResult.retriesAttempted,
@@ -312,7 +309,6 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         results: itemResults,
         cleanupResults,
         stats: {
-          mode,
           durationMs: dbResult.durationMs,
           retriesAttempted: dbResult.retriesAttempted,
           cleanupStats: {
@@ -333,14 +329,14 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
  * POST /api/sessions/bulk-restore
  * Restore multiple deleted chat sessions from trash
  *
- * Supports atomic mode for all-or-nothing restoration.
+ * The database operation is always atomic - all sessions are restored
+ * in a single transaction, or none are if an error occurs.
  */
 router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { sessionIds, atomic = false } = req.body as {
+    const { sessionIds } = req.body as {
       sessionIds: string[];
-      atomic?: boolean;
     };
 
     // Validate sessionIds
@@ -376,9 +372,8 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
     }
 
     const validIds = sessions.map(s => s.id);
-    const mode: BulkTransactionMode = atomic ? 'atomic' : 'partial';
 
-    // Execute restore within a transaction
+    // Execute restore within a single atomic transaction
     const dbResult = await executeBulkWrite(
       db,
       async (tx) => {
@@ -394,7 +389,6 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
         context: {
           userId: authReq.user!.id,
           sessionCount: validIds.length,
-          mode,
         },
       }
     );
@@ -427,7 +421,6 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
       component: 'Sessions',
       userId: authReq.user!.id,
       count: validIds.length,
-      mode,
       retriesAttempted: dbResult.retriesAttempted,
     });
 
@@ -439,7 +432,6 @@ router.post('/bulk-restore', requireAuth, async (req: Request, res: Response) =>
         failed: 0,
         results: itemResults,
         stats: {
-          mode,
           durationMs: dbResult.durationMs,
           retriesAttempted: dbResult.retriesAttempted,
         },
@@ -620,16 +612,20 @@ router.delete('/deleted', requireAuth, async (req: Request, res: Response) => {
  * POST /api/sessions/bulk-archive-remote
  * Archive Claude Remote sessions
  *
- * Supports partial mode by default - each session is archived independently.
- * With archiveLocal=true, also soft-deletes the local session in the same transaction.
+ * This endpoint performs two separate operations:
+ * 1. External API calls to archive remote sessions (cannot be rolled back)
+ * 2. Optional local database soft-delete (wrapped in transaction)
+ *
+ * Note: External API calls are intentionally done OUTSIDE the database transaction
+ * because they cannot be rolled back. The database operations only happen after
+ * successful archive of remote sessions.
  */
 router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { sessionIds, archiveLocal = false, atomic = false } = req.body as {
+    const { sessionIds, archiveLocal = false } = req.body as {
       sessionIds: string[];
       archiveLocal?: boolean;
-      atomic?: boolean;
     };
 
     // Validate sessionIds
@@ -670,97 +666,141 @@ router.post('/bulk-archive-remote', requireAuth, async (req: Request, res: Respo
       return;
     }
 
-    const mode: BulkTransactionMode = atomic ? 'atomic' : 'partial';
+    const startTime = Date.now();
 
-    // Use bulk transaction to handle both external archive and optional local delete
-    const txResult = await executeBulkTransaction(
-      db,
-      sessions,
-      async (tx: TransactionContext, session: ChatSession) => {
-        const result: SessionArchiveResult = {
+    // Step 1: Archive remote sessions via external API (outside transaction)
+    // These calls cannot be rolled back, so we do them first
+    const archiveOperation = async (session: ChatSession): Promise<SessionArchiveResult> => {
+      if (!session.remoteSessionId) {
+        return {
           sessionId: session.id,
           success: false,
-          message: '',
+          message: 'No remote session ID',
         };
+      }
 
-        // Skip sessions without remote ID
-        if (!session.remoteSessionId) {
-          result.message = 'No remote session ID';
-          return result;
-        }
-
-        // Archive remote session (external call)
+      try {
         const archiveResult = await archiveClaudeRemoteSession(
           session.remoteSessionId,
           claudeAuth as ClaudeAuth,
           process.env.CLAUDE_ENVIRONMENT_ID
         );
+        return {
+          sessionId: session.id,
+          success: archiveResult.success,
+          message: archiveResult.message,
+        };
+      } catch (error) {
+        return {
+          sessionId: session.id,
+          success: false,
+          message: (error as Error).message,
+        };
+      }
+    };
 
-        result.success = archiveResult.success;
-        result.message = archiveResult.message;
+    // Execute external archive operations with controlled concurrency
+    const archiveBatchConfig: BatchOperationConfig<ChatSession, SessionArchiveResult> = {
+      concurrency: DEFAULT_SESSION_CONCURRENCY,
+      maxBatchSize: MAX_ARCHIVE_BATCH_SIZE,
+      operationName: 'bulk-archive-remote-external',
+      continueOnError: true,
+    };
 
-        // Optionally soft delete the local session too (within same transaction)
-        if (archiveResult.success && archiveLocal) {
+    const archiveResult = await executeBatch(sessions, archiveOperation, archiveBatchConfig);
+
+    // Collect successfully archived session IDs
+    const successfullyArchivedIds: string[] = [];
+    const archiveResults: SessionArchiveResult[] = archiveResult.results.map(itemResult => {
+      if (itemResult.success && itemResult.result) {
+        if (itemResult.result.success) {
+          successfullyArchivedIds.push(itemResult.item.id);
+        }
+        return itemResult.result;
+      }
+      return {
+        sessionId: itemResult.item.id,
+        success: false,
+        message: itemResult.error?.message || 'Unknown error',
+      };
+    });
+
+    // Step 2: Optionally soft-delete local sessions (in transaction)
+    // Only delete sessions that were successfully archived remotely
+    let dbResult: { success: boolean; error?: Error; retriesAttempted: number; durationMs: number } = {
+      success: true,
+      retriesAttempted: 0,
+      durationMs: 0,
+    };
+
+    if (archiveLocal && successfullyArchivedIds.length > 0) {
+      dbResult = await executeBulkWrite(
+        db,
+        async (tx) => {
           await tx
             .update(chatSessions)
             .set({ deletedAt: new Date() })
-            .where(eq(chatSessions.id, session.id));
-        }
-
-        return result;
-      },
-      {
-        mode,
-        operationName: 'bulk-archive-remote',
-        maxRetries: DEFAULT_MAX_RETRIES,
-        context: {
-          userId: authReq.user!.id,
-          archiveLocal,
+            .where(inArray(chatSessions.id, successfullyArchivedIds));
+          return { deletedCount: successfullyArchivedIds.length };
         },
-      }
-    );
+        {
+          operationName: 'bulk-archive-local-delete',
+          maxRetries: DEFAULT_MAX_RETRIES,
+          context: {
+            userId: authReq.user!.id,
+            sessionCount: successfullyArchivedIds.length,
+          },
+        }
+      );
 
-    // Notify session list subscribers for archived+deleted sessions
-    if (archiveLocal) {
-      for (const itemResult of txResult.results) {
-        if (itemResult.success && itemResult.result?.success) {
-          sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, itemResult.item.id);
+      // Notify session list subscribers for deleted sessions
+      if (dbResult.success) {
+        for (const sessionId of successfullyArchivedIds) {
+          sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
         }
       }
     }
 
     // Build per-item results
-    const itemResults: BulkOperationItemResult[] = txResult.results.map(itemResult => ({
-      id: itemResult.item.id,
-      success: itemResult.success && (itemResult.result?.success ?? false),
-      message: itemResult.result?.message,
-      error: itemResult.error?.message || (!itemResult.result?.success ? itemResult.result?.message : undefined),
+    const itemResults: BulkOperationItemResult[] = archiveResults.map(result => ({
+      id: result.sessionId,
+      success: result.success,
+      message: result.message,
+      error: !result.success ? result.message : undefined,
     }));
 
-    const archiveSuccessCount = itemResults.filter(r => r.success).length;
+    const archiveSuccessCount = archiveResults.filter(r => r.success).length;
+    const totalDurationMs = Date.now() - startTime;
 
     logger.info(`Archived ${archiveSuccessCount}/${sessions.length} remote sessions`, {
       component: 'Sessions',
       userId: authReq.user!.id,
       archiveLocal,
-      mode,
-      successCount: txResult.successCount,
-      failureCount: txResult.failureCount,
-      retriesAttempted: txResult.retriesAttempted,
+      archiveSuccessCount,
+      archiveFailureCount: sessions.length - archiveSuccessCount,
+      localDeleteSuccess: dbResult.success,
+      localDeleteRetries: dbResult.retriesAttempted,
     });
 
     res.json({
-      success: txResult.success,
+      success: archiveSuccessCount > 0 && dbResult.success,
       data: {
         processed: sessions.length,
         succeeded: archiveSuccessCount,
         failed: sessions.length - archiveSuccessCount,
         results: itemResults,
         stats: {
-          mode,
-          durationMs: txResult.durationMs,
-          retriesAttempted: txResult.retriesAttempted,
-          rolledBack: txResult.rolledBack,
+          durationMs: totalDurationMs,
+          archiveStats: {
+            successCount: archiveResult.successCount,
+            failureCount: archiveResult.failureCount,
+            durationMs: archiveResult.totalDurationMs,
+          },
+          localDeleteStats: archiveLocal ? {
+            success: dbResult.success,
+            retriesAttempted: dbResult.retriesAttempted,
+            durationMs: dbResult.durationMs,
+          } : undefined,
         },
       }
     });

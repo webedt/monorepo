@@ -4,7 +4,7 @@
  * and structured error responses.
  */
 
-import { describe, it, beforeEach, afterEach, mock } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
   executeBulkTransaction,
@@ -133,7 +133,8 @@ describe('executeBulkTransaction', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.successCount, 1);
-      assert.ok(result.retriesAttempted >= 0);
+      // Verify retries happened: 2 failed attempts + 1 success = 3 total calls
+      assert.strictEqual(mockDb.callCount, 3);
     });
 
     it('should handle empty items array', async () => {
@@ -214,9 +215,8 @@ describe('executeBulkTransaction', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.successCount, 2);
-      // After transient errors are exhausted, should succeed
-      // The retry tracking verifies the transient error handling worked
-      assert.ok(result.retriesAttempted >= 0);
+      // Verify retry happened: 1 failed attempt + 1 success = 2 total calls
+      assert.strictEqual(mockDb.callCount, 2);
     });
   });
 
@@ -307,8 +307,8 @@ describe('executeBulkWrite', () => {
     );
 
     assert.strictEqual(result.success, true);
-    // Note: retries count is tracked but the internal withTransaction handles retry counting
-    assert.ok(result.retriesAttempted >= 0);
+    // Verify retry happened: 1 failed attempt + 1 success = 2 total calls
+    assert.strictEqual(mockDb.callCount, 2);
   });
 });
 
