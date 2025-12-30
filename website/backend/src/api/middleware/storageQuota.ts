@@ -92,7 +92,7 @@ export function requireStorageQuota(options: StorageQuotaOptions = {}) {
 
       next();
     } catch (error) {
-      logger.error('Storage quota check failed', error, {
+      logger.error('Storage quota check failed', error as Error, {
         component: 'StorageQuota',
         userId: authReq.user?.id,
       });

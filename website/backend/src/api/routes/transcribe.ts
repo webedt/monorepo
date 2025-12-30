@@ -156,7 +156,7 @@ router.post('/transcribe', aiOperationRateLimiter, upload.single('audio'), async
       },
     });
   } catch (error) {
-    logger.error('Transcription error', error, { component: 'transcribe', operation: 'transcribe' });
+    logger.error('Transcription error', error as Error, { component: 'transcribe', operation: 'transcribe' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to transcribe audio',

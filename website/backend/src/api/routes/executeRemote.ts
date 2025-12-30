@@ -220,7 +220,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         // Use centralized token refresh service for Gemini tokens
         geminiAuth = await tokenRefreshService.ensureValidGeminiTokenForUser(user.id, geminiAuth);
       } catch (error) {
-        logger.error('Failed to refresh Gemini token', error, { component: 'ExecuteRemoteRoute' });
+        logger.error('Failed to refresh Gemini token', error as Error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Gemini token expired. Please reconnect your Gemini account.' });
         return;
       }
@@ -243,7 +243,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         // Use centralized token refresh service for Claude tokens
         claudeAuth = await tokenRefreshService.ensureValidTokenForUser(user.id, claudeAuth);
       } catch (error) {
-        logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
+        logger.error('Failed to refresh Claude token', error as Error, { component: 'ExecuteRemoteRoute' });
         res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
         return;
       }
@@ -768,7 +768,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           message: 'Request interrupted by user',
         });
       } else {
-        logger.error('Execute Remote failed', error, {
+        logger.error('Execute Remote failed', error as Error, {
           component: 'ExecuteRemoteRoute',
           chatSessionId,
         });
@@ -802,7 +802,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     }
 
   } catch (error) {
-    logger.error('Execute Remote handler error', error, { component: 'ExecuteRemoteRoute' });
+    logger.error('Execute Remote handler error', error as Error, { component: 'ExecuteRemoteRoute' });
 
     if (!res.headersSent) {
       res.status(500).json({

@@ -60,7 +60,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get storage stats error', error, { component: 'storage', operation: 'getStats' });
+    logger.error('Get storage stats error', error as Error, { component: 'storage', operation: 'getStats' });
     res.status(500).json({ success: false, error: 'Failed to get storage statistics' });
   }
 });
@@ -116,7 +116,7 @@ router.get('/breakdown', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Get storage breakdown error', error, { component: 'storage', operation: 'getBreakdown' });
+    logger.error('Get storage breakdown error', error as Error, { component: 'storage', operation: 'getBreakdown' });
     res.status(500).json({ success: false, error: 'Failed to get storage breakdown' });
   }
 });
@@ -151,7 +151,7 @@ router.post('/recalculate', requireAuth, async (req: Request, res: Response) => 
       },
     });
   } catch (error) {
-    logger.error('Recalculate storage error', error, { component: 'storage', operation: 'recalculate' });
+    logger.error('Recalculate storage error', error as Error, { component: 'storage', operation: 'recalculate' });
     res.status(500).json({ success: false, error: 'Failed to recalculate storage usage' });
   }
 });
@@ -216,7 +216,7 @@ router.post('/check', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Check storage quota error', error, { component: 'storage', operation: 'checkQuota' });
+    logger.error('Check storage quota error', error as Error, { component: 'storage', operation: 'checkQuota' });
     res.status(500).json({ success: false, error: 'Failed to check storage quota' });
   }
 });
@@ -250,7 +250,7 @@ router.get('/tiers', requireAuth, async (_req: Request, res: Response) => {
       data: { tiers },
     });
   } catch (error) {
-    logger.error('Get storage tiers error', error, { component: 'storage', operation: 'getTiers' });
+    logger.error('Get storage tiers error', error as Error, { component: 'storage', operation: 'getTiers' });
     res.status(500).json({ success: false, error: 'Failed to get storage tiers' });
   }
 });
@@ -312,7 +312,7 @@ router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res
       },
     });
   } catch (error) {
-    logger.error('Admin get storage stats error', error, { component: 'storage', operation: 'adminGetStats' });
+    logger.error('Admin get storage stats error', error as Error, { component: 'storage', operation: 'adminGetStats' });
     res.status(500).json({ success: false, error: 'Failed to get user storage statistics' });
   }
 });
@@ -396,7 +396,7 @@ router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Reque
       });
     }
   } catch (error) {
-    logger.error('Admin set storage quota error', error, { component: 'storage', operation: 'adminSetQuota' });
+    logger.error('Admin set storage quota error', error as Error, { component: 'storage', operation: 'adminSetQuota' });
     res.status(500).json({ success: false, error: 'Failed to set user storage quota' });
   }
 });
@@ -475,7 +475,7 @@ router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Reques
       },
     });
   } catch (error) {
-    logger.error('Admin set storage tier error', error, { component: 'storage', operation: 'adminSetTier' });
+    logger.error('Admin set storage tier error', error as Error, { component: 'storage', operation: 'adminSetTier' });
     res.status(500).json({ success: false, error: 'Failed to set user storage tier' });
   }
 });
@@ -529,7 +529,7 @@ router.post('/admin/:userId/recalculate', requireAuth, requireAdmin, async (req:
       },
     });
   } catch (error) {
-    logger.error('Admin recalculate storage error', error, { component: 'storage', operation: 'adminRecalculate' });
+    logger.error('Admin recalculate storage error', error as Error, { component: 'storage', operation: 'adminRecalculate' });
     res.status(500).json({ success: false, error: 'Failed to recalculate user storage usage' });
   }
 });

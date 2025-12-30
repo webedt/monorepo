@@ -359,7 +359,7 @@ export function registerShutdownHandlers(
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
-    logger.error('Uncaught exception, initiating shutdown', error, {
+    logger.error('Uncaught exception, initiating shutdown', error as Error, {
       component: 'GracefulShutdown',
     });
     gracefulShutdown(server, 'uncaughtException', { ...config, exitCode: 1 });
