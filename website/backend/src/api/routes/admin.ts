@@ -180,7 +180,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
 
     sendSuccess(res, user[0]);
   } catch (error) {
-    logger.error('Error fetching user', error as Error, { component: 'admin', operation: 'getUser' });
+    logger.error('Error fetching user', error as Error, { component: 'admin', operation: 'getUser', targetUserId: req.params.id });
     sendInternalError(res, 'Failed to fetch user');
   }
 });
@@ -425,7 +425,7 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
 
     sendSuccess(res, updatedUser[0]);
   } catch (error) {
-    logger.error('Error updating user', error as Error, { component: 'admin', operation: 'updateUser' });
+    logger.error('Error updating user', error as Error, { component: 'admin', operation: 'updateUser', targetUserId: req.params.id });
     sendInternalError(res, 'Failed to update user');
   }
 });
@@ -500,7 +500,7 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
 
     sendSuccess(res, { id: deletedUser[0].id });
   } catch (error) {
-    logger.error('Error deleting user', error as Error, { component: 'admin', operation: 'deleteUser' });
+    logger.error('Error deleting user', error as Error, { component: 'admin', operation: 'deleteUser', targetUserId: req.params.id });
     sendInternalError(res, 'Failed to delete user');
   }
 });
