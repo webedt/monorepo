@@ -28,6 +28,9 @@ interface ActiveOscillator {
 /**
  * MIDI Player class for playing parsed MIDI files
  */
+// Lookahead window for incremental scheduling (seconds)
+const SCHEDULE_LOOKAHEAD = 2.0;
+
 export class MidiPlayer {
   private audioContext: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -40,6 +43,7 @@ export class MidiPlayer {
   private playbackStartTime: number = 0;
   private pauseTime: number = 0;
   private animationFrameId: number | null = null;
+  private lastScheduledTime: number = 0;
 
   constructor(options: MidiPlayerOptions = {}) {
     this.options = {
@@ -166,6 +170,18 @@ export class MidiPlayer {
       this.init();
       if (!this.audioContext || !this.masterGain) {
         console.warn('Audio context not available');
+        return;
+      }
+    }
+
+    // Handle closed audio context
+    if (this.audioContext.state === 'closed') {
+      console.warn('Audio context is closed, reinitializing');
+      this.audioContext = null;
+      this.masterGain = null;
+      this.init();
+      if (!this.audioContext || !this.masterGain) {
+        console.warn('Failed to reinitialize audio context');
         return;
       }
     }
@@ -435,11 +451,26 @@ export class MidiPlayer {
 
   /**
    * Schedule notes for playback from a given start time
+   * Uses incremental scheduling to avoid memory issues with long files
    */
   private scheduleNotes(startTime: number): void {
     if (!this.midiFile || !this.audioContext || !this.masterGain) return;
 
+    // Reset scheduling state for fresh start
+    this.lastScheduledTime = startTime;
+
+    // Schedule initial chunk
+    this.scheduleNotesInRange(startTime, startTime + SCHEDULE_LOOKAHEAD);
+  }
+
+  /**
+   * Schedule notes within a specific time range (incremental scheduling)
+   */
+  private scheduleNotesInRange(fromTime: number, toTime: number): void {
+    if (!this.midiFile || !this.audioContext || !this.masterGain) return;
+
     const now = this.audioContext.currentTime;
+    const currentPlaybackTime = (now - this.playbackStartTime) * this.options.speed;
 
     for (let trackIndex = 0; trackIndex < this.midiFile.tracks.length; trackIndex++) {
       if (this.options.mutedTracks.has(trackIndex)) continue;
@@ -447,14 +478,39 @@ export class MidiPlayer {
       const track = this.midiFile.tracks[trackIndex];
       for (const note of track.notes) {
         if (this.options.mutedChannels.has(note.channel)) continue;
-        if (note.startTimeSeconds < startTime) continue;
 
-        const noteStartTime = (note.startTimeSeconds - startTime) / this.options.speed;
+        // Only schedule notes within the target range
+        if (note.startTimeSeconds < fromTime || note.startTimeSeconds >= toTime) continue;
+
+        const noteStartTime = (note.startTimeSeconds - currentPlaybackTime) / this.options.speed;
         const noteDuration = note.durationSeconds / this.options.speed;
 
-        // Schedule all notes - Web Audio API handles far-future scheduling
-        this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
+        // Only schedule if the note hasn't already started
+        if (noteStartTime > 0) {
+          this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
+        }
       }
+    }
+
+    this.lastScheduledTime = toTime;
+  }
+
+  /**
+   * Extend scheduling as playback progresses
+   */
+  private extendScheduling(): void {
+    if (!this.midiFile || !this.audioContext || !this.masterGain) return;
+
+    const currentTime = this.state.currentTime;
+    const scheduleThreshold = this.lastScheduledTime - SCHEDULE_LOOKAHEAD / 2;
+
+    // When we're halfway through the lookahead window, schedule the next chunk
+    if (currentTime >= scheduleThreshold && this.lastScheduledTime < this.state.duration) {
+      const nextChunkEnd = Math.min(
+        this.lastScheduledTime + SCHEDULE_LOOKAHEAD,
+        this.state.duration
+      );
+      this.scheduleNotesInRange(this.lastScheduledTime, nextChunkEnd);
     }
   }
 
@@ -511,9 +567,12 @@ export class MidiPlayer {
     // Stop all active oscillators
     for (const active of this.activeOscillators) {
       try {
-        active.gainNode.gain.cancelScheduledValues(now);
-        active.gainNode.gain.setValueAtTime(0, now);
-        active.oscillator.stop(now + 0.01);
+        // Check for null/undefined before accessing
+        if (active.gainNode && active.oscillator) {
+          active.gainNode.gain.cancelScheduledValues(now);
+          active.gainNode.gain.setValueAtTime(0, now);
+          active.oscillator.stop(now + 0.01);
+        }
       } catch {
         // Oscillator may already be stopped
       }
@@ -544,11 +603,18 @@ export class MidiPlayer {
       this.updateState({ currentTime, progress });
       this.emit({ type: 'timeUpdate', time: currentTime, progress });
 
+      // Extend scheduling as playback progresses (incremental scheduling)
+      this.extendScheduling();
+
       // Check for end of playback
       if (currentTime >= this.state.duration) {
         if (this.options.loop) {
-          this.seek(0);
-          this.play();
+          // Handle loop atomically to avoid race conditions
+          this.stopAllNotes();
+          this.playbackStartTime = this.audioContext.currentTime;
+          this.scheduleNotes(0);
+          this.updateState({ currentTime: 0, progress: 0 });
+          this.emit({ type: 'loop' });
         } else {
           this.stop();
           this.emit({ type: 'end' });

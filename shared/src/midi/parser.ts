@@ -198,6 +198,27 @@ export class MidiParser {
         // Track note on/off for duration calculation
         if (event.type === 'noteOn' && event.velocity > 0) {
           const key = `${event.channel}-${event.note}`;
+
+          // Handle overlapping notes: if the same note is already active, end it first
+          const existingNote = activeNotes.get(key);
+          if (existingNote && existingNote.event.type === 'noteOn') {
+            const noteEvent = existingNote.event;
+            const duration = absoluteTime - existingNote.startTime;
+            // Only create note if it has positive duration
+            if (duration > 0) {
+              notes.push({
+                note: noteEvent.note,
+                noteName: this.midiNoteToName(noteEvent.note),
+                velocity: noteEvent.velocity,
+                channel: noteEvent.channel,
+                startTime: existingNote.startTime,
+                duration,
+                startTimeSeconds: 0,
+                durationSeconds: 0,
+              });
+            }
+          }
+
           activeNotes.set(key, { event, startTime: absoluteTime });
         } else if (event.type === 'noteOff' || (event.type === 'noteOn' && event.velocity === 0)) {
           const key = `${event.channel}-${event.note}`;
@@ -428,7 +449,9 @@ export class MidiParser {
 
       case 0x51: // Set Tempo
         baseEvent.subtype = 'setTempo';
-        baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        if (data.length >= 3) {
+          baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        }
         break;
 
       case 0x54: // SMPTE Offset
@@ -437,16 +460,26 @@ export class MidiParser {
 
       case 0x58: // Time Signature
         baseEvent.subtype = 'timeSignature';
-        baseEvent.numerator = data[0];
-        baseEvent.denominator = Math.pow(2, data[1]);
-        baseEvent.metronome = data[2];
-        baseEvent.thirtyseconds = data[3];
+        if (data.length >= 4) {
+          baseEvent.numerator = data[0];
+          baseEvent.denominator = Math.pow(2, data[1]);
+          baseEvent.metronome = data[2];
+          baseEvent.thirtyseconds = data[3];
+        } else if (data.length >= 2) {
+          // Minimal time signature with just numerator and denominator
+          baseEvent.numerator = data[0];
+          baseEvent.denominator = Math.pow(2, data[1]);
+        }
         break;
 
       case 0x59: // Key Signature
         baseEvent.subtype = 'keySignature';
-        baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
-        baseEvent.scale = data[1];
+        if (data.length >= 2) {
+          baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
+          baseEvent.scale = data[1];
+        } else if (data.length >= 1) {
+          baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
+        }
         break;
 
       case 0x7f: // Sequencer Specific
