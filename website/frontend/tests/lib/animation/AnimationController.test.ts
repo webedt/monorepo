@@ -1,363 +1,89 @@
 /**
  * Tests for AnimationController class
  *
- * Tests keyframe animation playback, fill modes, and timeline management.
+ * Tests keyframe animation playback, fill modes, and timeline management
+ * using the actual AnimationController implementation.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-// ============================================================================
-// Type Definitions (matching AnimationController.ts)
-// ============================================================================
-
-type AnimationState = 'idle' | 'playing' | 'paused' | 'finished';
-type PlaybackDirection = 'forward' | 'reverse' | 'alternate' | 'alternate-reverse';
-type FillMode = 'none' | 'forwards' | 'backwards' | 'both';
-
-interface AnimationEvent {
-  type: 'start' | 'end' | 'iteration' | 'pause' | 'resume' | 'cancel' | 'update';
-  currentTime: number;
-  iteration: number;
-  progress: number;
-  state: AnimationState;
-}
-
-type AnimationEventHandler = (event: AnimationEvent) => void;
-
-interface AnimationOptions {
-  duration?: number;
-  iterations?: number;
-  delay?: number;
-  direction?: PlaybackDirection;
-  fill?: FillMode;
-  playbackRate?: number;
-}
-
-interface TransformProperties {
-  x?: number;
-  y?: number;
-  rotation?: number;
-  scaleX?: number;
-  scaleY?: number;
-  opacity?: number;
-}
-
-interface Keyframe {
-  time: number;
-  value: TransformProperties;
-  easing?: string;
-}
-
-interface KeyframeTrack {
-  id: string;
-  keyframes: Keyframe[];
-}
-
-interface InterpolationResult {
-  value: TransformProperties;
-  currentKeyframeIndex: number;
-  isComplete: boolean;
-  progress: number;
-}
-
-// ============================================================================
-// Mock AnimationController Implementation
-// ============================================================================
-
-class MockAnimationController {
-  private track: KeyframeTrack;
-  private options: Required<AnimationOptions>;
-  private state: AnimationState = 'idle';
-  private currentTime = 0;
-  private currentIteration = 0;
-  private eventHandlers: Map<AnimationEvent['type'], Set<AnimationEventHandler>> = new Map();
-
-  constructor(track: KeyframeTrack, options: AnimationOptions = {}) {
-    this.track = track;
-    this.options = {
-      duration: options.duration ?? this.getTrackDuration(),
-      iterations: options.iterations ?? 1,
-      delay: options.delay ?? 0,
-      direction: options.direction ?? 'forward',
-      fill: options.fill ?? 'forwards',
-      playbackRate: options.playbackRate ?? 1,
-    };
-  }
-
-  private getTrackDuration(): number {
-    if (this.track.keyframes.length === 0) return 0;
-    return Math.max(...this.track.keyframes.map((k) => k.time));
-  }
-
-  getState(): AnimationState {
-    return this.state;
-  }
-
-  getCurrentTime(): number {
-    return this.currentTime;
-  }
-
-  getCurrentIteration(): number {
-    return this.currentIteration;
-  }
-
-  getTotalDuration(): number {
-    if (this.options.iterations === Infinity) return Infinity;
-    return this.options.duration * this.options.iterations + this.options.delay;
-  }
-
-  getProgress(): number {
-    const totalDuration = this.getTotalDuration();
-    if (totalDuration === Infinity) {
-      return this.options.duration > 0 ? this.currentTime / this.options.duration : 1;
-    }
-    const elapsed = this.currentIteration * this.options.duration + this.currentTime;
-    return totalDuration > 0 ? Math.min(elapsed / totalDuration, 1) : 1;
-  }
-
-  setPlaybackRate(rate: number): void {
-    this.options.playbackRate = Math.max(0.1, rate);
-  }
-
-  getPlaybackRate(): number {
-    return this.options.playbackRate;
-  }
-
-  play(): void {
-    if (this.state === 'playing') return;
-
-    if (this.state === 'finished') {
-      this.currentTime = 0;
-      this.currentIteration = 0;
-    }
-
-    if (this.state === 'paused') {
-      this.emit('resume');
-    } else {
-      this.emit('start');
-    }
-
-    this.state = 'playing';
-  }
-
-  pause(): void {
-    if (this.state !== 'playing') return;
-    this.state = 'paused';
-    this.emit('pause');
-  }
-
-  stop(): void {
-    this.cancel();
-    this.currentTime = 0;
-    this.currentIteration = 0;
-  }
-
-  cancel(): void {
-    this.state = 'idle';
-    this.emit('cancel');
-  }
-
-  seek(time: number): void {
-    this.currentTime = Math.max(0, Math.min(time, this.options.duration));
-    this.emit('update');
-  }
-
-  seekProgress(progress: number): void {
-    this.seek(progress * this.options.duration);
-  }
-
-  // Simulate time advancement (for testing)
-  advanceTime(deltaMs: number): void {
-    if (this.state !== 'playing') return;
-
-    const elapsed = deltaMs * this.options.playbackRate;
-
-    // Handle delay
-    if (elapsed < this.options.delay) {
-      return;
-    }
-
-    const timeAfterDelay = elapsed - this.options.delay + this.currentIteration * this.options.duration + this.currentTime;
-    const iterationDuration = this.options.duration;
-
-    if (iterationDuration <= 0) {
-      this.finish();
-      return;
-    }
-
-    const totalIterationTime = Math.floor(timeAfterDelay / iterationDuration);
-    const previousIteration = this.currentIteration;
-    this.currentIteration = Math.min(totalIterationTime, this.options.iterations - 1);
-    this.currentTime = timeAfterDelay - this.currentIteration * iterationDuration;
-
-    // Check for iteration boundary
-    if (this.currentIteration > previousIteration) {
-      this.emit('iteration');
-    }
-
-    // Check for completion
-    if (this.options.iterations !== Infinity && totalIterationTime >= this.options.iterations) {
-      this.currentTime = iterationDuration;
-      this.finish();
-      return;
-    }
-
-    this.emit('update');
-  }
-
-  private finish(): void {
-    this.state = 'finished';
-    this.emit('end');
-  }
-
-  getValue(): InterpolationResult {
-    const { fill, duration, direction } = this.options;
-
-    if (this.state === 'idle') {
-      if (fill === 'backwards' || fill === 'both') {
-        const showFirst = direction === 'reverse' || direction === 'alternate-reverse';
-        return this.interpolate(showFirst ? duration : 0);
-      }
-      return { value: {}, currentKeyframeIndex: -1, isComplete: false, progress: 0 };
-    }
-
-    if (this.state === 'finished') {
-      if (fill === 'forwards' || fill === 'both') {
-        const finalIteration = this.options.iterations - 1;
-        const isOddFinal = finalIteration % 2 === 1;
-        const endsReversed =
-          direction === 'reverse' ||
-          (direction === 'alternate' && isOddFinal) ||
-          (direction === 'alternate-reverse' && !isOddFinal);
-        return this.interpolate(endsReversed ? 0 : duration);
-      }
-      return { value: {}, currentKeyframeIndex: -1, isComplete: true, progress: 1 };
-    }
-
-    return this.getValueAtTime(this.currentTime);
-  }
-
-  getValueAtTime(time: number): InterpolationResult {
-    let effectiveTime = time;
-
-    const isOddIteration = this.currentIteration % 2 === 1;
-    const shouldReverse =
-      this.options.direction === 'reverse' ||
-      (this.options.direction === 'alternate' && isOddIteration) ||
-      (this.options.direction === 'alternate-reverse' && !isOddIteration);
-
-    if (shouldReverse) {
-      effectiveTime = this.options.duration - time;
-    }
-
-    return this.interpolate(effectiveTime);
-  }
-
-  private interpolate(time: number): InterpolationResult {
-    const keyframes = this.track.keyframes;
-
-    if (keyframes.length === 0) {
-      return { value: {}, currentKeyframeIndex: -1, isComplete: true, progress: 1 };
-    }
-
-    // Find surrounding keyframes
-    let fromIndex = 0;
-    let toIndex = 0;
-
-    for (let i = 0; i < keyframes.length - 1; i++) {
-      if (time >= keyframes[i].time && time < keyframes[i + 1].time) {
-        fromIndex = i;
-        toIndex = i + 1;
-        break;
-      }
-    }
-
-    if (time >= keyframes[keyframes.length - 1].time) {
-      fromIndex = toIndex = keyframes.length - 1;
-    }
-
-    const from = keyframes[fromIndex];
-    const to = keyframes[toIndex];
-
-    // Calculate local progress
-    let t = 0;
-    if (fromIndex !== toIndex) {
-      const segmentDuration = to.time - from.time;
-      t = segmentDuration > 0 ? (time - from.time) / segmentDuration : 1;
-    }
-
-    // Interpolate values
-    const value: TransformProperties = {};
-    if (from.value.x !== undefined && to.value.x !== undefined) {
-      value.x = from.value.x + (to.value.x - from.value.x) * t;
-    }
-    if (from.value.y !== undefined && to.value.y !== undefined) {
-      value.y = from.value.y + (to.value.y - from.value.y) * t;
-    }
-    if (from.value.opacity !== undefined && to.value.opacity !== undefined) {
-      value.opacity = from.value.opacity + (to.value.opacity - from.value.opacity) * t;
-    }
-
-    return {
-      value,
-      currentKeyframeIndex: fromIndex,
-      isComplete: time >= this.options.duration,
-      progress: this.options.duration > 0 ? time / this.options.duration : 1,
-    };
-  }
-
-  on(event: AnimationEvent['type'], handler: AnimationEventHandler): () => void {
-    if (!this.eventHandlers.has(event)) {
-      this.eventHandlers.set(event, new Set());
-    }
-    this.eventHandlers.get(event)!.add(handler);
-    return () => this.off(event, handler);
-  }
-
-  off(event: AnimationEvent['type'], handler: AnimationEventHandler): void {
-    this.eventHandlers.get(event)?.delete(handler);
-  }
-
-  destroy(): void {
-    this.cancel();
-    this.eventHandlers.clear();
-  }
-
-  private emit(type: AnimationEvent['type']): void {
-    const handlers = this.eventHandlers.get(type);
-    if (!handlers) return;
-
-    const event: AnimationEvent = {
-      type,
-      currentTime: this.currentTime,
-      iteration: this.currentIteration,
-      progress: this.getProgress(),
-      state: this.state,
-    };
-
-    for (const handler of handlers) {
-      try {
-        handler(event);
-      } catch (error) {
-        console.error('Animation event handler error:', error);
-      }
-    }
-  }
-}
+import {
+  AnimationController,
+  AnimationTimeline,
+  animate,
+} from '../../../src/lib/animation/AnimationController.js';
+import type {
+  AnimationState,
+  AnimationEvent,
+  AnimationOptions,
+  PlaybackDirection,
+} from '../../../src/lib/animation/AnimationController.js';
+import { createTrack } from '../../../src/lib/animation/keyframe.js';
+import type {
+  KeyframeTrack,
+  TransformProperties,
+  Keyframe,
+} from '../../../src/lib/animation/keyframe.js';
 
 // ============================================================================
 // Mock Data Factories
 // ============================================================================
 
-function createKeyframeTrack(overrides: Partial<KeyframeTrack> = {}): KeyframeTrack {
+function createKeyframe(overrides: Partial<Keyframe<TransformProperties>> = {}): Keyframe<TransformProperties> {
   return {
-    id: overrides.id ?? 'track-1',
-    keyframes: overrides.keyframes ?? [
-      { time: 0, value: { x: 0, y: 0, opacity: 0 } },
-      { time: 500, value: { x: 100, y: 50, opacity: 0.5 } },
-      { time: 1000, value: { x: 200, y: 100, opacity: 1 } },
-    ],
+    time: overrides.time ?? 0,
+    value: overrides.value ?? { x: 0, y: 0, opacity: 0 },
+    easing: overrides.easing,
   };
+}
+
+function createKeyframeTrack(overrides: Partial<KeyframeTrack<TransformProperties>> = {}): KeyframeTrack<TransformProperties> {
+  return createTrack(
+    overrides.id ?? 'track-1',
+    overrides.keyframes ?? [
+      createKeyframe({ time: 0, value: { x: 0, y: 0, opacity: 0 } }),
+      createKeyframe({ time: 500, value: { x: 100, y: 50, opacity: 0.5 } }),
+      createKeyframe({ time: 1000, value: { x: 200, y: 100, opacity: 1 } }),
+    ],
+    { defaultEasing: overrides.defaultEasing }
+  );
+}
+
+// ============================================================================
+// Test Setup Helpers
+// ============================================================================
+
+let rafCallbacks: Array<{ id: number; callback: FrameRequestCallback }> = [];
+let rafIdCounter = 0;
+let currentTime = 0;
+
+function setupAnimationFrameMocks(): void {
+  rafCallbacks = [];
+  rafIdCounter = 0;
+  currentTime = 0;
+
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
+    const id = ++rafIdCounter;
+    rafCallbacks.push({ id, callback });
+    return id;
+  });
+
+  vi.stubGlobal('cancelAnimationFrame', (id: number): void => {
+    rafCallbacks = rafCallbacks.filter((item) => item.id !== id);
+  });
+
+  vi.stubGlobal('performance', {
+    now: () => currentTime,
+  });
+}
+
+function advanceTime(ms: number): void {
+  currentTime += ms;
+  // Execute all pending RAF callbacks
+  const callbacks = [...rafCallbacks];
+  rafCallbacks = [];
+  for (const { callback } of callbacks) {
+    callback(currentTime);
+  }
 }
 
 // ============================================================================
@@ -365,14 +91,16 @@ function createKeyframeTrack(overrides: Partial<KeyframeTrack> = {}): KeyframeTr
 // ============================================================================
 
 describe('AnimationController', () => {
-  let controller: MockAnimationController;
+  let controller: AnimationController;
 
   beforeEach(() => {
-    controller = new MockAnimationController(createKeyframeTrack());
+    setupAnimationFrameMocks();
+    controller = new AnimationController(createKeyframeTrack());
   });
 
   afterEach(() => {
     controller.destroy();
+    vi.unstubAllGlobals();
   });
 
   describe('Initialization', () => {
@@ -386,7 +114,7 @@ describe('AnimationController', () => {
     });
 
     it('should accept custom options', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), {
+      controller = new AnimationController(createKeyframeTrack(), {
         duration: 2000,
         iterations: 3,
         playbackRate: 2,
@@ -394,6 +122,18 @@ describe('AnimationController', () => {
 
       expect(controller.getPlaybackRate()).toBe(2);
       expect(controller.getTotalDuration()).toBe(6000);
+    });
+
+    it('should use track duration by default', () => {
+      const track = createKeyframeTrack({
+        keyframes: [
+          createKeyframe({ time: 0 }),
+          createKeyframe({ time: 500 }),
+        ],
+      });
+      controller = new AnimationController(track);
+
+      expect(controller.getTotalDuration()).toBe(500);
     });
   });
 
@@ -419,9 +159,15 @@ describe('AnimationController', () => {
       expect(controller.getState()).toBe('playing');
     });
 
+    it('should not pause if not playing', () => {
+      controller.pause();
+
+      expect(controller.getState()).toBe('idle');
+    });
+
     it('should stop and reset', () => {
       controller.play();
-      controller.advanceTime(500);
+      advanceTime(500);
       controller.stop();
 
       expect(controller.getState()).toBe('idle');
@@ -431,32 +177,52 @@ describe('AnimationController', () => {
 
     it('should cancel without resetting position', () => {
       controller.play();
-      controller.advanceTime(500);
+      advanceTime(500);
       controller.cancel();
 
       expect(controller.getState()).toBe('idle');
+    });
+
+    it('should not play if already playing', () => {
+      const handler = vi.fn();
+      controller.on('start', handler);
+
+      controller.play();
+      controller.play(); // Second call should be ignored
+
+      expect(handler).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('Time and Progress', () => {
     it('should track current time', () => {
       controller.play();
-      controller.advanceTime(300);
+      advanceTime(300);
 
       expect(controller.getCurrentTime()).toBeGreaterThan(0);
     });
 
     it('should calculate progress', () => {
       controller.play();
-      controller.advanceTime(500);
+      advanceTime(500);
 
       expect(controller.getProgress()).toBeGreaterThan(0);
     });
 
     it('should handle infinite iterations', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { iterations: Infinity });
+      controller = new AnimationController(createKeyframeTrack(), { iterations: Infinity });
 
       expect(controller.getTotalDuration()).toBe(Infinity);
+    });
+
+    it('should return correct progress for infinite iterations', () => {
+      controller = new AnimationController(createKeyframeTrack(), { iterations: Infinity });
+      controller.play();
+      advanceTime(500);
+
+      // For infinite, progress is within current iteration
+      expect(controller.getProgress()).toBeGreaterThan(0);
+      expect(controller.getProgress()).toBeLessThan(1);
     });
   });
 
@@ -478,6 +244,14 @@ describe('AnimationController', () => {
 
       expect(controller.getCurrentTime()).toBe(500);
     });
+
+    it('should emit update event on seek', () => {
+      const handler = vi.fn();
+      controller.on('update', handler);
+      controller.seek(500);
+
+      expect(handler).toHaveBeenCalled();
+    });
   });
 
   describe('Playback Rate', () => {
@@ -496,30 +270,33 @@ describe('AnimationController', () => {
 
   describe('Iterations', () => {
     it('should track current iteration', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { iterations: 3 });
+      controller = new AnimationController(createKeyframeTrack(), { iterations: 3 });
       controller.play();
 
       expect(controller.getCurrentIteration()).toBe(0);
     });
 
     it('should emit iteration event on boundary', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { iterations: 3 });
+      controller = new AnimationController(createKeyframeTrack(), { iterations: 3 });
       const handler = vi.fn();
       controller.on('iteration', handler);
       controller.play();
 
-      controller.advanceTime(1500);
+      // Need multiple frame updates to cross iteration boundaries
+      advanceTime(500);
+      advanceTime(500);
+      advanceTime(500);
 
       expect(handler).toHaveBeenCalled();
     });
 
     it('should finish after all iterations', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { iterations: 2 });
+      controller = new AnimationController(createKeyframeTrack(), { iterations: 2 });
       const handler = vi.fn();
       controller.on('end', handler);
       controller.play();
 
-      controller.advanceTime(3000);
+      advanceTime(3000);
 
       expect(handler).toHaveBeenCalled();
       expect(controller.getState()).toBe('finished');
@@ -536,7 +313,7 @@ describe('AnimationController', () => {
     });
 
     it('should play in reverse', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { direction: 'reverse' });
+      controller = new AnimationController(createKeyframeTrack(), { direction: 'reverse' });
       controller.play();
       controller.seek(0);
       const result = controller.getValueAtTime(0);
@@ -545,48 +322,61 @@ describe('AnimationController', () => {
     });
 
     it('should alternate direction', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), {
+      controller = new AnimationController(createKeyframeTrack(), {
         direction: 'alternate',
         iterations: 2,
       });
       controller.play();
 
       // First iteration: forward
-      controller.advanceTime(500);
+      advanceTime(500);
       expect(controller.getCurrentIteration()).toBe(0);
 
       // After first iteration, should be on second (reverse)
-      controller.advanceTime(1000);
+      advanceTime(1000);
       expect(controller.getCurrentIteration()).toBe(1);
+    });
+
+    it('should handle alternate-reverse direction', () => {
+      controller = new AnimationController(createKeyframeTrack(), {
+        direction: 'alternate-reverse',
+        iterations: 2,
+      });
+      controller.play();
+      controller.seek(0);
+
+      // First iteration starts reversed
+      const result = controller.getValueAtTime(0);
+      expect(result.value.x).toBe(200);
     });
   });
 
   describe('Fill Mode', () => {
-    it('should show first frame with fill backwards', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { fill: 'backwards' });
+    it('should show first frame with fill backwards in idle state', () => {
+      controller = new AnimationController(createKeyframeTrack(), { fill: 'backwards' });
       const result = controller.getValue();
 
       expect(result.value.x).toBe(0);
     });
 
     it('should show last frame with fill forwards after finish', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { fill: 'forwards' });
+      controller = new AnimationController(createKeyframeTrack(), { fill: 'forwards' });
       controller.play();
-      controller.advanceTime(2000);
+      advanceTime(2000);
       const result = controller.getValue();
 
       expect(result.value.x).toBe(200);
     });
 
     it('should show empty with fill none in idle state', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { fill: 'none' });
+      controller = new AnimationController(createKeyframeTrack(), { fill: 'none' });
       const result = controller.getValue();
 
       expect(result.value).toEqual({});
     });
 
     it('should handle fill both', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { fill: 'both' });
+      controller = new AnimationController(createKeyframeTrack(), { fill: 'both' });
 
       // Before play - should show first frame
       const beforeResult = controller.getValue();
@@ -594,9 +384,21 @@ describe('AnimationController', () => {
 
       // After finish - should show last frame
       controller.play();
-      controller.advanceTime(2000);
+      advanceTime(2000);
       const afterResult = controller.getValue();
       expect(afterResult.value.x).toBe(200);
+    });
+
+    it('should handle fill forwards with reverse direction', () => {
+      controller = new AnimationController(createKeyframeTrack(), {
+        fill: 'forwards',
+        direction: 'reverse',
+      });
+      controller.play();
+      advanceTime(2000);
+      const result = controller.getValue();
+
+      expect(result.value.x).toBe(0); // Ends at the start position
     });
   });
 
@@ -684,7 +486,7 @@ describe('AnimationController', () => {
       const handler = vi.fn();
       controller.on('end', handler);
       controller.play();
-      controller.advanceTime(2000);
+      advanceTime(2000);
 
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'end' }));
     });
@@ -693,12 +495,12 @@ describe('AnimationController', () => {
       const handler = vi.fn();
       controller.on('update', handler);
       controller.play();
-      controller.advanceTime(100);
+      advanceTime(100);
 
       expect(handler).toHaveBeenCalled();
     });
 
-    it('should unsubscribe events', () => {
+    it('should unsubscribe events with returned function', () => {
       const handler = vi.fn();
       const unsubscribe = controller.on('start', handler);
       unsubscribe();
@@ -706,22 +508,83 @@ describe('AnimationController', () => {
 
       expect(handler).not.toHaveBeenCalled();
     });
+
+    it('should unsubscribe with off()', () => {
+      const handler = vi.fn();
+      controller.on('start', handler);
+      controller.off('start', handler);
+      controller.play();
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should include event data', () => {
+      let receivedEvent: AnimationEvent | null = null;
+      controller.on('start', (event) => {
+        receivedEvent = event;
+      });
+      controller.play();
+
+      expect(receivedEvent).not.toBeNull();
+      // Note: start event is emitted BEFORE state changes to 'playing'
+      expect(receivedEvent!.state).toBe('idle');
+      expect(receivedEvent!.iteration).toBe(0);
+    });
+
+    it('should handle errors in event handlers gracefully', () => {
+      const errorHandler = vi.fn(() => {
+        throw new Error('Test error');
+      });
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      controller.on('start', errorHandler);
+      controller.play();
+
+      expect(errorHandler).toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
+  });
+
+  describe('Delay', () => {
+    it('should wait for delay before starting animation', () => {
+      controller = new AnimationController(createKeyframeTrack(), { delay: 500 });
+      controller.play();
+      advanceTime(300);
+
+      // Should still be at start during delay
+      expect(controller.getCurrentTime()).toBe(0);
+    });
+
+    it('should start animation after delay', () => {
+      controller = new AnimationController(createKeyframeTrack(), { delay: 500 });
+      controller.play();
+      advanceTime(600);
+
+      expect(controller.getCurrentTime()).toBeGreaterThan(0);
+    });
+
+    it('should include delay in total duration', () => {
+      controller = new AnimationController(createKeyframeTrack(), { delay: 500 });
+
+      expect(controller.getTotalDuration()).toBe(1500);
+    });
   });
 
   describe('Edge Cases', () => {
     it('should handle empty keyframes', () => {
-      controller = new MockAnimationController({ id: 'empty', keyframes: [] });
+      controller = new AnimationController(createTrack('empty', []));
       const result = controller.getValue();
 
+      // In idle state with fill='forwards' (default), returns empty value
       expect(result.value).toEqual({});
-      expect(result.isComplete).toBe(true);
+      expect(result.currentKeyframeIndex).toBe(-1);
     });
 
     it('should handle single keyframe', () => {
-      controller = new MockAnimationController({
-        id: 'single',
-        keyframes: [{ time: 0, value: { x: 100 } }],
-      });
+      controller = new AnimationController(createTrack('single', [
+        createKeyframe({ time: 0, value: { x: 100 } }),
+      ]));
       controller.play();
       const result = controller.getValue();
 
@@ -729,11 +592,22 @@ describe('AnimationController', () => {
     });
 
     it('should handle zero duration', () => {
-      controller = new MockAnimationController(createKeyframeTrack(), { duration: 0 });
+      controller = new AnimationController(createKeyframeTrack(), { duration: 0 });
       controller.play();
-      controller.advanceTime(100);
+      advanceTime(100);
 
       expect(controller.getState()).toBe('finished');
+    });
+
+    it('should reset on play after finished', () => {
+      controller.play();
+      advanceTime(2000);
+      expect(controller.getState()).toBe('finished');
+
+      controller.play();
+      expect(controller.getState()).toBe('playing');
+      expect(controller.getCurrentTime()).toBe(0);
+      expect(controller.getCurrentIteration()).toBe(0);
     });
   });
 
@@ -750,28 +624,163 @@ describe('AnimationController', () => {
 });
 
 describe('AnimationTimeline', () => {
-  // Test multiple tracks managed together
-  it('should manage multiple tracks', () => {
-    const track1 = createKeyframeTrack({ id: 'track-1' });
-    const track2 = createKeyframeTrack({ id: 'track-2' });
+  let timeline: AnimationTimeline;
 
-    const controllers = new Map<string, MockAnimationController>();
-    controllers.set('track-1', new MockAnimationController(track1));
-    controllers.set('track-2', new MockAnimationController(track2));
+  beforeEach(() => {
+    setupAnimationFrameMocks();
+    timeline = new AnimationTimeline();
+  });
 
-    // Play all
-    for (const controller of controllers.values()) {
-      controller.play();
-    }
+  afterEach(() => {
+    timeline.destroy();
+    vi.unstubAllGlobals();
+  });
 
-    // All should be playing
-    for (const controller of controllers.values()) {
-      expect(controller.getState()).toBe('playing');
-    }
+  it('should add tracks and return controllers', () => {
+    const track = createKeyframeTrack({ id: 'track-1' });
+    const controller = timeline.addTrack(track);
 
-    // Clean up
-    for (const controller of controllers.values()) {
-      controller.destroy();
-    }
+    expect(controller).toBeDefined();
+    expect(timeline.getController('track-1')).toBe(controller);
+  });
+
+  it('should remove tracks', () => {
+    const track = createKeyframeTrack({ id: 'track-1' });
+    timeline.addTrack(track);
+    timeline.removeTrack('track-1');
+
+    expect(timeline.getController('track-1')).toBeUndefined();
+  });
+
+  it('should play all tracks', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.addTrack(createKeyframeTrack({ id: 'track-2' }));
+    timeline.playAll();
+
+    expect(timeline.getController('track-1')?.getState()).toBe('playing');
+    expect(timeline.getController('track-2')?.getState()).toBe('playing');
+    expect(timeline.getState()).toBe('playing');
+  });
+
+  it('should pause all tracks', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.addTrack(createKeyframeTrack({ id: 'track-2' }));
+    timeline.playAll();
+    timeline.pauseAll();
+
+    expect(timeline.getController('track-1')?.getState()).toBe('paused');
+    expect(timeline.getController('track-2')?.getState()).toBe('paused');
+    expect(timeline.getState()).toBe('paused');
+  });
+
+  it('should stop all tracks', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.playAll();
+    advanceTime(500);
+    timeline.stopAll();
+
+    expect(timeline.getController('track-1')?.getState()).toBe('idle');
+    expect(timeline.getController('track-1')?.getCurrentTime()).toBe(0);
+    expect(timeline.getState()).toBe('idle');
+  });
+
+  it('should seek all tracks', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.addTrack(createKeyframeTrack({ id: 'track-2' }));
+    timeline.seekAll(500);
+
+    expect(timeline.getController('track-1')?.getCurrentTime()).toBe(500);
+    expect(timeline.getController('track-2')?.getCurrentTime()).toBe(500);
+  });
+
+  it('should seek all tracks by progress', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.seekAllProgress(0.5);
+
+    expect(timeline.getController('track-1')?.getCurrentTime()).toBe(500);
+  });
+
+  it('should set playback rate for all tracks', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.addTrack(createKeyframeTrack({ id: 'track-2' }));
+    timeline.setPlaybackRateAll(2);
+
+    expect(timeline.getController('track-1')?.getPlaybackRate()).toBe(2);
+    expect(timeline.getController('track-2')?.getPlaybackRate()).toBe(2);
+  });
+
+  it('should get all values', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.addTrack(createKeyframeTrack({ id: 'track-2' }));
+    timeline.playAll();
+    timeline.seekAll(500);
+
+    const values = timeline.getAllValues();
+
+    expect(values.size).toBe(2);
+    expect(values.get('track-1')?.value.x).toBeCloseTo(100);
+    expect(values.get('track-2')?.value.x).toBeCloseTo(100);
+  });
+
+  it('should clean up on destroy', () => {
+    timeline.addTrack(createKeyframeTrack({ id: 'track-1' }));
+    timeline.destroy();
+
+    expect(timeline.getController('track-1')).toBeUndefined();
+  });
+});
+
+describe('animate helper', () => {
+  beforeEach(() => {
+    setupAnimationFrameMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should create and play animation', () => {
+    const onUpdate = vi.fn();
+    animate(createKeyframeTrack(), onUpdate);
+
+    advanceTime(100);
+
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('should call onComplete when animation ends', () => {
+    const onUpdate = vi.fn();
+    const onComplete = vi.fn();
+    animate(createKeyframeTrack(), onUpdate, { onComplete });
+
+    advanceTime(2000);
+
+    expect(onComplete).toHaveBeenCalled();
+  });
+
+  it('should return cancel function', () => {
+    const onUpdate = vi.fn();
+    const cancel = animate(createKeyframeTrack(), onUpdate);
+
+    cancel();
+    advanceTime(100);
+
+    // Updates should stop after cancel
+    const callCount = onUpdate.mock.calls.length;
+    advanceTime(100);
+    expect(onUpdate.mock.calls.length).toBe(callCount);
+  });
+
+  it('should pass options to controller', () => {
+    const onUpdate = vi.fn();
+    animate(createKeyframeTrack(), onUpdate, { playbackRate: 2 });
+
+    // Need multiple frame updates to trigger update events
+    advanceTime(100);
+    advanceTime(100);
+    advanceTime(100);
+
+    // With 2x speed, should progress faster
+    expect(onUpdate).toHaveBeenCalled();
   });
 });
