@@ -88,6 +88,7 @@ import {
   initializeExternalApiResilience,
   getExternalApiCircuitBreakerStatus,
   areExternalApisAvailable,
+  getEventType,
 } from '@webedt/shared';
 
 // Import background sync service
@@ -141,7 +142,7 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
           .from(events)
           .where(eq(events.chatSessionId, session.id));
 
-        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+        const completedEvents = allEvents.filter(e => getEventType(e.eventData) === 'completed');
 
         // Check if session has any events at all (worker started processing)
         const totalEvents = allEvents.length;

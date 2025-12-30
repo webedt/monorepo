@@ -458,10 +458,10 @@ export function createChecksManager(client: GitHubClient): ChecksManager {
             statusContexts.set(status.context, status.state);
           }
           for (const run of checkRuns) {
-            const state = run.status === 'completed'
+            const state: 'success' | 'failure' | 'pending' = run.status === 'completed'
               ? (run.conclusion === 'success' ? 'success' : 'failure')
               : 'pending';
-            statusContexts.set(run.name, state as any);
+            statusContexts.set(run.name, state);
           }
 
           // Determine which checks to evaluate

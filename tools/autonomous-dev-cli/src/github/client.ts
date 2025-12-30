@@ -26,6 +26,11 @@ import {
   type RetryContext,
 } from '../utils/retry.js';
 import {
+  getHttpStatusCode,
+  getErrorCode,
+  getErrorResponseHeaders,
+} from '../utils/typeGuards.js';
+import {
   withTimeout,
   DEFAULT_TIMEOUTS,
   getTimeoutFromEnv,
@@ -912,7 +917,7 @@ export class GitHubClient {
             config: this.retryConfig,
             onRetry: (error, attempt, delay) => {
               this.updateRateLimitState(error);
-              const statusCode = (error as any).status ?? (error as any).response?.status;
+              const statusCode = getHttpStatusCode(error);
 
               logger.apiCall('GitHub', endpoint, method, {
                 statusCode,
@@ -938,11 +943,11 @@ export class GitHubClient {
                 return error.isRetryable;
               }
               // Check for common retryable HTTP status codes
-              const statusCode = (error as any).status ?? (error as any).response?.status;
+              const statusCode = getHttpStatusCode(error);
               if (statusCode === 429) return true; // Rate limited
-              if (statusCode >= 500) return true; // Server errors
+              if (statusCode !== undefined && statusCode >= 500) return true; // Server errors
               // Network errors
-              const code = (error as any).code;
+              const code = getErrorCode(error);
               if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
                 return true;
               }
@@ -986,7 +991,7 @@ export class GitHubClient {
       return timedResult.result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      const statusCode = (error as any).status ?? (error as any).response?.status ?? 500;
+      const statusCode = getHttpStatusCode(error) ?? 500;
 
       // Failure - record it and update rate limit state
       this.updateRateLimitState(error);
@@ -1211,12 +1216,12 @@ export class GitHubClient {
 
         return await this.executeWithRetry(operation, endpoint, context);
       } catch (error) {
-        const statusCode = (error as any).status ?? (error as any).response?.status;
+        const statusCode = getHttpStatusCode(error);
 
         // Handle 429 rate limit specifically with header-based timing
         if (statusCode === 429) {
           attempt++;
-          const headers = (error as any).response?.headers;
+          const headers = getErrorResponseHeaders(error);
 
           // Extract rate limit reset time from headers
           let waitMs = this.getRequiredDelay();
