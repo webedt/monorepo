@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService, FRONTEND_URL, FRONTEND_PORT } from '@webedt/shared';
+import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService, FRONTEND_URL, FRONTEND_PORT, getRawBody } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -479,7 +479,7 @@ router.post(
 
       // Get raw body - Express body-parser must be configured to preserve raw body
       // Signature verification requires the raw body; JSON.stringify() won't work
-      const rawBody = (req as any).rawBody;
+      const rawBody = getRawBody(req);
       if (!rawBody) {
         logger.warn('Stripe webhook missing raw body - configure express.raw() middleware', {
           component: 'Payments',
@@ -584,7 +584,7 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
 
     // Get raw body - prefer rawBody from middleware, fall back to JSON.stringify for compatibility
     // Note: For production, configure express.raw() middleware to preserve raw body
-    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+    const rawBody = getRawBody(req) ?? JSON.stringify(req.body);
 
     // Construct signature string for verification (pipe-delimited format expected by paypalProvider)
     const signature = `${transmissionId}|${timestamp}|${transmissionSig}|${algo}|${certUrl}`;
