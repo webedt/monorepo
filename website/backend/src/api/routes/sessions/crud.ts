@@ -65,7 +65,6 @@ export function createCrudRoutes(
   middlewareServices?: SessionMiddlewareServices
 ): Router {
   const router = Router();
-  const { sessionQueryService } = services;
 
   // Use injected middleware services or fall back to default
   const sessionOwnershipMiddleware = middlewareServices
@@ -198,7 +197,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     // Use injected service instead of ServiceProvider.get()
-    const sessions = await sessionQueryService.listActive(authReq.user!.id);
+    const sessions = await services.sessionQueryService.listActive(authReq.user!.id);
 
     res.json({
       success: true,
@@ -288,7 +287,7 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Use injected service instead of ServiceProvider.get()
-    const result = await sessionQueryService.search(authReq.user!.id, {
+    const result = await services.sessionQueryService.search(authReq.user!.id, {
       query: query.trim(),
       limit,
       offset,
@@ -323,7 +322,7 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
     const offset = parseInt(req.query.offset as string) || 0;
 
     // Use injected service instead of ServiceProvider.get()
-    const result = await sessionQueryService.listDeleted(authReq.user!.id, { limit, offset });
+    const result = await services.sessionQueryService.listDeleted(authReq.user!.id, { limit, offset });
 
     res.json({
       success: true,
@@ -373,7 +372,7 @@ router.get('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Requ
   const { sessionId } = req as SessionRequest;
 
   // Use injected service instead of ServiceProvider.get()
-  const session = await sessionQueryService.getByIdWithPreview(sessionId, authReq.user!.id);
+  const session = await services.sessionQueryService.getByIdWithPreview(sessionId, authReq.user!.id);
 
   if (!session) {
     sendNotFound(res, 'Session not found');
@@ -685,15 +684,15 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
 /**
  * Default router using lazy service container.
  *
+ * Services are accessed at request time (not at module load time)
+ * via lazy getters, allowing the router to be created before
+ * ServiceProvider is initialized.
+ *
  * For new code, prefer using createCrudRoutes() with explicit
  * service injection for better testability.
  *
  * @deprecated Use createCrudRoutes() for new code
  */
-const lazyContainer = createLazyServiceContainer();
-const router = createCrudRoutes({
-  sessionQueryService: lazyContainer.sessionQueryService,
-  logger: lazyContainer.logger,
-});
+const router = createCrudRoutes(createLazyServiceContainer());
 
 export default router;
