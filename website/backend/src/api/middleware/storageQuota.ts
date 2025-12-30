@@ -91,7 +91,11 @@ export function requireStorageQuota(options: StorageQuotaOptions = {}) {
 
       next();
     } catch (error) {
-      logger.error('Storage quota check error', error, { component: 'storage', operation: 'checkQuota', userId: authReq.user?.id });
+      logger.error('Storage quota check error', error, {
+        component: 'storage',
+        operation: 'checkQuota',
+        userId: authReq.user?.id
+      });
 
       if (blockOnError) {
         // Block request when quota system is unavailable

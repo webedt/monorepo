@@ -370,17 +370,22 @@ app.use(
     _next: express.NextFunction
   ) => {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    const errorStack = err instanceof Error ? err.stack : undefined;
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     logger.error('Global error handler caught error', err, {
       component: 'server',
       operation: 'globalErrorHandler',
       path: req.path,
-      method: req.method
+      method: req.method,
+      requestId
     });
 
-    // Return more descriptive error message for debugging
-    res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
+    // Return error response with requestId for client-side debugging
+    res.status(500).json({
+      success: false,
+      error: errorMessage || 'Internal server error',
+      requestId
+    });
   }
 );
 

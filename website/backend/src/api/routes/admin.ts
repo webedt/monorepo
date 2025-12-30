@@ -218,7 +218,11 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('Error impersonating user', error, { component: 'admin', operation: 'impersonate' });
+    logger.error('Error impersonating user', error, {
+      component: 'admin',
+      operation: 'impersonate',
+      targetUserId: req.params.id
+    });
     res.status(500).json({ success: false, error: 'Failed to impersonate user' });
   }
 });

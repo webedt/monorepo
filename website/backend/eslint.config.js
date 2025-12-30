@@ -9,7 +9,7 @@ export default tseslint.config(
     files: ['src/**/*.ts'],
     rules: {
       // Disallow console.error and console.warn - use logger instead
-      'no-console': ['error', { allow: ['log', 'info', 'debug', 'warn'] }],
+      'no-console': ['error', { allow: ['log', 'info', 'debug'] }],
     },
   },
   {
