@@ -24,6 +24,13 @@ export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): b
   return userLevel >= requiredLevel;
 }
 
+/**
+ * Type guard to check if a string is a valid UserRole
+ */
+export function isValidRole(role: string): role is UserRole {
+  return ROLE_HIERARCHY.includes(role as UserRole);
+}
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),

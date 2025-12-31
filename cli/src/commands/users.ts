@@ -1,11 +1,9 @@
 import { Command } from 'commander';
-import { db, users, lucia, ROLE_HIERARCHY } from '@webedt/shared';
+import { db, users, lucia, ROLE_HIERARCHY, isValidRole } from '@webedt/shared';
 import type { UserRole } from '@webedt/shared';
 import { eq, desc } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
-
-const validRoles = ROLE_HIERARCHY;
 
 export const usersCommand = new Command('users')
   .description('User management operations');
@@ -35,8 +33,8 @@ usersCommand
 
       // Filter by role if specified
       if (options.role) {
-        if (!validRoles.includes(options.role)) {
-          console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        if (!isValidRole(options.role)) {
+          console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
           process.exit(1);
         }
         query = query.where(eq(users.role, options.role)) as typeof query;
@@ -123,8 +121,8 @@ usersCommand
   .action(async (email, password, options) => {
     try {
       // Validate role if provided
-      if (options.role && !validRoles.includes(options.role)) {
-        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      if (options.role && !isValidRole(options.role)) {
+        console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
         process.exit(1);
       }
 
@@ -208,8 +206,8 @@ usersCommand
   .action(async (userId, role) => {
     try {
       // Validate role
-      if (!validRoles.includes(role)) {
-        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      if (!isValidRole(role)) {
+        console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
         process.exit(1);
       }
 
