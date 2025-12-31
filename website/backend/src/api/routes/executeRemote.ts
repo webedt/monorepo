@@ -57,21 +57,6 @@ export interface UserRequestContent {
 // ============================================================================
 
 /**
- * Parse and validate a repository URL, returning owner/repo or an error.
- * Parses once and returns the result for reuse, avoiding multiple parse calls.
- *
- * @param repoUrl - The GitHub repository URL
- * @returns Object with owner, repo on success, or error string on failure
- */
-function parseAndValidateRepoUrl(repoUrl: string): { owner: string; repo: string } | { error: string } {
-  const result = parseGitUrl(repoUrl);
-  if (!result.isValid) {
-    return { error: result.error };
-  }
-  return { owner: result.owner, repo: result.repo };
-}
-
-/**
  * Serialize userRequest for storage
  */
 function serializeUserRequest(userRequest: string | UserRequestContent[]): string {
@@ -177,12 +162,12 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Validate and extract owner and repo name from URL (for PR functionality)
     // SECURITY: Validate URL early to prevent injection attacks
-    // Parse once and reuse the result to avoid triple parsing
+    // Uses parseGitUrl from gitUrlHelper which provides comprehensive security validation
     let repositoryOwner: string | null = null;
     let repositoryName: string | null = null;
     if (repoUrl) {
-      const parseResult = parseAndValidateRepoUrl(repoUrl);
-      if ('error' in parseResult) {
+      const parseResult = parseGitUrl(repoUrl);
+      if (!parseResult.isValid) {
         res.status(400).json({ success: false, error: `Invalid repository URL: ${parseResult.error}` });
         return;
       }
@@ -321,9 +306,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
           // Also extract owner/name if not already set (backward compatibility)
           // SECURITY: Validate URL from existing session with same rigor as new URLs
+          // Uses parseGitUrl from gitUrlHelper for comprehensive security validation
           if ((!repositoryOwner || !repositoryName) && repoUrl) {
-            const parseResult = parseAndValidateRepoUrl(repoUrl);
-            if ('error' in parseResult) {
+            const parseResult = parseGitUrl(repoUrl);
+            if (!parseResult.isValid) {
               // Existing session has invalid URL - this shouldn't happen but handle gracefully
               logger.error('Existing session has invalid repository URL', {
                 component: 'ExecuteRemoteRoute',

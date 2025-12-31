@@ -37,6 +37,8 @@
  * @module sessionPathHelper
  */
 
+import { parseGitUrl } from './gitUrlHelper.js';
+
 // Separator used between components (double underscore to avoid conflicts)
 const SESSION_PATH_SEPARATOR = '__';
 
@@ -84,6 +86,9 @@ export function normalizeRepoUrl(repoUrl: string): string {
 /**
  * Parse a GitHub repository URL to extract owner and repository name.
  *
+ * This function delegates to `parseGitUrl` from gitUrlHelper, which provides
+ * comprehensive security validation including host allowlisting and injection prevention.
+ *
  * Supports multiple URL formats:
  * - HTTPS: `https://github.com/owner/repo`
  * - HTTPS with .git: `https://github.com/owner/repo.git`
@@ -91,7 +96,7 @@ export function normalizeRepoUrl(repoUrl: string): string {
  *
  * @param repoUrl - The GitHub repository URL in any supported format
  * @returns Object containing `owner` and `repo` strings
- * @throws Error if the URL format is not recognized
+ * @throws Error if the URL format is not recognized or fails security validation
  *
  * @example
  * ```typescript
@@ -109,24 +114,14 @@ export function normalizeRepoUrl(repoUrl: string): string {
  * ```
  */
 export function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
-  // Remove .git suffix if present
-  const cleanUrl = repoUrl.replace(/\.git$/, '');
+  // Delegate to the canonical parseGitUrl for security-validated parsing
+  const result = parseGitUrl(repoUrl);
 
-  // Handle SSH format: git@github.com:owner/repo
-  if (cleanUrl.includes('@')) {
-    const match = cleanUrl.match(/@[\w.-]+:([\w-]+)\/([\w.-]+)/);
-    if (match) {
-      return { owner: match[1], repo: match[2] };
-    }
+  if (!result.isValid) {
+    throw new Error(`Invalid GitHub repository URL: ${repoUrl}`);
   }
 
-  // Handle HTTPS format: https://github.com/owner/repo
-  const match = cleanUrl.match(/github\.com\/([\w-]+)\/([\w.-]+)/);
-  if (match) {
-    return { owner: match[1], repo: match[2] };
-  }
-
-  throw new Error(`Invalid GitHub repository URL: ${repoUrl}`);
+  return { owner: result.owner, repo: result.repo };
 }
 
 /**
