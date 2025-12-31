@@ -5,7 +5,8 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -19,12 +20,15 @@ import {
 } from '@webedt/shared';
 
 // Validation schemas
+const roleEnum = z.enum(['user', 'editor', 'developer', 'admin']);
+
 const createUserSchema = {
   body: z.object({
     email: z.string().email('Invalid email address'),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     displayName: z.string().optional(),
     isAdmin: z.boolean().optional().default(false),
+    role: roleEnum.optional(),
   }),
 };
 
@@ -33,6 +37,7 @@ const updateUserSchema = {
     email: z.string().email().optional(),
     displayName: z.string().optional(),
     isAdmin: z.boolean().optional(),
+    role: roleEnum.optional(),
     password: z.string().min(8).optional(),
   }),
 };
@@ -45,6 +50,7 @@ interface UserUpdateData {
   email?: string;
   displayName?: string;
   isAdmin?: boolean;
+  role?: UserRole;
   passwordHash?: string;
 }
 
@@ -276,7 +282,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
 // POST /api/admin/users - Create a new user
 router.post('/users', requireAdmin, validateRequest(createUserSchema), async (req, res) => {
   try {
-    const { email, displayName, password, isAdmin } = req.body;
+    const { email, displayName, password, isAdmin, role } = req.body;
 
     // Check if user already exists
     const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -291,18 +297,25 @@ router.post('/users', requireAdmin, validateRequest(createUserSchema), async (re
     // Generate user ID
     const userId = crypto.randomUUID();
 
+    // Determine role - if explicitly provided, use it; otherwise derive from isAdmin flag
+    const userRole = role || (isAdmin ? 'admin' : 'user');
+    // Sync isAdmin flag with role
+    const userIsAdmin = isAdmin || role === 'admin';
+
     // Create user
     const newUser = await db.insert(users).values({
       id: userId,
       email,
       displayName: displayName || null,
       passwordHash,
-      isAdmin: isAdmin || false,
+      isAdmin: userIsAdmin,
+      role: userRole,
     }).returning({
       id: users.id,
       email: users.email,
       displayName: users.displayName,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     });
 
@@ -396,19 +409,51 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
   try {
     const authReq = req as AuthRequest;
     const { id } = req.params;
-    const { email, displayName, isAdmin, password } = req.body;
+    const { email, displayName, isAdmin, role, password } = req.body;
 
-    // Prevent user from removing their own admin status
-    if (authReq.user?.id === id && isAdmin === false) {
-      sendError(res, 'Cannot remove your own admin status', 400, ApiErrorCode.FORBIDDEN);
+    // Validate role if provided
+    const validRoles = ['user', 'editor', 'developer', 'admin'];
+    if (role !== undefined && !validRoles.includes(role)) {
+      sendError(res, `Invalid role. Must be one of: ${validRoles.join(', ')}`, 400, ApiErrorCode.VALIDATION_ERROR);
       return;
+    }
+
+    // Prevent user from removing their own admin status or demoting themselves
+    if (authReq.user?.id === id) {
+      if (isAdmin === false) {
+        sendError(res, 'Cannot remove your own admin status', 400, ApiErrorCode.FORBIDDEN);
+        return;
+      }
+      if (role !== undefined && role !== 'admin') {
+        sendError(res, 'Cannot demote your own role', 400, ApiErrorCode.FORBIDDEN);
+        return;
+      }
     }
 
     const updateData: UserUpdateData = {};
 
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;
-    if (isAdmin !== undefined) updateData.isAdmin = isAdmin;
+
+    // Handle role and isAdmin synchronization
+    if (role !== undefined) {
+      updateData.role = role;
+      // Sync isAdmin with role
+      updateData.isAdmin = role === 'admin';
+    } else if (isAdmin !== undefined) {
+      updateData.isAdmin = isAdmin;
+      // Sync role with isAdmin
+      if (isAdmin) {
+        updateData.role = 'admin';
+      } else {
+        // When removing admin, check if current role is admin and demote
+        const [currentUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+        if (currentUser && currentUser.role === 'admin') {
+          updateData.role = 'user'; // Demote from admin to basic user
+        }
+      }
+    }
+
     if (password) {
       updateData.passwordHash = await bcrypt.hash(password, 10);
     }
@@ -426,6 +471,7 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
         email: users.email,
         displayName: users.displayName,
         isAdmin: users.isAdmin,
+        role: users.role,
         createdAt: users.createdAt,
       });
 
