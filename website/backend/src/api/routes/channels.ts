@@ -29,6 +29,33 @@ import { v4 as uuidv4 } from 'uuid';
 const router = Router();
 
 /**
+ * Query parameters for pagination.
+ * Used to type-check query params from Express requests.
+ * Index signature allows compatibility with Record<string, unknown>.
+ */
+interface PaginationQueryParams {
+  cursor?: string;
+  limit?: string;
+  offset?: string;
+  page?: string;
+  [key: string]: string | undefined;
+}
+
+/**
+ * Typed update data for community channels.
+ * Matches the columns available on the communityChannels table.
+ */
+interface ChannelUpdateData {
+  name?: string;
+  description?: string | null;
+  isDefault?: boolean;
+  isReadOnly?: boolean;
+  sortOrder?: number;
+  status?: 'active' | 'archived' | 'hidden';
+  updatedAt: Date;
+}
+
+/**
  * @openapi
  * tags:
  *   - name: Channels
@@ -348,7 +375,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.get('/:id/messages', async (req: Request, res: Response) => {
   try {
     const channelId = req.params.id;
-    const query = req.query as Record<string, unknown>;
+    const query = req.query as PaginationQueryParams;
 
     // Verify channel exists
     const [channel] = await db
@@ -1022,8 +1049,8 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Build update
-    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    // Build update with typed data
+    const updateData: ChannelUpdateData = { updatedAt: new Date() };
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
     if (isDefault !== undefined) updateData.isDefault = isDefault;

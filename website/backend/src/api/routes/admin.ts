@@ -37,6 +37,17 @@ const updateUserSchema = {
   }),
 };
 
+/**
+ * Typed update data for user updates.
+ * Matches the columns available on the users table.
+ */
+interface UserUpdateData {
+  email?: string;
+  displayName?: string;
+  isAdmin?: boolean;
+  passwordHash?: string;
+}
+
 const router = Router();
 
 /**
@@ -393,7 +404,7 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
       return;
     }
 
-    const updateData: Record<string, unknown> = {};
+    const updateData: UserUpdateData = {};
 
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;

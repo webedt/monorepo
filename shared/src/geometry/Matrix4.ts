@@ -598,7 +598,14 @@ export class Matrix4 {
 
   /** Convert to column-major tuple */
   toTuple(): Matrix4Tuple {
-    return Array.from(this.elements) as unknown as Matrix4Tuple;
+    const e = this.elements;
+    // Directly construct the tuple with known 16 elements from Float64Array
+    return [
+      e[0], e[1], e[2], e[3],
+      e[4], e[5], e[6], e[7],
+      e[8], e[9], e[10], e[11],
+      e[12], e[13], e[14], e[15]
+    ] as const;
   }
 
   /** Convert to column-major array */
