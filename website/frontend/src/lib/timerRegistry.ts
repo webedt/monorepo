@@ -8,13 +8,13 @@
 export interface TimerEntry {
   id: number;
   type: 'timeout' | 'interval';
-  callback: () => void;
   delay: number;
   createdAt: number;
 }
 
 export class TimerRegistry {
   private timers: Map<number, TimerEntry> = new Map();
+  private debounceKeys: Map<string, number> = new Map();
   private nextId = 1;
 
   /**
@@ -33,7 +33,6 @@ export class TimerRegistry {
     this.timers.set(internalId, {
       id: timeoutId,
       type: 'timeout',
-      callback,
       delay,
       createdAt,
     });
@@ -54,7 +53,6 @@ export class TimerRegistry {
     this.timers.set(internalId, {
       id: intervalId,
       type: 'interval',
-      callback,
       delay,
       createdAt,
     });
@@ -121,6 +119,7 @@ export class TimerRegistry {
       }
     }
     this.timers.clear();
+    this.debounceKeys.clear();
   }
 
   /**
@@ -180,6 +179,8 @@ export class TimerRegistry {
         cleared++;
       }
     }
+    // Also clear debounce keys since they are timeouts
+    this.debounceKeys.clear();
     return cleared;
   }
 
@@ -201,51 +202,55 @@ export class TimerRegistry {
   /**
    * Debounce helper - clears any existing timeout with the same key and sets a new one.
    * Useful for search inputs, resize handlers, etc.
+   * Uses a separate key-to-ID map to avoid hash collisions.
    */
   debounce(key: string, callback: () => void, delay: number): number {
-    // Use negative IDs for keyed debounce timers to avoid conflicts
-    const keyedId = -Math.abs(this.hashCode(key));
-
-    // Clear existing timer for this key
-    const existing = this.timers.get(keyedId);
-    if (existing) {
-      window.clearTimeout(existing.id);
-      this.timers.delete(keyedId);
+    // Clear existing timer for this key if it exists
+    const existingId = this.debounceKeys.get(key);
+    if (existingId !== undefined) {
+      this.clear(existingId);
     }
 
+    // Create new timer and track it
+    const internalId = this.nextId++;
     const createdAt = Date.now();
+
     const timeoutId = window.setTimeout(() => {
-      this.timers.delete(keyedId);
+      this.timers.delete(internalId);
+      this.debounceKeys.delete(key);
       callback();
     }, delay);
 
-    this.timers.set(keyedId, {
+    this.timers.set(internalId, {
       id: timeoutId,
       type: 'timeout',
-      callback,
       delay,
       createdAt,
     });
 
-    return keyedId;
+    this.debounceKeys.set(key, internalId);
+
+    return internalId;
   }
 
   /**
    * Cancel a debounced timer by its key.
+   * Returns true if the timer was found and cleared.
    */
   cancelDebounce(key: string): boolean {
-    const keyedId = -Math.abs(this.hashCode(key));
-    return this.clear(keyedId);
+    const internalId = this.debounceKeys.get(key);
+    if (internalId !== undefined) {
+      this.debounceKeys.delete(key);
+      return this.clear(internalId);
+    }
+    return false;
   }
 
-  private hashCode(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return hash;
+  /**
+   * Check if a debounce key has an active timer.
+   */
+  hasDebounce(key: string): boolean {
+    return this.debounceKeys.has(key);
   }
 }
 
