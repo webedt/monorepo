@@ -6,6 +6,7 @@
  */
 
 import { createHmrId, registerComponent, unregisterComponent } from '../../lib/hmr';
+import { TimerRegistry } from '../../lib/timerRegistry';
 
 export interface ComponentOptions {
   className?: string;
@@ -23,6 +24,13 @@ export abstract class Component<T extends HTMLElement = HTMLElement> {
   }> = [];
   private hmrId: string | null = null;
   protected hmrParent: HTMLElement | null = null;
+
+  /**
+   * Registry for tracking timers (setTimeout/setInterval) with automatic cleanup.
+   * Use this.timers.setTimeout() or this.timers.setInterval() to register timers
+   * that will be automatically cleared when the component is unmounted.
+   */
+  protected readonly timers: TimerRegistry = new TimerRegistry();
 
   constructor(
     tagName: keyof HTMLElementTagNameMap = 'div',
@@ -87,6 +95,9 @@ export abstract class Component<T extends HTMLElement = HTMLElement> {
   unmount(): this {
     this.onUnmount();
     this.removeAllEventListeners();
+
+    // Clean up all timers registered via the TimerRegistry
+    this.timers.clearAll();
 
     // Unregister from HMR
     if (this.hmrId) {
