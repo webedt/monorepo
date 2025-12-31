@@ -210,9 +210,9 @@ export abstract class DomainError extends Error {
  * - Field values are out of range or invalid format
  *
  * @example
- * throw new ValidationError('Invalid email format', { field: 'email', value: 'not-an-email' });
- * throw new ValidationError('Name is required', { field: 'name' });
- * throw new ValidationError('Age must be positive', { field: 'age', value: -5, min: 0 });
+ * throw new ValidationError('Invalid email format', 'email', { value: 'not-an-email' });
+ * throw new ValidationError('Name is required', 'name');
+ * throw new ValidationError('Age must be positive', 'age', { value: -5, min: 0 });
  */
 export class ValidationError extends DomainError {
   readonly type = 'VALIDATION_ERROR' as const;
@@ -433,9 +433,13 @@ export class RateLimitError extends DomainError {
    * Create a RateLimitError from a response with Retry-After header
    */
   static fromRetryAfterHeader(retryAfter: string | number): RateLimitError {
-    const seconds = typeof retryAfter === 'string'
-      ? parseInt(retryAfter, 10) || 60
-      : retryAfter;
+    let seconds: number;
+    if (typeof retryAfter === 'string') {
+      const parsed = parseInt(retryAfter, 10);
+      seconds = Number.isNaN(parsed) ? 60 : parsed;
+    } else {
+      seconds = retryAfter;
+    }
     return new RateLimitError('Rate limit exceeded', seconds);
   }
 }
