@@ -37,6 +37,7 @@ export class MidiPianoRoll extends Component {
   private playheadEl: HTMLElement | null = null;
   private animationFrameId: number | null = null;
   private notes: { note: MidiNoteEvent; trackIndex: number; color: string }[] = [];
+  private clickListener: ((e: MouseEvent) => void) | null = null;
 
   // Colors for different tracks
   private trackColors = [
@@ -246,14 +247,14 @@ export class MidiPianoRoll extends Component {
   private setupEventListeners(): void {
     // Click to seek
     if (this.options.clickToSeek && this.scrollContainer) {
-      this.scrollContainer.addEventListener('click', (e) => {
+      this.clickListener = (e: MouseEvent) => {
         const rect = this.scrollContainer!.getBoundingClientRect();
         const x = e.clientX - rect.left + this.scrollContainer!.scrollLeft;
         const time = x / this.options.pixelsPerSecond;
         midiStore.seek(time);
-      });
+      };
+      this.scrollContainer.addEventListener('click', this.clickListener);
     }
-
   }
 
   private updatePlayhead(): void {
@@ -353,6 +354,10 @@ export class MidiPianoRoll extends Component {
 
   protected onUnmount(): void {
     this.stopPlayheadAnimation();
+    if (this.clickListener && this.scrollContainer) {
+      this.scrollContainer.removeEventListener('click', this.clickListener);
+      this.clickListener = null;
+    }
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
