@@ -113,7 +113,7 @@ export class TrashCleanupService extends ScheduledCleanupService(ATrashCleanupSe
       };
     } catch (error) {
       const errorMessage = this.getErrorMessage(error);
-      this.log.error(`Failed to permanently delete session ${sessionId}`, error as Error);
+      this.log.error(`Failed to permanently delete session ${sessionId}`, error);
       return {
         success: false,
         message: errorMessage,
@@ -181,7 +181,7 @@ export class TrashCleanupService extends ScheduledCleanupService(ATrashCleanupSe
         } catch (sessionError) {
           const errorMsg = this.getErrorMessage(sessionError);
           result.errors.push(`Session ${session.id}: ${errorMsg}`);
-          this.log.error(`Error cleaning up session ${session.id}`, sessionError as Error);
+          this.log.error(`Error cleaning up session ${session.id}`, sessionError);
         }
       }
 
@@ -192,7 +192,7 @@ export class TrashCleanupService extends ScheduledCleanupService(ATrashCleanupSe
           this.log.debug(`Recalculated storage usage for user ${userId}`);
         } catch (storageError) {
           // Log but don't fail the cleanup for storage recalculation errors
-          this.log.error(`Failed to recalculate storage for user ${userId}`, storageError as Error);
+          this.log.error(`Failed to recalculate storage for user ${userId}`, storageError);
         }
       }
 
@@ -208,7 +208,7 @@ export class TrashCleanupService extends ScheduledCleanupService(ATrashCleanupSe
     } catch (error) {
       const errorMsg = this.getErrorMessage(error);
       result.errors.push(`Cleanup failed: ${errorMsg}`);
-      this.log.error('Trash cleanup failed', error as Error);
+      this.log.error('Trash cleanup failed', error);
       return result;
     }
   }

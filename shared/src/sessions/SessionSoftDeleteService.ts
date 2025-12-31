@@ -74,7 +74,7 @@ export class SessionSoftDeleteService extends BaseService(ASessionSoftDeleteServ
       };
     } catch (error) {
       const errorMessage = this.getErrorMessage(error);
-      this.log.error(`Failed to soft delete session ${sessionId}`, error as Error);
+      this.log.error(`Failed to soft delete session ${sessionId}`, error);
       return {
         sessionId,
         success: false,
@@ -161,7 +161,7 @@ export class SessionSoftDeleteService extends BaseService(ASessionSoftDeleteServ
       };
     } catch (error) {
       const errorMessage = this.getErrorMessage(error);
-      this.log.error(`Failed to restore session ${sessionId}`, error as Error);
+      this.log.error(`Failed to restore session ${sessionId}`, error);
       return {
         sessionId,
         success: false,
@@ -191,6 +191,8 @@ export class SessionSoftDeleteService extends BaseService(ASessionSoftDeleteServ
   async initialize(): Promise<void> {
     // No initialization needed
   }
+
+  // dispose() inherited from BaseService - handles shutdown handlers automatically
 }
 
 export const sessionSoftDeleteService = new SessionSoftDeleteService();

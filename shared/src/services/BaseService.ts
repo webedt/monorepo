@@ -178,6 +178,9 @@ export function BaseService<T extends abstract new (...args: any[]) => AService>
      * Processes each item individually, collecting results and counting successes/failures.
      * This allows partial success where some items fail while others succeed.
      *
+     * Note: Items are processed sequentially to ensure graceful error handling.
+     * TODO: Consider adding optional concurrency parameter for parallel processing.
+     *
      * @param items - Array of items to process
      * @param processor - Async function to process each item
      * @param options - Optional configuration for logging
@@ -259,7 +262,7 @@ export function BaseService<T extends abstract new (...args: any[]) => AService>
       context?: Record<string, unknown>
     ): OperationResult {
       const errorMessage = this.getErrorMessage(error);
-      this.log.error(`Failed to ${operation}`, error as Error, context);
+      this.log.error(`Failed to ${operation}`, error, context);
       return {
         success: false,
         message: errorMessage,
@@ -322,7 +325,7 @@ export function BaseService<T extends abstract new (...args: any[]) => AService>
         try {
           await handler();
         } catch (error) {
-          this.log.error('Shutdown handler failed', error as Error);
+          this.log.error('Shutdown handler failed', error);
         }
       }
       this._shutdownHandlers = [];
@@ -437,7 +440,8 @@ export function ScheduledCleanupService<T extends abstract new (...args: any[]) 
         this._runWithErrorHandling();
       }, config.intervalMs);
 
-      // Allow the process to exit cleanly
+      // Allow the process to exit cleanly even if timers are pending
+      this._initialTimeoutId.unref();
       this._cleanupIntervalId.unref();
 
       // Register shutdown handler
@@ -470,7 +474,7 @@ export function ScheduledCleanupService<T extends abstract new (...args: any[]) 
       try {
         await this.runScheduledTask();
       } catch (error) {
-        this.log.error(`Scheduled ${this.getTaskName()} failed`, error as Error);
+        this.log.error(`Scheduled ${this.getTaskName()} failed`, error);
       }
     }
 

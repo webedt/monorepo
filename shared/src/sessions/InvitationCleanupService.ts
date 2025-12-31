@@ -113,7 +113,7 @@ export class InvitationCleanupService extends ScheduledCleanupService(AInvitatio
     } catch (error) {
       const errorMsg = this.getErrorMessage(error);
       result.errors.push(`Cleanup failed: ${errorMsg}`);
-      this.log.error('Invitation cleanup failed', error as Error);
+      this.log.error('Invitation cleanup failed', error);
       return result;
     }
   }
