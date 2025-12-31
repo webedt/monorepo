@@ -33,6 +33,8 @@ export class Input extends Component<HTMLDivElement> {
   private helperElement?: HTMLSpanElement;
   private errorElement?: HTMLSpanElement;
   private options: InputOptions;
+  private inputId: string;
+  private errorId: string;
 
   constructor(options: InputOptions = {}) {
     super('div', {
@@ -46,10 +48,16 @@ export class Input extends Component<HTMLDivElement> {
       ...options,
     };
 
+    // Generate unique IDs for accessibility
+    const uniqueId = options.id || `input-${Math.random().toString(36).substr(2, 9)}`;
+    this.inputId = uniqueId;
+    this.errorId = `${uniqueId}-error`;
+
     // Create input element
     this.inputElement = document.createElement('input');
     this.inputElement.className = 'input';
     this.inputElement.type = this.options.type!;
+    this.inputElement.id = this.inputId;
 
     this.buildStructure();
     this.applyOptions();
@@ -121,9 +129,7 @@ export class Input extends Component<HTMLDivElement> {
 
     // Link label to input
     if (this.labelElement) {
-      const inputId = this.options.id || `input-${Math.random().toString(36).substr(2, 9)}`;
-      this.inputElement.id = inputId;
-      this.labelElement.htmlFor = inputId;
+      this.labelElement.htmlFor = this.inputId;
     }
   }
 
@@ -214,10 +220,18 @@ export class Input extends Component<HTMLDivElement> {
 
     if (message) {
       this.inputElement.classList.add('input--error');
+      this.inputElement.setAttribute('aria-invalid', 'true');
+      this.inputElement.setAttribute('aria-describedby', this.errorId);
+
       this.errorElement = document.createElement('span');
       this.errorElement.className = 'input-error';
+      this.errorElement.id = this.errorId;
+      this.errorElement.setAttribute('role', 'alert');
       this.errorElement.textContent = message;
       this.element.appendChild(this.errorElement);
+    } else {
+      this.inputElement.removeAttribute('aria-invalid');
+      this.inputElement.removeAttribute('aria-describedby');
     }
 
     return this;
@@ -293,6 +307,8 @@ export class TextArea extends Component<HTMLDivElement> {
   private helperElement?: HTMLSpanElement;
   private errorElement?: HTMLSpanElement;
   private options: TextAreaOptions;
+  private textareaId: string;
+  private errorId: string;
 
   constructor(options: TextAreaOptions = {}) {
     super('div', {
@@ -307,8 +323,14 @@ export class TextArea extends Component<HTMLDivElement> {
       ...options,
     };
 
+    // Generate unique IDs for accessibility
+    const uniqueId = options.id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
+    this.textareaId = uniqueId;
+    this.errorId = `${uniqueId}-error`;
+
     this.textareaElement = document.createElement('textarea');
     this.textareaElement.className = 'input';
+    this.textareaElement.id = this.textareaId;
 
     this.buildStructure();
     this.applyOptions();
@@ -374,10 +396,9 @@ export class TextArea extends Component<HTMLDivElement> {
     if (rows !== undefined) this.textareaElement.rows = rows;
     if (resize) this.textareaElement.style.resize = resize;
 
+    // Link label to textarea
     if (this.labelElement) {
-      const textareaId = this.options.id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
-      this.textareaElement.id = textareaId;
-      this.labelElement.htmlFor = textareaId;
+      this.labelElement.htmlFor = this.textareaId;
     }
   }
 
@@ -455,10 +476,18 @@ export class TextArea extends Component<HTMLDivElement> {
 
     if (message) {
       this.textareaElement.classList.add('input--error');
+      this.textareaElement.setAttribute('aria-invalid', 'true');
+      this.textareaElement.setAttribute('aria-describedby', this.errorId);
+
       this.errorElement = document.createElement('span');
       this.errorElement.className = 'input-error';
+      this.errorElement.id = this.errorId;
+      this.errorElement.setAttribute('role', 'alert');
       this.errorElement.textContent = message;
       this.element.appendChild(this.errorElement);
+    } else {
+      this.textareaElement.removeAttribute('aria-invalid');
+      this.textareaElement.removeAttribute('aria-describedby');
     }
 
     return this;
