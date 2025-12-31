@@ -26,10 +26,36 @@ class Router {
   private outlet: HTMLElement | null = null;
   private notFoundComponent: (() => HTMLElement) | null = null;
 
+  // Store bound handlers for proper cleanup
+  private boundHandleHashChange: () => void;
+  private boundHandleLoad: () => void;
+
   constructor() {
+    // Bind handlers once in constructor for consistent references
+    this.boundHandleHashChange = () => this.handleRouteChange();
+    this.boundHandleLoad = () => this.handleRouteChange();
+
     // Listen to hash changes
-    window.addEventListener('hashchange', () => this.handleRouteChange());
-    window.addEventListener('load', () => this.handleRouteChange());
+    window.addEventListener('hashchange', this.boundHandleHashChange);
+    window.addEventListener('load', this.boundHandleLoad);
+  }
+
+  /**
+   * Cleanup - removes all event listeners and clears state.
+   *
+   * WARNING: This method is intended for HMR (Hot Module Replacement) cleanup
+   * and testing scenarios only. After calling destroy(), the router instance
+   * will be non-functional and cannot be reinitialized. In production, this
+   * is only called during HMR dispose to prevent duplicate event listeners.
+   */
+  destroy(): void {
+    window.removeEventListener('hashchange', this.boundHandleHashChange);
+    window.removeEventListener('load', this.boundHandleLoad);
+    this.routes = [];
+    this.currentMatch = null;
+    this.listeners.clear();
+    this.outlet = null;
+    this.notFoundComponent = null;
   }
 
   /**
@@ -291,5 +317,6 @@ if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
     router.saveForHmr();
+    router.destroy();
   });
 }

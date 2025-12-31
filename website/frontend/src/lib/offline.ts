@@ -24,7 +24,14 @@ class OfflineManager {
   private checkInterval: number | null = null;
   private lastOnlineTime: number = Date.now();
 
+  // Store bound handlers for proper cleanup
+  private boundHandleOnline: () => void;
+  private boundHandleOffline: () => void;
+
   constructor() {
+    // Bind handlers once in constructor for consistent references
+    this.boundHandleOnline = () => this.handleOnline();
+    this.boundHandleOffline = () => this.handleOffline();
     this.initialize();
   }
 
@@ -33,8 +40,8 @@ class OfflineManager {
     this.status = navigator.onLine ? 'online' : 'offline';
 
     // Listen for online/offline events
-    window.addEventListener('online', () => this.handleOnline());
-    window.addEventListener('offline', () => this.handleOffline());
+    window.addEventListener('online', this.boundHandleOnline);
+    window.addEventListener('offline', this.boundHandleOffline);
 
     // Periodic connectivity check for slow connections
     this.startConnectivityCheck();
@@ -222,12 +229,20 @@ class OfflineManager {
   }
 
   /**
-   * Cleanup
+   * Cleanup - removes all event listeners and clears state
    */
   destroy(): void {
+    // Remove window event listeners
+    window.removeEventListener('online', this.boundHandleOnline);
+    window.removeEventListener('offline', this.boundHandleOffline);
+
+    // Clear connectivity check interval
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
+      this.checkInterval = null;
     }
+
+    // Clear all registered listeners and pending operations
     this.listeners.clear();
     this.pendingOperations.clear();
   }
