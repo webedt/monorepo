@@ -164,19 +164,25 @@ export class CodePage extends Page<CodePageOptions> {
     super.onMount();
 
     // Setup back button using tracked listener
-    this.addListenerBySelector('[data-action="back"]', 'click', () => {
+    if (!this.addListenerBySelector('[data-action="back"]', 'click', () => {
       this.navigate(`/session/${this.options.params?.sessionId}/chat`);
-    });
+    })) {
+      console.warn('[CodePage] Back button not found in template');
+    }
 
     // Setup refresh button using tracked listener
-    this.addListenerBySelector('[data-action="refresh"]', 'click', () => {
+    if (!this.addListenerBySelector('[data-action="refresh"]', 'click', () => {
       this.loadFiles();
-    });
+    })) {
+      console.warn('[CodePage] Refresh button not found in template');
+    }
 
     // Setup import from URL button using tracked listener
-    this.addListenerBySelector('[data-action="import-url"]', 'click', () => {
+    if (!this.addListenerBySelector('[data-action="import-url"]', 'click', () => {
       this.openUrlImportDialog();
-    });
+    })) {
+      console.warn('[CodePage] Import URL button not found in template');
+    }
 
     // Setup compare button
     const compareBtnContainer = this.$('.compare-btn-container') as HTMLElement;
@@ -235,8 +241,12 @@ export class CodePage extends Page<CodePageOptions> {
     }
 
     // Setup undo/redo buttons using tracked listeners
-    this.addListenerBySelector('[data-action="undo"]', 'click', () => this.handleUndo());
-    this.addListenerBySelector('[data-action="redo"]', 'click', () => this.handleRedo());
+    if (!this.addListenerBySelector('[data-action="undo"]', 'click', () => this.handleUndo())) {
+      console.warn('[CodePage] Undo button not found in template');
+    }
+    if (!this.addListenerBySelector('[data-action="redo"]', 'click', () => this.handleRedo())) {
+      console.warn('[CodePage] Redo button not found in template');
+    }
 
     // Initialize MultiCursorEditor
     this.initializeMultiCursorEditor();

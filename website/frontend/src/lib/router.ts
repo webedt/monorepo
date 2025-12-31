@@ -41,7 +41,12 @@ class Router {
   }
 
   /**
-   * Cleanup - removes all event listeners and clears state
+   * Cleanup - removes all event listeners and clears state.
+   *
+   * WARNING: This method is intended for HMR (Hot Module Replacement) cleanup
+   * and testing scenarios only. After calling destroy(), the router instance
+   * will be non-functional and cannot be reinitialized. In production, this
+   * is only called during HMR dispose to prevent duplicate event listeners.
    */
   destroy(): void {
     window.removeEventListener('hashchange', this.boundHandleHashChange);
