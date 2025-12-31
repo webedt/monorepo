@@ -19,7 +19,15 @@ usersCommand
     try {
       const limit = parseInt(options.limit, 10);
 
-      let query = db
+      // Validate role filter if specified
+      const roleFilter = options.role as UserRole | undefined;
+      if (roleFilter && !validRoles.includes(roleFilter)) {
+        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        process.exit(1);
+      }
+
+      // Build query with optional role filter
+      const baseQuery = db
         .select({
           id: users.id,
           email: users.email,
@@ -29,20 +37,11 @@ usersCommand
           preferredProvider: users.preferredProvider,
           createdAt: users.createdAt,
         })
-        .from(users)
-        .orderBy(desc(users.createdAt))
-        .limit(limit);
+        .from(users);
 
-      // Filter by role if specified
-      if (options.role) {
-        if (!validRoles.includes(options.role)) {
-          console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
-          process.exit(1);
-        }
-        query = query.where(eq(users.role, options.role)) as typeof query;
-      }
-
-      const userList = await query;
+      const userList = roleFilter
+        ? await baseQuery.where(eq(users.role, roleFilter)).orderBy(desc(users.createdAt)).limit(limit)
+        : await baseQuery.orderBy(desc(users.createdAt)).limit(limit);
 
       if (userList.length === 0) {
         console.log('No users found.');
@@ -123,7 +122,8 @@ usersCommand
   .action(async (email, password, options) => {
     try {
       // Validate role if provided
-      if (options.role && !validRoles.includes(options.role)) {
+      const roleOption = options.role as UserRole | undefined;
+      if (roleOption && !validRoles.includes(roleOption)) {
         console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
         process.exit(1);
       }
@@ -143,7 +143,7 @@ usersCommand
       const passwordHash = await bcrypt.hash(password, 10);
 
       // Determine role - use explicit role, or derive from admin flag
-      const role = (options.role || (options.admin ? 'admin' : 'user')) as UserRole;
+      const role: UserRole = roleOption || (options.admin ? 'admin' : 'user');
       const isAdmin = options.admin || role === 'admin';
 
       await db.insert(users).values({
@@ -205,10 +205,11 @@ usersCommand
 usersCommand
   .command('set-role <userId> <role>')
   .description('Set user role (user, editor, developer, admin)')
-  .action(async (userId, role) => {
+  .action(async (userId, roleArg: string) => {
     try {
       // Validate role
-      if (!validRoles.includes(role)) {
+      const newRole = roleArg as UserRole;
+      if (!validRoles.includes(newRole)) {
         console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
         process.exit(1);
       }
@@ -225,15 +226,15 @@ usersCommand
       }
 
       // Sync isAdmin with role
-      const isAdmin = role === 'admin';
+      const isAdmin = newRole === 'admin';
 
       await db
         .update(users)
-        .set({ role: role as UserRole, isAdmin })
+        .set({ role: newRole, isAdmin })
         .where(eq(users.id, userId));
 
       console.log(`User ${user.email}:`);
-      console.log(`  Role: ${role}`);
+      console.log(`  Role: ${newRole}`);
       console.log(`  Admin: ${isAdmin ? 'Yes' : 'No'}`);
     } catch (error) {
       console.error('Error updating role:', error);

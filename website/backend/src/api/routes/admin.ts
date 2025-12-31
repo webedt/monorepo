@@ -4,10 +4,13 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
+
+const validRoles = ROLE_HIERARCHY;
 
 const router = Router();
 
@@ -73,8 +76,7 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role && !validRoles.includes(role)) {
+    if (role && !validRoles.includes(role as UserRole)) {
       res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
     }
@@ -129,8 +131,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role !== undefined && !validRoles.includes(role)) {
+    if (role !== undefined && !validRoles.includes(role as UserRole)) {
       res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
     }
