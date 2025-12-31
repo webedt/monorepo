@@ -393,6 +393,7 @@ function mapRowToChatSession(row: Record<string, unknown>): ChatSession {
     shareToken: row.share_token as string | null,
     shareExpiresAt: row.share_expires_at as Date | null,
     version: row.version as number,
+    searchVector: row.search_vector as string | null,
   };
 }
 

@@ -270,6 +270,10 @@ async function doInitialize(): Promise<void> {
       }
     }
 
+    if (schemaUpdate.fullTextSearchSetup) {
+      console.log('  ✅ Full-text search triggers and indexes configured');
+    }
+
     if (schemaUpdate.errors.length > 0) {
       console.warn('  Schema update warnings:');
       for (const err of schemaUpdate.errors) {
@@ -277,7 +281,7 @@ async function doInitialize(): Promise<void> {
       }
     }
 
-    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0 && schemaUpdate.duplicatesRemoved === 0) {
+    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0 && schemaUpdate.duplicatesRemoved === 0 && !schemaUpdate.fullTextSearchSetup) {
       console.log('  ✅ Schema is up to date');
     }
 
