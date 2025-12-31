@@ -7,7 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, events, eq, and, asc, isNull, isNotNull, logger, generateSessionPath, sessionSoftDeleteService } from '@webedt/shared';
+import { db, chatSessions, messages, events, eq, and, asc, isNull, isNotNull, logger, generateSessionPath, sessionSoftDeleteService, WORKER_CALLBACK_SECRET } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import { sessionCreationRateLimiter } from '../../middleware/rateLimit.js';
 
@@ -631,8 +631,7 @@ router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Re
   const { status, completedAt, workerSecret } = req.body;
 
   // Validate worker secret
-  const expectedSecret = process.env.WORKER_CALLBACK_SECRET;
-  if (!expectedSecret || workerSecret !== expectedSecret) {
+  if (!WORKER_CALLBACK_SECRET || workerSecret !== WORKER_CALLBACK_SECRET) {
     logger.warn(`Invalid worker secret for session ${sessionId}`, { component: 'Sessions' });
     res.status(401).json({ success: false, error: 'Invalid worker secret' });
     return;

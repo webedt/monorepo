@@ -13,6 +13,7 @@ import {
   formatSchemaErrors,
   getCurrentMigrationVersion,
   getDatabaseDiagnostics,
+  DATABASE_URL,
 } from '@webedt/shared';
 
 const { Pool } = pg;
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
   console.log('═'.repeat(60));
   console.log('');
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = DATABASE_URL;
 
   if (!databaseUrl) {
     console.error('❌ DATABASE_URL environment variable is not set');
