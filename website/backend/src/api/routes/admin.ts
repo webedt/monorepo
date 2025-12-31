@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db, users, sessions, eq, sql } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
+import { logAdminAction } from '../middleware/auditMiddleware.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
 import {
@@ -16,7 +17,14 @@ import {
   sendInternalError,
   validateRequest,
   ApiErrorCode,
+  listAuditLogs,
+  getAuditLog,
+  getAuditStats,
+  isAuditAction,
+  isAuditEntityType,
 } from '@webedt/shared';
+
+import type { AuditAction, AuditEntityType } from '@webedt/shared';
 
 // Validation schemas
 const createUserSchema = {
@@ -306,6 +314,14 @@ router.post('/users', requireAdmin, validateRequest(createUserSchema), async (re
       createdAt: users.createdAt,
     });
 
+    // Audit log
+    await logAdminAction(req as AuthRequest, {
+      action: 'USER_CREATE',
+      entityType: 'user',
+      entityId: userId,
+      newState: { email, displayName, isAdmin: isAdmin || false },
+    });
+
     sendSuccess(res, newUser[0], 201);
   } catch (error) {
     console.error('Error creating user:', error);
@@ -404,6 +420,18 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
       return;
     }
 
+    // Get previous state for audit log
+    const [previousUser] = await db.select({
+      email: users.email,
+      displayName: users.displayName,
+      isAdmin: users.isAdmin,
+    }).from(users).where(eq(users.id, id)).limit(1);
+
+    if (!previousUser) {
+      sendNotFound(res, 'User not found');
+      return;
+    }
+
     const updateData: UserUpdateData = {};
 
     if (email !== undefined) updateData.email = email;
@@ -433,6 +461,23 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
       sendNotFound(res, 'User not found');
       return;
     }
+
+    // Determine which audit action to use
+    const hasAdminStatusChange = isAdmin !== undefined && previousUser.isAdmin !== isAdmin;
+    const auditAction = hasAdminStatusChange ? 'USER_ADMIN_STATUS_CHANGE' : 'USER_UPDATE';
+
+    // Audit log (exclude passwordHash from state)
+    await logAdminAction(authReq, {
+      action: auditAction,
+      entityType: 'user',
+      entityId: id,
+      previousState: previousUser,
+      newState: {
+        email: updatedUser[0].email,
+        displayName: updatedUser[0].displayName,
+        isAdmin: updatedUser[0].isAdmin,
+      },
+    });
 
     sendSuccess(res, updatedUser[0]);
   } catch (error) {
@@ -502,12 +547,32 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
       return;
     }
 
+    // Get user info before deletion for audit log
+    const [userToDelete] = await db.select({
+      email: users.email,
+      displayName: users.displayName,
+      isAdmin: users.isAdmin,
+    }).from(users).where(eq(users.id, id)).limit(1);
+
+    if (!userToDelete) {
+      sendNotFound(res, 'User not found');
+      return;
+    }
+
     const deletedUser = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id });
 
     if (!deletedUser || deletedUser.length === 0) {
       sendNotFound(res, 'User not found');
       return;
     }
+
+    // Audit log
+    await logAdminAction(authReq, {
+      action: 'USER_DELETE',
+      entityType: 'user',
+      entityId: id,
+      previousState: userToDelete,
+    });
 
     sendSuccess(res, { id: deletedUser[0].id });
   } catch (error) {
@@ -600,6 +665,17 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
     // Create new session for target user
     const session = await lucia.createSession(id, {});
     const sessionCookie = lucia.createSessionCookie(session.id);
+
+    // Audit log - use targetUser info for context
+    await logAdminAction(authReq, {
+      action: 'USER_IMPERSONATE',
+      entityType: 'user',
+      entityId: id,
+      metadata: {
+        targetUserEmail: targetUser[0].email,
+        targetUserDisplayName: targetUser[0].displayName,
+      },
+    });
 
     res.setHeader('Set-Cookie', sessionCookie.serialize());
     sendSuccess(res, {
@@ -792,8 +868,19 @@ router.get('/rate-limits', requireAdmin, async (req, res) => {
 // POST /api/admin/rate-limits/reset - Reset rate limit metrics
 router.post('/rate-limits/reset', requireAdmin, async (req, res) => {
   try {
+    const authReq = req as AuthRequest;
     const { resetRateLimitMetrics } = await import('../middleware/rateLimit.js');
     resetRateLimitMetrics();
+
+    // Audit log
+    await logAdminAction(authReq, {
+      action: 'RATE_LIMIT_RESET',
+      entityType: 'setting',
+      metadata: {
+        resetAt: new Date().toISOString(),
+      },
+    });
+
     sendSuccess(res, {
       message: 'Rate limit metrics reset successfully',
       resetAt: new Date().toISOString(),
@@ -801,6 +888,198 @@ router.post('/rate-limits/reset', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error resetting rate limit metrics:', error);
     sendInternalError(res, 'Failed to reset rate limit metrics');
+  }
+});
+
+/**
+ * @openapi
+ * /admin/audit-logs:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: List audit logs
+ *     description: Returns paginated audit logs with filtering options. Admin access required.
+ *     parameters:
+ *       - name: adminId
+ *         in: query
+ *         description: Filter by admin user ID
+ *         schema:
+ *           type: string
+ *       - name: action
+ *         in: query
+ *         description: Filter by action type
+ *         schema:
+ *           type: string
+ *       - name: entityType
+ *         in: query
+ *         description: Filter by entity type
+ *         schema:
+ *           type: string
+ *       - name: entityId
+ *         in: query
+ *         description: Filter by entity ID
+ *         schema:
+ *           type: string
+ *       - name: startDate
+ *         in: query
+ *         description: Filter by start date (ISO 8601)
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - name: endDate
+ *         in: query
+ *         description: Filter by end date (ISO 8601)
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - name: limit
+ *         in: query
+ *         description: Maximum number of results (default 50, max 100)
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         description: Number of results to skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Audit logs retrieved successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// GET /api/admin/audit-logs - List audit logs
+router.get('/audit-logs', requireAdmin, async (req, res) => {
+  try {
+    const {
+      adminId,
+      action,
+      entityType,
+      entityId,
+      startDate,
+      endDate,
+    } = req.query;
+
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Validate action if provided
+    let validatedAction: AuditAction | undefined;
+    if (action && typeof action === 'string') {
+      if (!isAuditAction(action)) {
+        sendError(res, `Invalid action: ${action}`, 400, ApiErrorCode.VALIDATION_ERROR);
+        return;
+      }
+      validatedAction = action;
+    }
+
+    // Validate entityType if provided
+    let validatedEntityType: AuditEntityType | undefined;
+    if (entityType && typeof entityType === 'string') {
+      if (!isAuditEntityType(entityType)) {
+        sendError(res, `Invalid entityType: ${entityType}`, 400, ApiErrorCode.VALIDATION_ERROR);
+        return;
+      }
+      validatedEntityType = entityType;
+    }
+
+    const result = await listAuditLogs({
+      adminId: adminId as string | undefined,
+      action: validatedAction,
+      entityType: validatedEntityType,
+      entityId: entityId as string | undefined,
+      startDate: startDate ? new Date(startDate as string) : undefined,
+      endDate: endDate ? new Date(endDate as string) : undefined,
+      limit,
+      offset,
+    });
+
+    sendSuccess(res, result);
+  } catch (error) {
+    console.error('Error fetching audit logs:', error);
+    sendInternalError(res, 'Failed to fetch audit logs');
+  }
+});
+
+/**
+ * @openapi
+ * /admin/audit-logs/stats:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get audit log statistics
+ *     description: Returns aggregate statistics for audit logs. Admin access required.
+ *     responses:
+ *       200:
+ *         description: Audit statistics retrieved successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// GET /api/admin/audit-logs/stats - Get audit statistics
+router.get('/audit-logs/stats', requireAdmin, async (req, res) => {
+  try {
+    const stats = await getAuditStats();
+    sendSuccess(res, stats);
+  } catch (error) {
+    console.error('Error fetching audit stats:', error);
+    sendInternalError(res, 'Failed to fetch audit statistics');
+  }
+});
+
+/**
+ * @openapi
+ * /admin/audit-logs/{id}:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get audit log by ID
+ *     description: Returns a single audit log entry. Admin access required.
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         description: Audit log ID
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Audit log retrieved successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+// GET /api/admin/audit-logs/:id - Get single audit log
+router.get('/audit-logs/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const auditLog = await getAuditLog(id);
+
+    if (!auditLog) {
+      sendNotFound(res, 'Audit log not found');
+      return;
+    }
+
+    sendSuccess(res, auditLog);
+  } catch (error) {
+    console.error('Error fetching audit log:', error);
+    sendInternalError(res, 'Failed to fetch audit log');
   }
 });
 

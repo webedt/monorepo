@@ -18,6 +18,7 @@ import {
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { logAdminAction } from '../middleware/auditMiddleware.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -605,6 +606,21 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
       status: announcement.status,
     });
 
+    // Audit log - use correct action based on status
+    const auditAction = announcement.status === 'published' ? 'ANNOUNCEMENT_PUBLISH' : 'ANNOUNCEMENT_CREATE';
+    await logAdminAction(authReq, {
+      action: auditAction,
+      entityType: 'announcement',
+      entityId: announcement.id,
+      newState: {
+        title: announcement.title,
+        type: announcement.type,
+        priority: announcement.priority,
+        status: announcement.status,
+        pinned: announcement.pinned,
+      },
+    });
+
     res.json({
       success: true,
       data: { announcement },
@@ -773,6 +789,31 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
       component: 'Announcements',
     });
 
+    // Determine audit action - check if this is a publish action
+    const isPublishing = status === 'published' && existing.status !== 'published';
+    const auditAction = isPublishing ? 'ANNOUNCEMENT_PUBLISH' : 'ANNOUNCEMENT_UPDATE';
+
+    // Audit log
+    await logAdminAction(authReq, {
+      action: auditAction,
+      entityType: 'announcement',
+      entityId: announcementId,
+      previousState: {
+        title: existing.title,
+        type: existing.type,
+        priority: existing.priority,
+        status: existing.status,
+        pinned: existing.pinned,
+      },
+      newState: {
+        title: updated.title,
+        type: updated.type,
+        priority: updated.priority,
+        status: updated.status,
+        pinned: updated.pinned,
+      },
+    });
+
     res.json({
       success: true,
       data: { announcement: updated },
@@ -850,6 +891,20 @@ router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
 
     logger.info(`Admin ${authReq.user!.id} deleted announcement ${announcementId}`, {
       component: 'Announcements',
+    });
+
+    // Audit log
+    await logAdminAction(authReq, {
+      action: 'ANNOUNCEMENT_DELETE',
+      entityType: 'announcement',
+      entityId: announcementId,
+      previousState: {
+        title: existing.title,
+        type: existing.type,
+        priority: existing.priority,
+        status: existing.status,
+        pinned: existing.pinned,
+      },
     });
 
     res.json({

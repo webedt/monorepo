@@ -1232,3 +1232,91 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
 // Type exports for Idempotency Keys
 export type IdempotencyKey = typeof idempotencyKeys.$inferSelect;
 export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
+
+// ============================================================================
+// ADMIN AUDIT LOGS - Immutable audit trail for security-sensitive operations
+// ============================================================================
+
+// Audit action types for admin operations
+export const AUDIT_ACTIONS = [
+  // User management
+  'USER_CREATE',
+  'USER_UPDATE',
+  'USER_DELETE',
+  'USER_ADMIN_STATUS_CHANGE',
+  'USER_IMPERSONATE',
+  // Session management
+  'SESSION_DELETE',
+  'SESSION_RESTORE',
+  'SESSION_LOCK',
+  // Announcement management
+  'ANNOUNCEMENT_CREATE',
+  'ANNOUNCEMENT_UPDATE',
+  'ANNOUNCEMENT_DELETE',
+  'ANNOUNCEMENT_PUBLISH',
+  // Organization management
+  'ORGANIZATION_CREATE',
+  'ORGANIZATION_UPDATE',
+  'ORGANIZATION_DELETE',
+  'ORGANIZATION_MEMBER_ADD',
+  'ORGANIZATION_MEMBER_REMOVE',
+  'ORGANIZATION_MEMBER_ROLE_CHANGE',
+  // Payment/billing operations
+  'PAYMENT_REFUND',
+  'PAYMENT_MANUAL_ADJUSTMENT',
+  // Rate limit operations
+  'RATE_LIMIT_RESET',
+  // Other admin operations
+  'ADMIN_SETTING_CHANGE',
+] as const;
+
+export type AuditAction = typeof AUDIT_ACTIONS[number];
+
+// Entity types that can be audited
+export const AUDIT_ENTITY_TYPES = [
+  'user',
+  'session',
+  'announcement',
+  'organization',
+  'organization_member',
+  'payment',
+  'setting',
+] as const;
+
+export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];
+
+// Admin Audit Logs - Immutable audit trail for security-sensitive operations
+export const adminAuditLogs = pgTable('admin_audit_logs', {
+  id: text('id').primaryKey(), // UUID
+  adminId: text('admin_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'set null' }), // Admin who performed the action
+  action: text('action').notNull(), // The action performed (from AUDIT_ACTIONS)
+  entityType: text('entity_type').notNull(), // Type of entity affected (from AUDIT_ENTITY_TYPES)
+  entityId: text('entity_id'), // ID of the affected entity (nullable for bulk operations)
+  previousState: json('previous_state').$type<Record<string, unknown>>(), // State before the change
+  newState: json('new_state').$type<Record<string, unknown>>(), // State after the change
+  metadata: json('metadata').$type<{
+    reason?: string; // Optional reason for the action
+    affectedCount?: number; // For bulk operations
+    requestId?: string; // Request correlation ID
+    userAgent?: string; // Browser/client info
+    [key: string]: unknown;
+  }>(),
+  ipAddress: text('ip_address'), // IP address of the admin
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Type exports for Admin Audit Logs
+export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
+export type NewAdminAuditLog = typeof adminAuditLogs.$inferInsert;
+
+/** Type guard to check if a string is a valid AuditAction */
+export function isAuditAction(value: unknown): value is AuditAction {
+  return typeof value === 'string' && AUDIT_ACTIONS.includes(value as AuditAction);
+}
+
+/** Type guard to check if a string is a valid AuditEntityType */
+export function isAuditEntityType(value: unknown): value is AuditEntityType {
+  return typeof value === 'string' && AUDIT_ENTITY_TYPES.includes(value as AuditEntityType);
+}

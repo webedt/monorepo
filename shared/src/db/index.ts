@@ -539,6 +539,11 @@ export type {
   // Idempotency types
   IdempotencyKey,
   NewIdempotencyKey,
+  // Admin audit log types
+  AdminAuditLog,
+  NewAdminAuditLog,
+  AuditAction,
+  AuditEntityType,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -599,6 +604,12 @@ export {
   SNIPPET_CATEGORIES,
   // Idempotency tables
   idempotencyKeys,
+  // Admin audit log tables and utilities
+  adminAuditLogs,
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  isAuditAction,
+  isAuditEntityType,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
