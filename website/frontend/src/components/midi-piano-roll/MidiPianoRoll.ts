@@ -63,11 +63,11 @@ export class MidiPianoRoll extends Component {
     const state = midiStore.getState();
 
     this.element.innerHTML = `
-      <div class="midi-piano-roll-container">
-        ${this.options.showPiano ? '<div class="midi-piano-roll-keys"></div>' : ''}
-        <div class="midi-piano-roll-scroll">
-          <canvas class="midi-piano-roll-canvas"></canvas>
-          <div class="midi-piano-roll-playhead"></div>
+      <div class="midi-piano-roll-container" role="img" aria-label="Piano roll visualization showing MIDI notes over time">
+        ${this.options.showPiano ? '<div class="midi-piano-roll-keys" aria-hidden="true"></div>' : ''}
+        <div class="midi-piano-roll-scroll" tabindex="0" aria-label="MIDI note timeline. Click to seek playback position.">
+          <canvas class="midi-piano-roll-canvas" aria-hidden="true"></canvas>
+          <div class="midi-piano-roll-playhead" aria-hidden="true"></div>
         </div>
       </div>
     `;

@@ -153,20 +153,20 @@ export class MidiPlayer extends Component {
 
     return `
       <div class="midi-player-transport">
-        <button class="midi-player-transport-btn" data-action="stop" title="Stop" ${!state.isLoaded ? 'disabled' : ''}>
-          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        <button class="midi-player-transport-btn" data-action="stop" title="Stop" aria-label="Stop playback" ${!state.isLoaded ? 'disabled' : ''}>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12"/></svg>
         </button>
-        <button class="midi-player-transport-btn midi-player-transport-btn--primary" data-action="play-pause" title="${isPlaying ? 'Pause' : 'Play'}" ${!state.isLoaded ? 'disabled' : ''}>
-          <svg viewBox="0 0 24 24" fill="currentColor">${playPauseIcon}</svg>
+        <button class="midi-player-transport-btn midi-player-transport-btn--primary" data-action="play-pause" title="${isPlaying ? 'Pause' : 'Play'}" aria-label="${isPlaying ? 'Pause playback' : 'Start playback'}" ${!state.isLoaded ? 'disabled' : ''}>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${playPauseIcon}</svg>
         </button>
-        <div class="midi-player-time">
+        <div class="midi-player-time" aria-live="polite" aria-atomic="true">
           <span class="midi-player-time-current">${this.formatTime(state.currentTime)}</span>
-          <span class="midi-player-time-separator">/</span>
+          <span class="midi-player-time-separator" aria-hidden="true">/</span>
           <span class="midi-player-time-duration">${this.formatTime(state.duration)}</span>
         </div>
         <div class="midi-player-transport-spacer"></div>
-        <button class="midi-player-transport-btn ${state.settings.loop ? 'midi-player-transport-btn--active' : ''}" data-action="loop" title="Loop">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="midi-player-transport-btn ${state.settings.loop ? 'midi-player-transport-btn--active' : ''}" data-action="loop" title="Loop" aria-label="${state.settings.loop ? 'Disable loop' : 'Enable loop'}" aria-pressed="${state.settings.loop}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <polyline points="17 1 21 5 17 9"/>
             <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
             <polyline points="7 23 3 19 7 15"/>
@@ -174,17 +174,17 @@ export class MidiPlayer extends Component {
           </svg>
         </button>
         <div class="midi-player-volume">
-          <button class="midi-player-transport-btn" data-action="volume-toggle" title="Volume">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="midi-player-transport-btn" data-action="volume-toggle" title="Volume" aria-label="Toggle volume">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
               <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
               <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
             </svg>
           </button>
-          <input type="range" class="midi-player-volume-slider" min="0" max="100" value="${Math.round(state.settings.volume * 100)}" />
+          <input type="range" class="midi-player-volume-slider" min="0" max="100" value="${Math.round(state.settings.volume * 100)}" aria-label="Volume" />
         </div>
         <div class="midi-player-speed">
-          <select class="midi-player-speed-select">
+          <select class="midi-player-speed-select" aria-label="Playback speed">
             <option value="0.5" ${state.settings.speed === 0.5 ? 'selected' : ''}>0.5x</option>
             <option value="0.75" ${state.settings.speed === 0.75 ? 'selected' : ''}>0.75x</option>
             <option value="1" ${state.settings.speed === 1.0 ? 'selected' : ''}>1x</option>
@@ -217,8 +217,8 @@ export class MidiPlayer extends Component {
       .filter((track) => track.noteCount > 0)
       .map((track) => `
         <div class="midi-player-track ${track.isMuted ? 'midi-player-track--muted' : ''}" data-track="${track.index}">
-          <button class="midi-player-track-mute" data-action="toggle-track" data-track="${track.index}" title="${track.isMuted ? 'Unmute' : 'Mute'}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="midi-player-track-mute" data-action="toggle-track" data-track="${track.index}" title="${track.isMuted ? 'Unmute' : 'Mute'}" aria-label="${track.isMuted ? 'Unmute' : 'Mute'} ${this.escapeHtml(track.name)}" aria-pressed="${track.isMuted}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               ${track.isMuted
                 ? '<path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>'
                 : '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>'
@@ -246,8 +246,8 @@ export class MidiPlayer extends Component {
     const channelItems = fileInfo.channels
       .map((channel) => `
         <div class="midi-player-channel ${channel.isMuted ? 'midi-player-channel--muted' : ''}" data-channel="${channel.channel}">
-          <button class="midi-player-channel-mute" data-action="toggle-channel" data-channel="${channel.channel}" title="${channel.isMuted ? 'Unmute' : 'Mute'}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="midi-player-channel-mute" data-action="toggle-channel" data-channel="${channel.channel}" title="${channel.isMuted ? 'Unmute' : 'Mute'}" aria-label="${channel.isMuted ? 'Unmute' : 'Mute'} channel ${channel.channel + 1}" aria-pressed="${channel.isMuted}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               ${channel.isMuted
                 ? '<path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>'
                 : '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>'
