@@ -32,11 +32,57 @@ interface ChatMessage {
   fullContent?: string;
 }
 
+/**
+ * Message content can be a string or structured object depending on event type.
+ */
+interface StructuredMessage {
+  content?: unknown;
+  model?: string;
+}
+
+/**
+ * Base event data structure for SSE events.
+ * Event data varies by type - common fields are optional.
+ * Note: Some fields like `message` have runtime-variable types.
+ */
+interface EventData {
+  type?: string;
+  /** Message content - can be string (for errors) or object (for assistant responses) */
+  message?: string | StructuredMessage;
+  content?: unknown;
+  status?: string;
+  title?: string;
+  name?: string;
+  id?: string;
+  tool_use_id?: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  tool_use_result?: unknown;
+  is_error?: boolean;
+  error?: string;
+  total_cost_usd?: number;
+  duration_ms?: number;
+  method?: string;
+  branch_name?: string;
+  sessionName?: string;
+  data?: { preview?: string };
+  _replayed?: boolean;
+}
+
 interface RawEvent {
   id: string;
   type: string;
   timestamp: Date;
-  data: any;
+  data: EventData;
+}
+
+/**
+ * Stored event format from database/API.
+ */
+interface StoredEvent {
+  id?: string;
+  timestamp?: string;
+  eventData?: EventData;
 }
 
 // Event type emoji mapping
@@ -729,7 +775,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       const events = response.data?.events || response.events || [];
 
       // Store raw events for raw view
-      this.rawEvents = events.map((event: any) => this.convertToRawEvent(event));
+      this.rawEvents = events.map((event: StoredEvent) => this.convertToRawEvent(event));
 
       // Build tool result map from events (tool_result events reference tool_use by id)
       this.buildToolResultMap(events);
@@ -737,7 +783,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Convert events to messages for formatted view
       // Use flatMap since convertEventToMessages returns an array (to handle extracting tool_use from assistant)
       this.messages = events
-        .flatMap((event: any) => this.convertEventToMessages(event))
+        .flatMap((event: StoredEvent) => this.convertEventToMessages(event))
         .filter((msg: ChatMessage | null): msg is ChatMessage => msg !== null);
 
       this.renderContent();
@@ -760,11 +806,11 @@ export class ChatPage extends Page<ChatPageOptions> {
    * 1. Direct tool_result events
    * 2. Inside user events with content array containing tool_result blocks
    */
-  private buildToolResultMap(events: any[]): void {
+  private buildToolResultMap(events: StoredEvent[]): void {
     this.toolResultMap.clear();
 
     for (const event of events) {
-      const data = event.eventData || event;
+      const data = event.eventData || (event as unknown as EventData);
 
       // Direct tool_result event
       if (data?.type === 'tool_result' && data?.tool_use_id) {
@@ -776,15 +822,16 @@ export class ChatPage extends Page<ChatPageOptions> {
       }
 
       // User event with tool_result in content array
-      if (data?.type === 'user' && data?.message?.content) {
-        const content = data.message.content;
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block.type === 'tool_result' && block.tool_use_id) {
-              this.toolResultMap.set(block.tool_use_id, {
+      if (data?.type === 'user' && data?.message && typeof data.message === 'object') {
+        const messageContent = (data.message as { content?: unknown[] }).content;
+        if (Array.isArray(messageContent)) {
+          for (const block of messageContent) {
+            const typedBlock = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
+            if (typedBlock.type === 'tool_result' && typedBlock.tool_use_id) {
+              this.toolResultMap.set(typedBlock.tool_use_id, {
                 tool_use_result: {},
-                content: block.content,
-                is_error: block.is_error,
+                content: typedBlock.content,
+                is_error: typedBlock.is_error,
               });
             }
           }
@@ -793,8 +840,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
-  private convertToRawEvent(event: any): RawEvent {
-    const data = event.eventData || event;
+  private convertToRawEvent(event: StoredEvent): RawEvent {
+    const data = event.eventData || (event as unknown as EventData);
     const eventType = data?.type || 'unknown';
 
     return {
@@ -810,8 +857,8 @@ export class ChatPage extends Page<ChatPageOptions> {
    * Returns an array because assistant events may contain both text and tool_use blocks.
    * @param event The event to convert
    */
-  private convertEventToMessages(event: any): (ChatMessage | null)[] {
-    const data = event.eventData || event;
+  private convertEventToMessages(event: StoredEvent): (ChatMessage | null)[] {
+    const data: EventData = event.eventData || (event as unknown as EventData);
     const eventType = data?.type;
 
     if (!data) return [null];
@@ -824,9 +871,10 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     // Skip control/internal events (these are too low-level or redundant)
     // Pass through only key events: input_preview, title_generation, result, assistant, thinking, tool_use, error, user
-    if (['connected', 'heartbeat', 'env_manager_log', 'system', 'tool_result',
+    const skipEvents = ['connected', 'heartbeat', 'env_manager_log', 'system', 'tool_result',
          'session_created', 'session_name', 'completed', 'message', 'submission_preview',
-         'replay_start', 'replay_end', 'live_stream_start', 'resuming'].includes(eventType)) {
+         'replay_start', 'replay_end', 'live_stream_start', 'resuming'];
+    if (eventType && skipEvents.includes(eventType)) {
       return [null];
     }
 
@@ -834,7 +882,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     switch (eventType) {
       case 'input_preview': {
         // input_preview is server confirmation of user's request
-        const previewContent = data.data?.preview || data.message || '';
+        const messageStr = typeof data.message === 'string' ? data.message : '';
+        const previewContent = data.data?.preview || messageStr || '';
         if (!previewContent) return [null];
 
         // During page load/replay: show as user message bubble (no optimistic message was shown)
@@ -863,7 +912,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       case 'user_message':
         // Legacy event type for follow-up messages (backwards compatibility)
         // New sessions use input_preview with source: 'user' instead
-        const userContent = data.content || '';
+        const userContent = typeof data.content === 'string' ? data.content : '';
         if (!userContent) return [null];
         return [{
           id: event.id || `user-${Date.now()}`,
@@ -878,7 +927,8 @@ export class ChatPage extends Page<ChatPageOptions> {
         return this.extractMessagesFromAssistant(event, data);
 
       case 'error': {
-        const errorContent = data.message || data.error || 'An error occurred';
+        const errorMsg = typeof data.message === 'string' ? data.message : '';
+        const errorContent = errorMsg || data.error || 'An error occurred';
         // Filter out abort-related error messages - these will be shown as 'interrupted' event instead
         if (errorContent.includes('aborted') || errorContent.includes('Aborted')) {
           return [null];
@@ -949,11 +999,13 @@ export class ChatPage extends Page<ChatPageOptions> {
       case 'user': {
         // Check for interrupt messages in tool_result content
         // These appear when the user stops/interrupts a session
-        const messageContent = data.message?.content;
+        const messageObj = typeof data.message === 'object' && data.message !== null ? data.message : null;
+        const messageContent = messageObj?.content;
         if (Array.isArray(messageContent)) {
           for (const block of messageContent) {
-            if (block.type === 'tool_result' && block.is_error === true) {
-              const content = block.content || '';
+            const typedBlock = block as { type?: string; is_error?: boolean; content?: string };
+            if (typedBlock.type === 'tool_result' && typedBlock.is_error === true) {
+              const content = typedBlock.content || '';
               if (content.includes('interrupted by user')) {
                 return [{
                   id: event.id || `interrupt-${Date.now()}`,
@@ -980,11 +1032,11 @@ export class ChatPage extends Page<ChatPageOptions> {
 
       case 'interrupted': {
         // Interrupt event from the server when user stops the session
-        const message = data.message || 'Request interrupted by user';
+        const interruptMsg = typeof data.message === 'string' ? data.message : 'Request interrupted by user';
         return [{
           id: event.id || `interrupted-${Date.now()}`,
           type: 'error',
-          content: `⏹️ ${message}`,
+          content: `⏹️ ${interruptMsg}`,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
       }
@@ -1207,7 +1259,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     workerStore.startExecution(this.session.id);
   }
 
-  private handleStreamEvent(event: any): void {
+  private handleStreamEvent(event: EventData): void {
     const eventType = event.type;
 
     // Update heartbeat
