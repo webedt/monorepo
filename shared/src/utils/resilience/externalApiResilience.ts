@@ -63,6 +63,28 @@ export const CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG: Partial<CircuitBreakerConfig>
   halfOpenMaxAttempts: 2,
 };
 
+/**
+ * Image generation provider types for per-provider circuit breakers.
+ */
+export type ImageGenProvider = 'openrouter' | 'cometapi' | 'google';
+
+/**
+ * Image generation circuit breaker configuration.
+ * Per-provider circuit breakers since providers fail independently.
+ * - 3 consecutive failures to open (balanced sensitivity)
+ * - 45 second reset timeout (allow rate limits to clear)
+ * - 2 successes in half-open to close
+ */
+export function getImageGenCircuitBreakerConfig(provider: ImageGenProvider): Partial<CircuitBreakerConfig> {
+  return {
+    name: `image-gen:${provider}`,
+    failureThreshold: 3,
+    successThreshold: 2,
+    resetTimeoutMs: 45000,
+    halfOpenMaxAttempts: 2,
+  };
+}
+
 // =============================================================================
 // Retry Configurations
 // =============================================================================
@@ -146,11 +168,67 @@ export const CLAUDE_REMOTE_RETRY_CONFIG: Partial<RetryConfig> = {
   },
 };
 
+/**
+ * Image generation API retry configuration.
+ * Moderate retries with exponential backoff, aware of rate limits.
+ */
+export const IMAGE_GEN_RETRY_CONFIG: Partial<RetryConfig> = {
+  maxRetries: 3,
+  baseDelayMs: 1500,
+  maxDelayMs: 20000,
+  backoffMultiplier: 2,
+  useJitter: true,
+  jitterFactor: 0.3,
+  operationName: 'image-gen-api',
+  isRetryable: (error: Error) => {
+    const statusCode = getStatusCode(error);
+
+    // Don't retry auth errors
+    if (statusCode === 401 || statusCode === 403) {
+      return false;
+    }
+
+    // Don't retry validation/bad request errors
+    if (statusCode === 400 || statusCode === 422) {
+      return false;
+    }
+
+    // Don't retry content policy violations (often 451 or similar)
+    if (statusCode === 451) {
+      return false;
+    }
+
+    // Retry rate limits and server errors
+    if (statusCode === 429 || (statusCode !== undefined && statusCode >= 500)) {
+      return true;
+    }
+
+    // Retry network errors
+    const code = getErrorCode(error);
+    if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' ||
+        code === 'ECONNRESET' || code === 'ECONNREFUSED') {
+      return true;
+    }
+
+    const message = error.message.toLowerCase();
+    return message.includes('network') ||
+           message.includes('timeout') ||
+           message.includes('connection') ||
+           message.includes('temporarily unavailable') ||
+           message.includes('service unavailable');
+  },
+};
+
 // =============================================================================
 // Circuit Breaker Initialization
 // =============================================================================
 
 let initialized = false;
+
+/**
+ * Image generation providers to initialize circuit breakers for.
+ */
+const IMAGE_GEN_PROVIDERS: ImageGenProvider[] = ['openrouter', 'cometapi', 'google'];
 
 /**
  * Initialize external API circuit breakers and register state change listeners.
@@ -166,6 +244,12 @@ export function initializeExternalApiResilience(): void {
 
   // Get or create Claude Remote circuit breaker
   const claudeRemoteBreaker = circuitBreakerRegistry.get('claude-remote', CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG);
+
+  // Get or create image generation circuit breakers (per-provider)
+  const imageGenBreakers = IMAGE_GEN_PROVIDERS.map(provider => ({
+    provider,
+    breaker: circuitBreakerRegistry.get(`image-gen:${provider}`, getImageGenCircuitBreakerConfig(provider)),
+  }));
 
   // Register state change listeners for logging/observability
   githubBreaker.onStateChange((newState, prevState) => {
@@ -186,10 +270,27 @@ export function initializeExternalApiResilience(): void {
     });
   });
 
+  // Register state change listeners for image generation providers
+  for (const { provider, breaker } of imageGenBreakers) {
+    breaker.onStateChange((newState, prevState) => {
+      logger.warn(`Circuit breaker [image-gen:${provider}] state changed: ${prevState} -> ${newState}`, {
+        component: 'ExternalApiResilience',
+        circuitName: `image-gen:${provider}`,
+        provider,
+        prevState,
+        newState,
+      });
+    });
+  }
+
   initialized = true;
   logger.info('External API resilience initialized', {
     component: 'ExternalApiResilience',
-    circuitBreakers: ['github', 'claude-remote'],
+    circuitBreakers: [
+      'github',
+      'claude-remote',
+      ...IMAGE_GEN_PROVIDERS.map(p => `image-gen:${p}`),
+    ],
   });
 }
 
@@ -280,6 +381,48 @@ export async function withClaudeRemoteResilience<T>(
 }
 
 /**
+ * Wrap an image generation API call with retry and circuit breaker patterns.
+ * Uses per-provider circuit breakers since different providers fail independently.
+ *
+ * @param provider - The image generation provider (openrouter, cometapi, google)
+ * @param operation - The image generation API operation to execute
+ * @param operationName - Name of the operation for logging
+ * @returns The result of the operation
+ * @throws Error if all retries fail and circuit breaker rejects
+ */
+export async function withImageGenResilience<T>(
+  provider: ImageGenProvider,
+  operation: () => Promise<T>,
+  operationName: string
+): Promise<T> {
+  const config = getImageGenCircuitBreakerConfig(provider);
+  const breaker = circuitBreakerRegistry.get(`image-gen:${provider}`, config);
+
+  const result = await breaker.execute(async () => {
+    return withRetry(operation, {
+      ...IMAGE_GEN_RETRY_CONFIG,
+      operationName: `image-gen:${provider}:${operationName}`,
+    });
+  });
+
+  if (result.success && result.data !== undefined) {
+    return result.data;
+  }
+
+  if (result.wasRejected) {
+    logger.error(`Image generation API call rejected by circuit breaker: ${provider}/${operationName}`, {
+      component: 'ExternalApiResilience',
+      operationName,
+      provider,
+      circuitState: breaker.getState(),
+    });
+    throw new Error(`Image generation provider ${provider} temporarily unavailable (circuit breaker open). Please try again later.`);
+  }
+
+  throw result.error || new Error(`Image generation API call failed: ${provider}/${operationName}`);
+}
+
+/**
  * Execute an operation with only circuit breaker protection (no retry).
  * Use for operations that should fail fast without retrying.
  *
@@ -337,16 +480,28 @@ export async function withRetryOnly<T>(
 // Health Check Helpers
 // =============================================================================
 
+type CircuitBreakerStats = ReturnType<typeof circuitBreakerRegistry.getAllStats>[string];
+
 /**
  * Get the current status of all external API circuit breakers.
  * Useful for health check endpoints.
  */
 export function getExternalApiCircuitBreakerStatus(): {
-  github: { state: string; stats: ReturnType<typeof circuitBreakerRegistry.getAllStats>[string] };
-  claudeRemote: { state: string; stats: ReturnType<typeof circuitBreakerRegistry.getAllStats>[string] };
+  github: { state: string; stats: CircuitBreakerStats };
+  claudeRemote: { state: string; stats: CircuitBreakerStats };
+  imageGen: Record<ImageGenProvider, { state: string; stats: CircuitBreakerStats }>;
 } {
   const githubBreaker = circuitBreakerRegistry.get('github', GITHUB_CIRCUIT_BREAKER_CONFIG);
   const claudeRemoteBreaker = circuitBreakerRegistry.get('claude-remote', CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG);
+
+  const imageGenStatus = {} as Record<ImageGenProvider, { state: string; stats: CircuitBreakerStats }>;
+  for (const provider of IMAGE_GEN_PROVIDERS) {
+    const breaker = circuitBreakerRegistry.get(`image-gen:${provider}`, getImageGenCircuitBreakerConfig(provider));
+    imageGenStatus[provider] = {
+      state: breaker.getState(),
+      stats: breaker.getStats(),
+    };
+  }
 
   return {
     github: {
@@ -357,29 +512,58 @@ export function getExternalApiCircuitBreakerStatus(): {
       state: claudeRemoteBreaker.getState(),
       stats: claudeRemoteBreaker.getStats(),
     },
+    imageGen: imageGenStatus,
   };
 }
 
 /**
  * Check if external APIs are available (circuit breakers not open).
  */
-export function areExternalApisAvailable(): { github: boolean; claudeRemote: boolean } {
+export function areExternalApisAvailable(): {
+  github: boolean;
+  claudeRemote: boolean;
+  imageGen: Record<ImageGenProvider, boolean>;
+} {
   const githubBreaker = circuitBreakerRegistry.get('github', GITHUB_CIRCUIT_BREAKER_CONFIG);
   const claudeRemoteBreaker = circuitBreakerRegistry.get('claude-remote', CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG);
+
+  const imageGenAvailable = {} as Record<ImageGenProvider, boolean>;
+  for (const provider of IMAGE_GEN_PROVIDERS) {
+    const breaker = circuitBreakerRegistry.get(`image-gen:${provider}`, getImageGenCircuitBreakerConfig(provider));
+    imageGenAvailable[provider] = !breaker.isOpen();
+  }
 
   return {
     github: !githubBreaker.isOpen(),
     claudeRemote: !claudeRemoteBreaker.isOpen(),
+    imageGen: imageGenAvailable,
   };
+}
+
+/**
+ * Check if a specific image generation provider is available.
+ */
+export function isImageGenProviderAvailable(provider: ImageGenProvider): boolean {
+  const breaker = circuitBreakerRegistry.get(`image-gen:${provider}`, getImageGenCircuitBreakerConfig(provider));
+  return !breaker.isOpen();
 }
 
 /**
  * Reset a specific circuit breaker (use with caution, mainly for testing).
  */
-export function resetCircuitBreaker(name: 'github' | 'claude-remote'): void {
-  const config = name === 'github'
-    ? GITHUB_CIRCUIT_BREAKER_CONFIG
-    : CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG;
+export function resetCircuitBreaker(name: 'github' | 'claude-remote' | `image-gen:${ImageGenProvider}`): void {
+  let config: Partial<CircuitBreakerConfig>;
+
+  if (name === 'github') {
+    config = GITHUB_CIRCUIT_BREAKER_CONFIG;
+  } else if (name === 'claude-remote') {
+    config = CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG;
+  } else if (name.startsWith('image-gen:')) {
+    const provider = name.replace('image-gen:', '') as ImageGenProvider;
+    config = getImageGenCircuitBreakerConfig(provider);
+  } else {
+    throw new Error(`Unknown circuit breaker: ${name}`);
+  }
 
   const breaker = circuitBreakerRegistry.get(name, config);
   breaker.reset();

@@ -68,16 +68,21 @@ export {
   resetExternalApiResilienceForTesting,
   withGitHubResilience,
   withClaudeRemoteResilience,
+  withImageGenResilience,
   withCircuitBreakerOnly,
   withRetryOnly,
   getExternalApiCircuitBreakerStatus,
   areExternalApisAvailable,
+  isImageGenProviderAvailable,
   resetCircuitBreaker,
+  getImageGenCircuitBreakerConfig,
   GITHUB_CIRCUIT_BREAKER_CONFIG,
   CLAUDE_REMOTE_CIRCUIT_BREAKER_CONFIG,
   GITHUB_RETRY_CONFIG,
   CLAUDE_REMOTE_RETRY_CONFIG,
+  IMAGE_GEN_RETRY_CONFIG,
 } from './externalApiResilience.js';
+export type { ImageGenProvider } from './externalApiResilience.js';
 
 // Rate Limiter
 export {
