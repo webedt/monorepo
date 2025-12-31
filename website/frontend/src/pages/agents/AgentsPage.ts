@@ -34,7 +34,6 @@ export class AgentsPage extends Page<PageOptions> {
   private isLoading = true;
   private filterMode: FilterMode = 'all';
   private searchQuery = '';
-  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isSearching = false;
   private serverSearchResults: Session[] | null = null;
   private pendingSearchQuery: string | null = null;
@@ -51,8 +50,9 @@ export class AgentsPage extends Page<PageOptions> {
   private prefetchedBranches: Map<string, Branch[]> = new Map();
   private reposPrefetchPromise: Promise<void> | null = null;
 
-  // Session list updates subscription
+  // Session list updates subscription (tracked via ListenerRegistry)
   private sessionUpdatesEventSource: EventSource | null = null;
+  private searchDebounceTimerId: ReturnType<typeof setTimeout> | null = null;
 
   // Collections
   private collectionsPanel: CollectionsPanel | null = null;
@@ -453,17 +453,19 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   /**
-   * Subscribe to real-time session list updates via SSE
+   * Subscribe to real-time session list updates via SSE.
+   * Uses ListenerRegistry for automatic cleanup on unmount.
    */
   private subscribeToSessionUpdates(): void {
-    // Close any existing connection
+    // Close any existing connection via the registry
     if (this.sessionUpdatesEventSource) {
-      this.sessionUpdatesEventSource.close();
+      this.listeners.closeEventSource(this.sessionUpdatesEventSource);
     }
 
-    this.sessionUpdatesEventSource = new EventSource('/api/sessions/updates', { withCredentials: true });
+    // Create EventSource tracked by ListenerRegistry
+    this.sessionUpdatesEventSource = this.listeners.addEventSource('/api/sessions/updates', { withCredentials: true });
 
-    this.sessionUpdatesEventSource.addEventListener('created', (event: MessageEvent) => {
+    const handleCreated = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const session = data.session as Session;
@@ -475,9 +477,9 @@ export class AgentsPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[AgentsPage] Failed to parse created event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.addEventListener('updated', (event: MessageEvent) => {
+    const handleUpdated = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const updatedSession = data.session as Partial<Session> & { id: string };
@@ -492,9 +494,9 @@ export class AgentsPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[AgentsPage] Failed to parse updated event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.addEventListener('status_changed', (event: MessageEvent) => {
+    const handleStatusChanged = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const updatedSession = data.session as Partial<Session> & { id: string };
@@ -509,9 +511,9 @@ export class AgentsPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[AgentsPage] Failed to parse status_changed event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.addEventListener('deleted', (event: MessageEvent) => {
+    const handleDeleted = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const sessionId = data.session.id;
@@ -523,11 +525,18 @@ export class AgentsPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[AgentsPage] Failed to parse deleted event:', error);
       }
-    });
-
-    this.sessionUpdatesEventSource.onerror = (error) => {
-      console.error('[AgentsPage] Session updates SSE error:', error);
     };
+
+    const handleError = () => {
+      console.error('[AgentsPage] Session updates SSE error');
+    };
+
+    // Register all event listeners with the registry
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'created', handleCreated as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'updated', handleUpdated as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'status_changed', handleStatusChanged as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'deleted', handleDeleted as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'error', handleError as EventListener);
   }
 
   private async loadSessions(): Promise<void> {
@@ -793,10 +802,10 @@ export class AgentsPage extends Page<PageOptions> {
   private handleSearch(query: string): void {
     this.searchQuery = query;
 
-    // Clear any pending debounce timer
-    if (this.searchDebounceTimer) {
-      clearTimeout(this.searchDebounceTimer);
-      this.searchDebounceTimer = null;
+    // Clear any pending debounce timer via ListenerRegistry
+    if (this.searchDebounceTimerId) {
+      this.listeners.clearTimer(this.searchDebounceTimerId);
+      this.searchDebounceTimerId = null;
     }
 
     // If query is empty, clear server search results and use local filtering
@@ -816,8 +825,9 @@ export class AgentsPage extends Page<PageOptions> {
       return;
     }
 
-    // Debounce server-side search for longer queries
-    this.searchDebounceTimer = setTimeout(async () => {
+    // Debounce server-side search for longer queries using ListenerRegistry
+    this.searchDebounceTimerId = this.listeners.setTimeout(async () => {
+      this.searchDebounceTimerId = null;
       await this.performServerSearch(query.trim());
     }, 300);
 
@@ -867,6 +877,7 @@ export class AgentsPage extends Page<PageOptions> {
   protected onUnmount(): void {
     this.isMounted = false;
 
+    // Unmount child components
     this.requestTextArea?.unmount();
     this.searchInput?.unmount();
     this.createSessionBtn?.unmount();
@@ -879,19 +890,12 @@ export class AgentsPage extends Page<PageOptions> {
     this.branchSelect?.unmount();
     this.collectionsPanel?.unmount();
 
-    // Clear search debounce timer
-    if (this.searchDebounceTimer) {
-      clearTimeout(this.searchDebounceTimer);
-      this.searchDebounceTimer = null;
-    }
-
     // Clear pending search query
     this.pendingSearchQuery = null;
 
-    // Close session updates subscription
-    if (this.sessionUpdatesEventSource) {
-      this.sessionUpdatesEventSource.close();
-      this.sessionUpdatesEventSource = null;
-    }
+    // Note: EventSource, timers, and event listeners are automatically
+    // cleaned up by ListenerRegistry via base Page.unmount()
+    this.sessionUpdatesEventSource = null;
+    this.searchDebounceTimerId = null;
   }
 }

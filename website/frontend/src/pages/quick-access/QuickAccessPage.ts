@@ -62,10 +62,9 @@ export class QuickAccessPage extends Page<PageOptions> {
   private selectedRepo: Repository | null = null;
   private selectedBranch: string = '';
 
-  // SSE subscription
+  // SSE subscription (tracked via ListenerRegistry)
   private sessionUpdatesEventSource: EventSource | null = null;
   private sseReconnectAttempts = 0;
-  private sseReconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly MAX_SSE_RECONNECT_ATTEMPTS = 5;
 
   protected render(): string {
@@ -599,13 +598,15 @@ export class QuickAccessPage extends Page<PageOptions> {
   }
 
   private subscribeToSessionUpdates(): void {
+    // Close any existing connection via the registry
     if (this.sessionUpdatesEventSource) {
-      this.sessionUpdatesEventSource.close();
+      this.listeners.closeEventSource(this.sessionUpdatesEventSource);
     }
 
-    this.sessionUpdatesEventSource = new EventSource('/api/sessions/updates', { withCredentials: true });
+    // Create EventSource tracked by ListenerRegistry
+    this.sessionUpdatesEventSource = this.listeners.addEventSource('/api/sessions/updates', { withCredentials: true });
 
-    this.sessionUpdatesEventSource.addEventListener('created', (event: MessageEvent) => {
+    const handleCreated = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const session = data.session as Session;
@@ -616,9 +617,9 @@ export class QuickAccessPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[QuickAccessPage] Failed to parse created event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.addEventListener('updated', (event: MessageEvent) => {
+    const handleUpdated = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const updatedSession = data.session as Partial<Session> & { id: string };
@@ -630,9 +631,9 @@ export class QuickAccessPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[QuickAccessPage] Failed to parse updated event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.addEventListener('status_changed', (event: MessageEvent) => {
+    const handleStatusChanged = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const updatedSession = data.session as Partial<Session> & { id: string };
@@ -644,9 +645,9 @@ export class QuickAccessPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[QuickAccessPage] Failed to parse status_changed event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.addEventListener('deleted', (event: MessageEvent) => {
+    const handleDeleted = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         const sessionId = data.session.id;
@@ -655,23 +656,30 @@ export class QuickAccessPage extends Page<PageOptions> {
       } catch (error) {
         console.error('[QuickAccessPage] Failed to parse deleted event:', error);
       }
-    });
+    };
 
-    this.sessionUpdatesEventSource.onerror = () => {
+    const handleError = () => {
       console.error('[QuickAccessPage] Session updates SSE error, attempting reconnect...');
       this.handleSSEReconnect();
     };
 
-    // Reset reconnect attempts on successful connection
-    this.sessionUpdatesEventSource.onopen = () => {
+    const handleOpen = () => {
       this.sseReconnectAttempts = 0;
     };
+
+    // Register all event listeners with the registry
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'created', handleCreated as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'updated', handleUpdated as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'status_changed', handleStatusChanged as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'deleted', handleDeleted as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'error', handleError as EventListener);
+    this.listeners.addEventSourceListener(this.sessionUpdatesEventSource, 'open', handleOpen as EventListener);
   }
 
   private handleSSEReconnect(): void {
-    // Close existing connection
+    // Close existing connection via ListenerRegistry
     if (this.sessionUpdatesEventSource) {
-      this.sessionUpdatesEventSource.close();
+      this.listeners.closeEventSource(this.sessionUpdatesEventSource);
       this.sessionUpdatesEventSource = null;
     }
 
@@ -688,7 +696,8 @@ export class QuickAccessPage extends Page<PageOptions> {
 
     console.log(`[QuickAccessPage] Reconnecting SSE in ${delay}ms (attempt ${this.sseReconnectAttempts})`);
 
-    this.sseReconnectTimeout = setTimeout(() => {
+    // Use ListenerRegistry for timer tracking (auto-cleanup on unmount)
+    this.listeners.setTimeout(() => {
       this.subscribeToSessionUpdates();
     }, delay);
   }
@@ -716,16 +725,8 @@ export class QuickAccessPage extends Page<PageOptions> {
     this.branchSelect?.unmount();
     this.branchSelect = null;
 
-    // Clear SSE reconnect timeout
-    if (this.sseReconnectTimeout) {
-      clearTimeout(this.sseReconnectTimeout);
-      this.sseReconnectTimeout = null;
-    }
-
-    // Close SSE connection
-    if (this.sessionUpdatesEventSource) {
-      this.sessionUpdatesEventSource.close();
-      this.sessionUpdatesEventSource = null;
-    }
+    // Note: EventSource, timers, and event listeners are automatically
+    // cleaned up by ListenerRegistry via base Page.unmount()
+    this.sessionUpdatesEventSource = null;
   }
 }
