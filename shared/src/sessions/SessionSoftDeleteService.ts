@@ -1,7 +1,6 @@
-import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
-import type { TransactionContext } from '../db/index.js';
+import { db, chatSessions, events, messages } from '../db/index.js';
 import { eq } from 'drizzle-orm';
-import { logger } from '../utils/logging/logger.js';
+import { BaseService } from '../services/BaseService.js';
 
 import { ASessionSoftDeleteService } from './ASessionSoftDeleteService.js';
 
@@ -12,14 +11,14 @@ import type {
   BulkRestoreResult,
 } from './ASessionSoftDeleteService.js';
 
-export class SessionSoftDeleteService extends ASessionSoftDeleteService {
+export class SessionSoftDeleteService extends BaseService(ASessionSoftDeleteService) {
   async softDeleteSession(
     sessionId: string
   ): Promise<SoftDeleteResult> {
     try {
       const now = new Date();
 
-      const result = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      const result = await this.withTransaction(async (tx) => {
         // First verify the session exists and is not already deleted
         const [session] = await tx
           .select({ id: chatSessions.id, deletedAt: chatSessions.deletedAt })
@@ -63,8 +62,7 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
         context: { operation: 'softDeleteSession', sessionId },
       });
 
-      logger.debug(`Soft deleted session ${sessionId} with ${result.messagesDeleted} messages and ${result.eventsDeleted} events`, {
-        component: 'SessionSoftDeleteService',
+      this.log.debug(`Soft deleted session ${sessionId} with ${result.messagesDeleted} messages and ${result.eventsDeleted} events`, {
         sessionId,
       });
 
@@ -75,10 +73,8 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
         eventsDeleted: result.eventsDeleted,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`Failed to soft delete session ${sessionId}`, error as Error, {
-        component: 'SessionSoftDeleteService',
-      });
+      const errorMessage = this.getErrorMessage(error);
+      this.log.error(`Failed to soft delete session ${sessionId}`, error);
       return {
         sessionId,
         success: false,
@@ -92,38 +88,24 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
   async softDeleteSessions(
     sessionIds: string[]
   ): Promise<BulkSoftDeleteResult> {
-    if (sessionIds.length === 0) {
-      return { successCount: 0, failureCount: 0, results: [] };
-    }
+    const bulkResult = await this.executeBulkOperation(
+      sessionIds,
+      (id) => this.softDeleteSession(id),
+      { operationName: 'soft delete' }
+    );
 
-    const results: SoftDeleteResult[] = [];
-    let successCount = 0;
-    let failureCount = 0;
-
-    // Process each session individually to handle errors gracefully
-    for (const sessionId of sessionIds) {
-      const result = await this.softDeleteSession(sessionId);
-      results.push(result);
-      if (result.success) {
-        successCount++;
-      } else {
-        failureCount++;
-      }
-    }
-
-    logger.info(`Bulk soft delete completed: ${successCount} succeeded, ${failureCount} failed`, {
-      component: 'SessionSoftDeleteService',
-      total: sessionIds.length,
-    });
-
-    return { successCount, failureCount, results };
+    return {
+      successCount: bulkResult.successCount,
+      failureCount: bulkResult.failureCount,
+      results: bulkResult.results,
+    };
   }
 
   async restoreSession(
     sessionId: string
   ): Promise<RestoreResult> {
     try {
-      const result = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      const result = await this.withTransaction(async (tx) => {
         // First verify the session exists and is deleted
         const [session] = await tx
           .select({ id: chatSessions.id, deletedAt: chatSessions.deletedAt })
@@ -167,8 +149,7 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
         context: { operation: 'restoreSession', sessionId },
       });
 
-      logger.debug(`Restored session ${sessionId} with ${result.messagesRestored} messages and ${result.eventsRestored} events`, {
-        component: 'SessionSoftDeleteService',
+      this.log.debug(`Restored session ${sessionId} with ${result.messagesRestored} messages and ${result.eventsRestored} events`, {
         sessionId,
       });
 
@@ -179,10 +160,8 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
         eventsRestored: result.eventsRestored,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`Failed to restore session ${sessionId}`, error as Error, {
-        component: 'SessionSoftDeleteService',
-      });
+      const errorMessage = this.getErrorMessage(error);
+      this.log.error(`Failed to restore session ${sessionId}`, error);
       return {
         sessionId,
         success: false,
@@ -196,40 +175,24 @@ export class SessionSoftDeleteService extends ASessionSoftDeleteService {
   async restoreSessions(
     sessionIds: string[]
   ): Promise<BulkRestoreResult> {
-    if (sessionIds.length === 0) {
-      return { successCount: 0, failureCount: 0, results: [] };
-    }
+    const bulkResult = await this.executeBulkOperation(
+      sessionIds,
+      (id) => this.restoreSession(id),
+      { operationName: 'restore' }
+    );
 
-    const results: RestoreResult[] = [];
-    let successCount = 0;
-    let failureCount = 0;
-
-    // Process each session individually to handle errors gracefully
-    for (const sessionId of sessionIds) {
-      const result = await this.restoreSession(sessionId);
-      results.push(result);
-      if (result.success) {
-        successCount++;
-      } else {
-        failureCount++;
-      }
-    }
-
-    logger.info(`Bulk restore completed: ${successCount} succeeded, ${failureCount} failed`, {
-      component: 'SessionSoftDeleteService',
-      total: sessionIds.length,
-    });
-
-    return { successCount, failureCount, results };
+    return {
+      successCount: bulkResult.successCount,
+      failureCount: bulkResult.failureCount,
+      results: bulkResult.results,
+    };
   }
 
   async initialize(): Promise<void> {
     // No initialization needed
   }
 
-  async dispose(): Promise<void> {
-    // No cleanup needed
-  }
+  // dispose() inherited from BaseService - handles shutdown handlers automatically
 }
 
 export const sessionSoftDeleteService = new SessionSoftDeleteService();

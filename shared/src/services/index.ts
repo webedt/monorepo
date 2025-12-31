@@ -44,6 +44,19 @@ export {
   AGitHubClient,
 } from './abstracts/index.js';
 
+// Base service class with common patterns
+export {
+  BaseService,
+  ScheduledCleanupService,
+} from './BaseService.js';
+
+export type {
+  OperationResult,
+  BulkOperationResult,
+  ScheduledTaskConfig,
+  ComponentLogger,
+} from './BaseService.js';
+
 // Types specific to abstract classes (not duplicated elsewhere)
 export type { ClaudeWebClientConfig } from './abstracts/index.js';
 
