@@ -539,7 +539,11 @@ export type {
   // Idempotency types
   IdempotencyKey,
   NewIdempotencyKey,
+  UserRole,
 } from './schema.js';
+
+// Re-export role utilities from schema
+export { ROLE_HIERARCHY, hasRolePermission, isValidRole } from './schema.js';
 
 // Re-export table definitions from schema
 export {
