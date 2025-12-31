@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { db, users, eq, logger } from '@webedt/shared';
+import { db, users, eq, logger, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import { getFrontendUrl, getRequestOrigin } from './helpers.js';
@@ -58,7 +58,7 @@ router.get('/oauth', requireAuth, (req: Request, res: Response) => {
   const redirectUri = `${returnOrigin}/api/github/oauth/callback`;
 
   const params = new URLSearchParams({
-    client_id: process.env.GITHUB_CLIENT_ID!,
+    client_id: GITHUB_CLIENT_ID,
     redirect_uri: redirectUri,
     scope: 'repo workflow user:email',
     state,
@@ -107,8 +107,8 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        client_id: process.env.GITHUB_CLIENT_ID,
-        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
         code,
       }),
     });

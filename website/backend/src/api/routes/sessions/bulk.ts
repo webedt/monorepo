@@ -26,6 +26,7 @@ import {
   executeBulkWrite,
   sessionSoftDeleteService,
   LIMITS,
+  CLAUDE_ENVIRONMENT_ID,
 } from '@webedt/shared';
 import type { Request, Response } from 'express';
 import type { ClaudeAuth, BatchOperationConfig } from '@webedt/shared';
@@ -200,7 +201,7 @@ router.post('/bulk-delete', requireAuth, idempotencyMiddleware({ endpoint: '/api
       deleteGitBranch,
       claudeAuth as ClaudeAuth | null,
       githubToken,
-      process.env.CLAUDE_ENVIRONMENT_ID
+      CLAUDE_ENVIRONMENT_ID
     );
 
     // Execute external cleanup operations with controlled concurrency
@@ -468,7 +469,7 @@ router.delete('/deleted', requireAuth, idempotencyMiddleware({ endpoint: '/api/s
       shouldDeleteGitBranch,
       claudeAuth as ClaudeAuth | null,
       githubToken,
-      process.env.CLAUDE_ENVIRONMENT_ID
+      CLAUDE_ENVIRONMENT_ID
     );
 
     // Execute external cleanup with controlled concurrency
@@ -654,7 +655,7 @@ router.post('/bulk-archive-remote', requireAuth, idempotencyMiddleware({ endpoin
         const archiveResult = await archiveClaudeRemoteSession(
           session.remoteSessionId,
           claudeAuth as ClaudeAuth,
-          process.env.CLAUDE_ENVIRONMENT_ID
+          CLAUDE_ENVIRONMENT_ID
         );
         return {
           sessionId: session.id,

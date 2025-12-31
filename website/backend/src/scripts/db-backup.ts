@@ -9,13 +9,13 @@
 import 'dotenv/config';
 import pg from 'pg';
 import * as path from 'path';
-import { createBackup, getDatabaseDiagnostics } from '@webedt/shared';
+import { createBackup, getDatabaseDiagnostics, DATABASE_URL, BACKUP_DIR } from '@webedt/shared';
 
 const { Pool } = pg;
 
 function parseArgs(): { outputDir: string } {
   const args = process.argv.slice(2);
-  let outputDir = process.env.BACKUP_DIR || './backups';
+  let outputDir = BACKUP_DIR || './backups';
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--output' || args[i] === '-o') {
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   console.log('═'.repeat(60));
   console.log('');
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = DATABASE_URL;
   const { outputDir } = parseArgs();
 
   if (!databaseUrl) {
