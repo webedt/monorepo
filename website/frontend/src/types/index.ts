@@ -8,6 +8,9 @@
  * - editor: Full access to the editor suite for game creation
  * - developer: Full access plus development tools and API access
  * - admin: Full administrative access including user management
+ *
+ * Note: This type mirrors the UserRole type in shared/src/db/schema.ts.
+ * Keep in sync with ROLE_HIERARCHY in the shared package.
  */
 export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
 
