@@ -4,7 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
+import { db, users, eq, withImageGenResilience, isImageGenProviderAvailable } from '@webedt/shared';
+import type { ImageGenProvider } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { aiOperationRateLimiter } from '../middleware/rateLimit.js';
@@ -61,8 +62,19 @@ interface ImageGenerationRequest {
   model?: string;
 }
 
+/**
+ * Custom error class that carries HTTP status code for retry logic.
+ */
+class ImageGenApiError extends Error {
+  constructor(message: string, public readonly statusCode: number) {
+    super(message);
+    this.name = 'ImageGenApiError';
+  }
+}
+
 // Generate image using OpenRouter or CometAPI (OpenAI-compatible API)
 async function generateWithOpenAICompatible(
+  provider: ImageGenProvider,
   apiKey: string,
   baseUrl: string,
   model: string,
@@ -97,34 +109,41 @@ async function generateWithOpenAICompatible(
       });
     }
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://webedt.com',
-        'X-Title': 'WebEDT Image Editor',
+    // Wrap the API call with resilience (retry + circuit breaker)
+    const result = await withImageGenResilience(
+      provider,
+      async () => {
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://webedt.com',
+            'X-Title': 'WebEDT Image Editor',
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            max_tokens: 4096,
+            // Enable image generation in response
+            response_format: { type: 'text' },
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[ImageGen] API error:', response.status, errorText);
+          throw new ImageGenApiError(`API error: ${response.status} - ${errorText}`, response.status);
+        }
+
+        return response.json() as Promise<{ choices?: Array<{ message?: { content?: string } }> }>;
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 4096,
-        // Enable image generation in response
-        response_format: { type: 'text' },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[ImageGen] API error:', response.status, errorText);
-      return { success: false, error: `API error: ${response.status} - ${errorText}` };
-    }
-
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      'generateImage'
+    );
 
     // Extract image from response
     // The response format may vary depending on the model
-    const content = data.choices?.[0]?.message?.content;
+    const content = result.choices?.[0]?.message?.content;
 
     if (content) {
       // Check if content contains base64 image data
@@ -184,36 +203,43 @@ async function generateWithGoogle(
 
     parts.push({ text: prompt });
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: {
-            responseModalities: ['image', 'text'],
-            responseMimeType: 'image/png',
-          },
-        }),
-      }
+    // Wrap the API call with resilience (retry + circuit breaker)
+    const data = await withImageGenResilience(
+      'google',
+      async () => {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig: {
+                responseModalities: ['image', 'text'],
+                responseMimeType: 'image/png',
+              },
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[ImageGen] Google API error:', response.status, errorText);
+          throw new ImageGenApiError(`Google API error: ${response.status} - ${errorText}`, response.status);
+        }
+
+        return response.json() as Promise<{ candidates?: Array<{ content?: { parts?: Array<{ inline_data?: { mime_type?: string; data?: string }; text?: string }> } }> }>;
+      },
+      'generateImage'
     );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[ImageGen] Google API error:', response.status, errorText);
-      return { success: false, error: `Google API error: ${response.status} - ${errorText}` };
-    }
-
-    const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ inline_data?: { mime_type?: string; data?: string }; text?: string }> } }> };
 
     // Extract image from response
     const candidates = data.candidates || [];
     for (const candidate of candidates) {
-      const parts = candidate.content?.parts || [];
-      for (const part of parts) {
+      const candidateParts = candidate.content?.parts || [];
+      for (const part of candidateParts) {
         if (part.inline_data) {
           const mimeType = part.inline_data.mime_type || 'image/png';
           const base64 = part.inline_data.data;
@@ -364,12 +390,21 @@ router.post('/generate', requireAuth, aiOperationRateLimiter, async (req: Reques
 
     let result: { success: boolean; imageData?: string; error?: string };
 
+    // Check if the provider is available (circuit breaker not open)
+    if (!isImageGenProviderAvailable(provider as ImageGenProvider)) {
+      res.status(503).json({
+        success: false,
+        error: `Image generation provider ${provider} is temporarily unavailable. Please try again later.`,
+      });
+      return;
+    }
+
     if (provider === 'google') {
       result = await generateWithGoogle(apiKey, model, prompt, imageData);
     } else {
       // OpenRouter or CometAPI (OpenAI-compatible)
       const endpoint = PROVIDER_ENDPOINTS[provider as 'openrouter' | 'cometapi'];
-      result = await generateWithOpenAICompatible(apiKey, endpoint.baseUrl, model, prompt, imageData);
+      result = await generateWithOpenAICompatible(provider as ImageGenProvider, apiKey, endpoint.baseUrl, model, prompt, imageData);
     }
 
     if (result.success && result.imageData) {
