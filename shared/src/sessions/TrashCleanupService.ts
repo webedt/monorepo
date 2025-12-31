@@ -1,7 +1,5 @@
-import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
-import type { TransactionContext } from '../db/index.js';
+import { db, chatSessions, events, messages } from '../db/index.js';
 import { eq, lt, and, isNotNull } from 'drizzle-orm';
-import { logger } from '../utils/logging/logger.js';
 import { StorageService } from '../storage/StorageService.js';
 import {
   TRASH_CLEANUP_ENABLED,
@@ -9,9 +7,11 @@ import {
   TRASH_CLEANUP_INITIAL_DELAY_MS,
   TRASH_RETENTION_DAYS,
 } from '../config/index.js';
+import { ScheduledCleanupService } from '../services/BaseService.js';
 
 import { ATrashCleanupService } from './ATrashCleanupService.js';
 
+import type { ScheduledTaskConfig } from '../services/BaseService.js';
 import type { TrashCleanupResult, TrashCleanupSession } from './ATrashCleanupService.js';
 
 interface DeleteSessionResult {
@@ -21,9 +21,28 @@ interface DeleteSessionResult {
   messagesDeleted: number;
 }
 
-export class TrashCleanupService extends ATrashCleanupService {
-  private cleanupIntervalId: NodeJS.Timeout | null = null;
-  private initialTimeoutId: NodeJS.Timeout | null = null;
+export class TrashCleanupService extends ScheduledCleanupService(ATrashCleanupService) {
+  getScheduledTaskConfig(): ScheduledTaskConfig {
+    return {
+      enabled: TRASH_CLEANUP_ENABLED,
+      intervalMs: TRASH_CLEANUP_INTERVAL_MS,
+      initialDelayMs: TRASH_CLEANUP_INITIAL_DELAY_MS,
+    };
+  }
+
+  getTaskName(): string {
+    return 'trash cleanup';
+  }
+
+  getSchedulerLogConfig(): Record<string, unknown> {
+    return {
+      retentionDays: TRASH_RETENTION_DAYS,
+    };
+  }
+
+  async runScheduledTask(): Promise<void> {
+    await this.cleanupExpiredTrash(TRASH_RETENTION_DAYS);
+  }
 
   async getExpiredTrashSessions(
     retentionDays: number
@@ -60,7 +79,7 @@ export class TrashCleanupService extends ATrashCleanupService {
   ): Promise<DeleteSessionResult> {
     try {
       // Use transaction to ensure atomicity - either all deletes succeed or none do
-      const result = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      const result = await this.withTransaction(async (tx) => {
         // Delete events first (foreign key constraint)
         const deletedEvents = await tx
           .delete(events)
@@ -93,10 +112,8 @@ export class TrashCleanupService extends ATrashCleanupService {
         messagesDeleted: result.messagesDeleted,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`Failed to permanently delete session ${sessionId}`, error as Error, {
-        component: 'TrashCleanupService',
-      });
+      const errorMessage = this.getErrorMessage(error);
+      this.log.error(`Failed to permanently delete session ${sessionId}`, error as Error);
       return {
         success: false,
         message: errorMessage,
@@ -126,23 +143,17 @@ export class TrashCleanupService extends ATrashCleanupService {
       errors: [],
     };
 
-    logger.info(`Starting trash cleanup (retention: ${retentionDays} days)`, {
-      component: 'TrashCleanupService',
-    });
+    this.log.info(`Starting trash cleanup (retention: ${retentionDays} days)`);
 
     try {
       const expiredSessions = await this.getExpiredTrashSessions(retentionDays);
 
       if (expiredSessions.length === 0) {
-        logger.info('No expired trash sessions found', {
-          component: 'TrashCleanupService',
-        });
+        this.log.info('No expired trash sessions found');
         return result;
       }
 
-      logger.info(`Found ${expiredSessions.length} expired trash sessions to clean up`, {
-        component: 'TrashCleanupService',
-      });
+      this.log.info(`Found ${expiredSessions.length} expired trash sessions to clean up`);
 
       // Track users who need storage recalculation
       const affectedUserIds = new Set<string>();
@@ -157,8 +168,7 @@ export class TrashCleanupService extends ATrashCleanupService {
             result.messagesDeleted += deleteResult.messagesDeleted;
             affectedUserIds.add(session.userId);
 
-            logger.info(`Cleaned up expired trash session ${session.id}`, {
-              component: 'TrashCleanupService',
+            this.log.info(`Cleaned up expired trash session ${session.id}`, {
               sessionId: session.id,
               userId: session.userId,
               deletedAt: session.deletedAt.toISOString(),
@@ -169,11 +179,9 @@ export class TrashCleanupService extends ATrashCleanupService {
             result.errors.push(`Session ${session.id}: ${deleteResult.message}`);
           }
         } catch (sessionError) {
-          const errorMsg = sessionError instanceof Error ? sessionError.message : 'Unknown error';
+          const errorMsg = this.getErrorMessage(sessionError);
           result.errors.push(`Session ${session.id}: ${errorMsg}`);
-          logger.error(`Error cleaning up session ${session.id}`, sessionError as Error, {
-            component: 'TrashCleanupService',
-          });
+          this.log.error(`Error cleaning up session ${session.id}`, sessionError as Error);
         }
       }
 
@@ -181,19 +189,14 @@ export class TrashCleanupService extends ATrashCleanupService {
       for (const userId of affectedUserIds) {
         try {
           await StorageService.recalculateUsage(userId);
-          logger.debug(`Recalculated storage usage for user ${userId}`, {
-            component: 'TrashCleanupService',
-          });
+          this.log.debug(`Recalculated storage usage for user ${userId}`);
         } catch (storageError) {
           // Log but don't fail the cleanup for storage recalculation errors
-          logger.error(`Failed to recalculate storage for user ${userId}`, storageError as Error, {
-            component: 'TrashCleanupService',
-          });
+          this.log.error(`Failed to recalculate storage for user ${userId}`, storageError as Error);
         }
       }
 
-      logger.info('Trash cleanup completed', {
-        component: 'TrashCleanupService',
+      this.log.info('Trash cleanup completed', {
         sessionsDeleted: result.sessionsDeleted,
         eventsDeleted: result.eventsDeleted,
         messagesDeleted: result.messagesDeleted,
@@ -203,81 +206,11 @@ export class TrashCleanupService extends ATrashCleanupService {
 
       return result;
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = this.getErrorMessage(error);
       result.errors.push(`Cleanup failed: ${errorMsg}`);
-      logger.error('Trash cleanup failed', error as Error, {
-        component: 'TrashCleanupService',
-      });
+      this.log.error('Trash cleanup failed', error as Error);
       return result;
     }
-  }
-
-  private async runCleanupWithErrorHandling(): Promise<void> {
-    try {
-      await this.cleanupExpiredTrash(TRASH_RETENTION_DAYS);
-    } catch (error) {
-      logger.error('Scheduled trash cleanup failed', error as Error, {
-        component: 'TrashCleanupService',
-      });
-    }
-  }
-
-  startScheduledCleanup(): void {
-    if (!TRASH_CLEANUP_ENABLED) {
-      logger.info('Trash cleanup is disabled', {
-        component: 'TrashCleanupService',
-      });
-      return;
-    }
-
-    if (this.cleanupIntervalId) {
-      logger.warn('Trash cleanup scheduler already running', {
-        component: 'TrashCleanupService',
-      });
-      return;
-    }
-
-    logger.info('Starting trash cleanup scheduler', {
-      component: 'TrashCleanupService',
-      intervalMs: TRASH_CLEANUP_INTERVAL_MS,
-      initialDelayMs: TRASH_CLEANUP_INITIAL_DELAY_MS,
-      retentionDays: TRASH_RETENTION_DAYS,
-    });
-
-    // Initial cleanup after delay (with error handling)
-    this.initialTimeoutId = setTimeout(() => {
-      this.runCleanupWithErrorHandling();
-    }, TRASH_CLEANUP_INITIAL_DELAY_MS);
-
-    // Schedule periodic cleanup (with error handling)
-    this.cleanupIntervalId = setInterval(() => {
-      this.runCleanupWithErrorHandling();
-    }, TRASH_CLEANUP_INTERVAL_MS);
-
-    // Allow the process to exit cleanly even if this timer is running
-    this.cleanupIntervalId.unref();
-  }
-
-  stopScheduledCleanup(): void {
-    if (this.initialTimeoutId) {
-      clearTimeout(this.initialTimeoutId);
-      this.initialTimeoutId = null;
-    }
-    if (this.cleanupIntervalId) {
-      clearInterval(this.cleanupIntervalId);
-      this.cleanupIntervalId = null;
-      logger.info('Trash cleanup scheduler stopped', {
-        component: 'TrashCleanupService',
-      });
-    }
-  }
-
-  async initialize(): Promise<void> {
-    this.startScheduledCleanup();
-  }
-
-  async dispose(): Promise<void> {
-    this.stopScheduledCleanup();
   }
 }
 

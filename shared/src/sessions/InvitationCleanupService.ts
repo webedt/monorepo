@@ -1,19 +1,39 @@
 import { db, organizationInvitations, eq, lt } from '../db/index.js';
-import { logger } from '../utils/logging/logger.js';
 import {
   INVITATION_CLEANUP_ENABLED,
   INVITATION_CLEANUP_INTERVAL_MS,
   INVITATION_CLEANUP_INITIAL_DELAY_MS,
   INVITATION_RETENTION_DAYS_AFTER_EXPIRY,
 } from '../config/index.js';
+import { ScheduledCleanupService } from '../services/BaseService.js';
 
 import { AInvitationCleanupService } from './AInvitationCleanupService.js';
 
+import type { ScheduledTaskConfig } from '../services/BaseService.js';
 import type { InvitationCleanupResult, ExpiredInvitation } from './AInvitationCleanupService.js';
 
-export class InvitationCleanupService extends AInvitationCleanupService {
-  private cleanupIntervalId: NodeJS.Timeout | null = null;
-  private initialTimeoutId: NodeJS.Timeout | null = null;
+export class InvitationCleanupService extends ScheduledCleanupService(AInvitationCleanupService) {
+  getScheduledTaskConfig(): ScheduledTaskConfig {
+    return {
+      enabled: INVITATION_CLEANUP_ENABLED,
+      intervalMs: INVITATION_CLEANUP_INTERVAL_MS,
+      initialDelayMs: INVITATION_CLEANUP_INITIAL_DELAY_MS,
+    };
+  }
+
+  getTaskName(): string {
+    return 'invitation cleanup';
+  }
+
+  getSchedulerLogConfig(): Record<string, unknown> {
+    return {
+      retentionDaysAfterExpiry: INVITATION_RETENTION_DAYS_AFTER_EXPIRY,
+    };
+  }
+
+  async runScheduledTask(): Promise<void> {
+    await this.cleanupExpiredInvitations(INVITATION_RETENTION_DAYS_AFTER_EXPIRY);
+  }
 
   async getExpiredInvitations(
     retentionDaysAfterExpiry: number
@@ -53,19 +73,9 @@ export class InvitationCleanupService extends AInvitationCleanupService {
         .delete(organizationInvitations)
         .where(eq(organizationInvitations.id, invitationId));
 
-      return {
-        success: true,
-        message: `Deleted invitation ${invitationId}`,
-      };
+      return this.successResult(`Deleted invitation ${invitationId}`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`Failed to delete invitation ${invitationId}`, error as Error, {
-        component: 'InvitationCleanupService',
-      });
-      return {
-        success: false,
-        message: errorMessage,
-      };
+      return this.handleError(error, 'delete invitation', { invitationId });
     }
   }
 
@@ -77,9 +87,7 @@ export class InvitationCleanupService extends AInvitationCleanupService {
       errors: [],
     };
 
-    logger.info(`Starting invitation cleanup (retention after expiry: ${retentionDaysAfterExpiry} days)`, {
-      component: 'InvitationCleanupService',
-    });
+    this.log.info(`Starting invitation cleanup (retention after expiry: ${retentionDaysAfterExpiry} days)`);
 
     try {
       // Calculate cutoff once: invitations that expired more than retentionDaysAfterExpiry ago
@@ -94,93 +102,20 @@ export class InvitationCleanupService extends AInvitationCleanupService {
       result.invitationsDeleted = deleted.length;
 
       if (deleted.length === 0) {
-        logger.info('No expired invitations found', {
-          component: 'InvitationCleanupService',
-        });
+        this.log.info('No expired invitations found');
       } else {
-        logger.info('Invitation cleanup completed', {
-          component: 'InvitationCleanupService',
+        this.log.info('Invitation cleanup completed', {
           invitationsDeleted: result.invitationsDeleted,
         });
       }
 
       return result;
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = this.getErrorMessage(error);
       result.errors.push(`Cleanup failed: ${errorMsg}`);
-      logger.error('Invitation cleanup failed', error as Error, {
-        component: 'InvitationCleanupService',
-      });
+      this.log.error('Invitation cleanup failed', error as Error);
       return result;
     }
-  }
-
-  private async runCleanupWithErrorHandling(): Promise<void> {
-    try {
-      await this.cleanupExpiredInvitations(INVITATION_RETENTION_DAYS_AFTER_EXPIRY);
-    } catch (error) {
-      logger.error('Scheduled invitation cleanup failed', error as Error, {
-        component: 'InvitationCleanupService',
-      });
-    }
-  }
-
-  startScheduledCleanup(): void {
-    if (!INVITATION_CLEANUP_ENABLED) {
-      logger.info('Invitation cleanup is disabled', {
-        component: 'InvitationCleanupService',
-      });
-      return;
-    }
-
-    if (this.cleanupIntervalId) {
-      logger.warn('Invitation cleanup scheduler already running', {
-        component: 'InvitationCleanupService',
-      });
-      return;
-    }
-
-    logger.info('Starting invitation cleanup scheduler', {
-      component: 'InvitationCleanupService',
-      intervalMs: INVITATION_CLEANUP_INTERVAL_MS,
-      initialDelayMs: INVITATION_CLEANUP_INITIAL_DELAY_MS,
-      retentionDaysAfterExpiry: INVITATION_RETENTION_DAYS_AFTER_EXPIRY,
-    });
-
-    // Initial cleanup after delay (with error handling)
-    this.initialTimeoutId = setTimeout(() => {
-      this.runCleanupWithErrorHandling();
-    }, INVITATION_CLEANUP_INITIAL_DELAY_MS);
-
-    // Schedule periodic cleanup (with error handling)
-    this.cleanupIntervalId = setInterval(() => {
-      this.runCleanupWithErrorHandling();
-    }, INVITATION_CLEANUP_INTERVAL_MS);
-
-    // Allow the process to exit cleanly even if this timer is running
-    this.cleanupIntervalId.unref();
-  }
-
-  stopScheduledCleanup(): void {
-    if (this.initialTimeoutId) {
-      clearTimeout(this.initialTimeoutId);
-      this.initialTimeoutId = null;
-    }
-    if (this.cleanupIntervalId) {
-      clearInterval(this.cleanupIntervalId);
-      this.cleanupIntervalId = null;
-      logger.info('Invitation cleanup scheduler stopped', {
-        component: 'InvitationCleanupService',
-      });
-    }
-  }
-
-  async initialize(): Promise<void> {
-    this.startScheduledCleanup();
-  }
-
-  async dispose(): Promise<void> {
-    this.stopScheduledCleanup();
   }
 }
 
