@@ -12,6 +12,35 @@ import type {
   ImageAiKeysData,
 } from './encryptedColumns.js';
 
+/**
+ * User role type - defines access levels for the platform
+ * - user: Basic user access (read-only, limited features)
+ * - editor: Full access to the editor suite for game creation
+ * - developer: Full access plus development tools and API access
+ * - admin: Full administrative access including user management
+ */
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
+/**
+ * Role hierarchy for permission checks
+ * Higher index = more permissions
+ */
+export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+
+/**
+ * Check if a role has at least the required permission level
+ * Returns false if either role is invalid (not in hierarchy)
+ */
+export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
+  const userLevel = ROLE_HIERARCHY.indexOf(userRole);
+  const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+  // Return false if either role is not found in hierarchy (security safeguard)
+  if (userLevel === -1 || requiredLevel === -1) {
+    return false;
+  }
+  return userLevel >= requiredLevel;
+}
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
@@ -41,6 +70,11 @@ export const users = pgTable('users', {
   preferredModel: text('preferred_model'),
   chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
+  // User role for access control - defaults to 'user' for basic access
+  // 'editor' grants full access to the editor suite for game creation
+  // 'developer' grants full access plus development tools
+  // 'admin' grants full administrative access
+  role: text('role').$type<UserRole>().default('user').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
