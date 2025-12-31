@@ -37,6 +37,7 @@ export class MidiPianoRoll extends Component {
   private playheadEl: HTMLElement | null = null;
   private animationFrameId: number | null = null;
   private notes: { note: MidiNoteEvent; trackIndex: number; color: string }[] = [];
+  private currentFileName: string | null = null;
 
   // Colors for different tracks
   private trackColors = [
@@ -176,6 +177,8 @@ export class MidiPianoRoll extends Component {
     this.canvas.height = height * dpr;
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
+    // Reset transform before scaling to prevent compounding
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
   }
 
@@ -331,11 +334,17 @@ export class MidiPianoRoll extends Component {
 
   protected onMount(): void {
     this.unsubscribe = midiStore.subscribe((state) => {
-      // Re-render when file changes
-      if (state.isLoaded && this.notes.length === 0) {
+      // Re-render when file changes (check fileName to detect new file loads)
+      const fileChanged = state.fileName !== this.currentFileName;
+      if (state.isLoaded && (this.notes.length === 0 || fileChanged)) {
+        this.currentFileName = state.fileName;
         this.processNotes(state);
         this.updateCanvasSize(state);
         this.renderNotes();
+      } else if (!state.isLoaded && this.currentFileName !== null) {
+        // Clear notes when file is unloaded
+        this.currentFileName = null;
+        this.notes = [];
       }
 
       // Update playhead

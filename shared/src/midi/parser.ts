@@ -56,7 +56,7 @@ export class MidiParser {
           for (const event of track.events) {
             if (event.type === 'meta') {
               const metaEvent = event as MidiMetaEvent;
-              if (metaEvent.subtype === 'setTempo' && metaEvent.tempo !== undefined) {
+              if (metaEvent.subtype === 'setTempo' && metaEvent.tempo !== undefined && metaEvent.tempo > 0) {
                 tempoChanges.push({
                   time: event.absoluteTime,
                   microsecondsPerQuarterNote: metaEvent.tempo,
@@ -177,8 +177,8 @@ export class MidiParser {
     let runningStatus = 0;
     let trackName: string | undefined;
 
-    // Note tracking for duration calculation
-    const activeNotes: Map<string, { event: MidiEvent; startTime: number }> = new Map();
+    // Note tracking for duration calculation - use array to handle overlapping notes
+    const activeNotes: Map<string, Array<{ event: MidiEvent; startTime: number }>> = new Map();
     const notes: MidiNoteEvent[] = [];
 
     while (this.position < endPosition) {
@@ -198,24 +198,32 @@ export class MidiParser {
         // Track note on/off for duration calculation
         if (event.type === 'noteOn' && event.velocity > 0) {
           const key = `${event.channel}-${event.note}`;
-          activeNotes.set(key, { event, startTime: absoluteTime });
+          const existing = activeNotes.get(key) || [];
+          existing.push({ event, startTime: absoluteTime });
+          activeNotes.set(key, existing);
         } else if (event.type === 'noteOff' || (event.type === 'noteOn' && event.velocity === 0)) {
           const key = `${event.channel}-${event.note}`;
-          const activeNote = activeNotes.get(key);
-          if (activeNote && activeNote.event.type === 'noteOn') {
-            const noteEvent = activeNote.event;
-            const duration = absoluteTime - activeNote.startTime;
-            notes.push({
-              note: noteEvent.note,
-              noteName: this.midiNoteToName(noteEvent.note),
-              velocity: noteEvent.velocity,
-              channel: noteEvent.channel,
-              startTime: activeNote.startTime,
-              duration,
-              startTimeSeconds: 0, // Will be calculated later
-              durationSeconds: 0, // Will be calculated later
-            });
-            activeNotes.delete(key);
+          const activeList = activeNotes.get(key);
+          if (activeList && activeList.length > 0) {
+            // Pop the first (oldest) active note for this key
+            const activeNote = activeList.shift()!;
+            if (activeList.length === 0) {
+              activeNotes.delete(key);
+            }
+            if (activeNote.event.type === 'noteOn') {
+              const noteEvent = activeNote.event;
+              const duration = absoluteTime - activeNote.startTime;
+              notes.push({
+                note: noteEvent.note,
+                noteName: this.midiNoteToName(noteEvent.note),
+                velocity: noteEvent.velocity,
+                channel: noteEvent.channel,
+                startTime: activeNote.startTime,
+                duration,
+                startTimeSeconds: 0, // Will be calculated later
+                durationSeconds: 0, // Will be calculated later
+              });
+            }
           }
         }
 
@@ -428,7 +436,9 @@ export class MidiParser {
 
       case 0x51: // Set Tempo
         baseEvent.subtype = 'setTempo';
-        baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        if (data.length >= 3) {
+          baseEvent.tempo = (data[0] << 16) | (data[1] << 8) | data[2];
+        }
         break;
 
       case 0x54: // SMPTE Offset
@@ -437,16 +447,20 @@ export class MidiParser {
 
       case 0x58: // Time Signature
         baseEvent.subtype = 'timeSignature';
-        baseEvent.numerator = data[0];
-        baseEvent.denominator = Math.pow(2, data[1]);
-        baseEvent.metronome = data[2];
-        baseEvent.thirtyseconds = data[3];
+        if (data.length >= 4) {
+          baseEvent.numerator = data[0];
+          baseEvent.denominator = Math.pow(2, data[1]);
+          baseEvent.metronome = data[2];
+          baseEvent.thirtyseconds = data[3];
+        }
         break;
 
       case 0x59: // Key Signature
         baseEvent.subtype = 'keySignature';
-        baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
-        baseEvent.scale = data[1];
+        if (data.length >= 2) {
+          baseEvent.key = data[0] > 127 ? data[0] - 256 : data[0];
+          baseEvent.scale = data[1];
+        }
         break;
 
       case 0x7f: // Sequencer Specific
@@ -518,6 +532,9 @@ export class MidiParser {
    * Read a single byte
    */
   private readByte(): number {
+    if (this.position >= this.data.length) {
+      throw new Error('Unexpected end of file while reading byte');
+    }
     return this.data[this.position++];
   }
 
@@ -525,6 +542,9 @@ export class MidiParser {
    * Read a 16-bit unsigned integer (big-endian)
    */
   private readUint16(): number {
+    if (this.position + 1 >= this.data.length) {
+      throw new Error('Unexpected end of file while reading uint16');
+    }
     const value = (this.data[this.position] << 8) | this.data[this.position + 1];
     this.position += 2;
     return value;
@@ -534,6 +554,9 @@ export class MidiParser {
    * Read a 32-bit unsigned integer (big-endian)
    */
   private readUint32(): number {
+    if (this.position + 3 >= this.data.length) {
+      throw new Error('Unexpected end of file while reading uint32');
+    }
     const value =
       (this.data[this.position] << 24) |
       (this.data[this.position + 1] << 16) |
@@ -547,6 +570,9 @@ export class MidiParser {
    * Read a string of specified length
    */
   private readString(length: number): string {
+    if (this.position + length > this.data.length) {
+      throw new Error('Unexpected end of file while reading string');
+    }
     let result = '';
     for (let i = 0; i < length; i++) {
       result += String.fromCharCode(this.data[this.position++]);

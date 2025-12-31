@@ -32,6 +32,7 @@ export class MidiPlayer extends Component {
   private timeCurrentEl: HTMLElement | null = null;
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
+  private dragCleanup: (() => void) | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
@@ -354,10 +355,18 @@ export class MidiPlayer extends Component {
       this.isDragging = false;
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      this.dragCleanup = null;
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+
+    // Store cleanup function for unmount
+    this.dragCleanup = () => {
+      this.isDragging = false;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
   }
 
   private updateProgressFromMouse(e: MouseEvent): void {
@@ -467,6 +476,10 @@ export class MidiPlayer extends Component {
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
+    }
+    if (this.dragCleanup) {
+      this.dragCleanup();
+      this.dragCleanup = null;
     }
     if (this.importDialog) {
       this.importDialog.unmount();
