@@ -777,6 +777,11 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'users.current_month_spent_cents': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS current_month_spent_cents TEXT NOT NULL DEFAULT \'0\'',
   'users.spending_limit_action': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_limit_action TEXT NOT NULL DEFAULT \'warn\'',
   'users.spending_reset_at': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS spending_reset_at TIMESTAMP',
+  // User role for access control - defaults to 'user' for basic access
+  // 'editor' grants full access to the editor suite for game creation
+  // 'developer' grants full access plus development tools
+  // 'admin' grants full administrative access
+  'users.role': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT \'user\'',
 };
 
 /**

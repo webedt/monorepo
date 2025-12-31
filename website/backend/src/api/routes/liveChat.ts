@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, liveChatMessages, users, eq, and, desc, StorageService, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireEditor } from '../middleware/auth.js';
 import {
   requireStorageQuota,
   calculateLiveChatMessageSize,
@@ -246,8 +246,9 @@ ${currentMessage}`;
   return prompt;
 }
 
-// All routes require authentication
-router.use(requireAuth);
+// All routes require authentication and editor role
+// Live chat is part of the editor suite for collaboration
+router.use(requireAuth, requireEditor);
 
 /**
  * GET /api/live-chat/:owner/:repo/:branch/messages

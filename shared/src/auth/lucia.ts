@@ -66,6 +66,7 @@ export const lucia = new Lucia(adapter, {
       preferredProvider: attributes.preferred_provider || 'claude',
       preferredModel: attributes.preferred_model,
       isAdmin: attributes.is_admin,
+      role: attributes.role || 'user',
     };
   },
 });
@@ -84,6 +85,7 @@ declare module 'lucia' {
       preferred_provider: string;
       preferred_model: string | null;
       is_admin: boolean;
+      role: string;
     };
   }
 
@@ -99,5 +101,6 @@ declare module 'lucia' {
     preferredProvider: string;
     preferredModel: string | null;
     isAdmin: boolean;
+    role: string;
   }
 }

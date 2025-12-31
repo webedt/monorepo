@@ -83,3 +83,42 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 
   next();
 }
+
+import { hasRolePermission } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
+
+/**
+ * Middleware factory that requires a minimum role level
+ * Uses the role hierarchy: admin > developer > editor > user
+ */
+export function requireRole(minimumRole: UserRole) {
+  return function(req: Request, res: Response, next: NextFunction): void {
+    if (!req.user || !req.authSession) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const userRole = (req.user.role || 'user') as UserRole;
+    if (!hasRolePermission(userRole, minimumRole)) {
+      res.status(403).json({
+        success: false,
+        error: `Forbidden: ${minimumRole} role or higher required`
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Middleware that requires editor role or higher
+ * Editors have full access to the editor suite for game creation
+ */
+export const requireEditor = requireRole('editor');
+
+/**
+ * Middleware that requires developer role or higher
+ * Developers have full access plus development tools and API access
+ */
+export const requireDeveloper = requireRole('developer');

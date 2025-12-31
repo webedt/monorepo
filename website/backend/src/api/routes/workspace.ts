@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { collaborationRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 
@@ -250,8 +250,9 @@ const router = Router();
  *         $ref: '#/components/responses/Unauthorized'
  */
 
-// All routes require authentication
-router.use(requireAuth);
+// All routes require authentication and editor role
+// Workspace features are part of the editor suite
+router.use(requireAuth, requireEditor);
 
 // Offline threshold: 30 seconds
 const OFFLINE_THRESHOLD_MS = 30 * 1000;

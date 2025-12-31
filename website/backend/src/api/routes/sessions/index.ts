@@ -18,6 +18,7 @@
  */
 
 import { Router } from 'express';
+import { requireAuth, requireEditor } from '../../middleware/auth.js';
 import crudRoutes from './crud.js';
 import sharingRoutes from './sharing.js';
 import streamingRoutes from './streaming.js';
@@ -31,7 +32,12 @@ const router = Router();
 // Order matters - more specific routes first
 
 // Sharing routes (includes public /shared/:token endpoints)
+// NOTE: sharingRoutes handles its own auth - public endpoints don't require auth
 router.use('/', sharingRoutes);
+
+// All other session routes require authentication and editor role
+// Sessions are part of the editor suite for code editing and AI interaction
+router.use(requireAuth, requireEditor);
 
 // Sync routes
 router.use('/', syncRoutes);

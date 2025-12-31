@@ -41,6 +41,11 @@ export const users = pgTable('users', {
   preferredModel: text('preferred_model'),
   chatVerbosityLevel: text('chat_verbosity_level').default('normal').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
+  // User role for access control - defaults to 'user' for basic access
+  // 'editor' grants full access to the editor suite
+  // 'developer' grants full access plus development tools
+  // 'admin' grants full administrative access
+  role: text('role').default('user').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Storage quota fields - "Few GB per user" default quota
   storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
@@ -1232,3 +1237,24 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
 // Type exports for Idempotency Keys
 export type IdempotencyKey = typeof idempotencyKeys.$inferSelect;
 export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
+
+// User role type and helpers
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
+/**
+ * Role hierarchy from lowest to highest permission level
+ * admin > developer > editor > user
+ */
+export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+
+/**
+ * Check if a user role has permission for a required minimum role
+ * @param userRole - The user's current role
+ * @param requiredRole - The minimum required role for the action
+ * @returns true if the user has sufficient permissions
+ */
+export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
+  const userIndex = ROLE_HIERARCHY.indexOf(userRole);
+  const requiredIndex = ROLE_HIERARCHY.indexOf(requiredRole);
+  return userIndex >= requiredIndex;
+}

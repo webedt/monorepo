@@ -539,6 +539,8 @@ export type {
   // Idempotency types
   IdempotencyKey,
   NewIdempotencyKey,
+  // User role types
+  UserRole,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -599,6 +601,9 @@ export {
   SNIPPET_CATEGORIES,
   // Idempotency tables
   idempotencyKeys,
+  // User role utilities
+  ROLE_HIERARCHY,
+  hasRolePermission,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
