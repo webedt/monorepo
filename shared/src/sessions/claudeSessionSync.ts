@@ -7,13 +7,19 @@
 
 import { db, chatSessions, events, users, getPool, withTransactionOrThrow } from '../db/index.js';
 import type { TransactionContext } from '../db/index.js';
-import { eq, and, or, isNotNull, isNull, gte, ne, lte, inArray } from 'drizzle-orm';
+import { eq, and, or, isNotNull, isNull, gte, ne, lte, inArray, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
 import { generateSessionPath, normalizeRepoUrl } from '../utils/helpers/sessionPathHelper.js';
 import { logger } from '../utils/logging/logger.js';
 import { runWithCorrelation } from '../utils/logging/correlationContext.js';
 import { ensureValidToken, isClaudeAuthDb } from '../auth/claudeAuth.js';
+import {
+  updateSessionStatusWithLock,
+  isVersionConflict,
+} from './sessionLocking.js';
+import type { SessionStatus } from './sessionLocking.js';
+import { retryWithBackoff } from '../utils/resilience/retry.js';
 import { sessionListBroadcaster } from './sessionListBroadcaster.js';
 import {
   CLAUDE_ENVIRONMENT_ID,
@@ -214,18 +220,21 @@ async function cleanupRedundantSessions(
       return 0;
     }
 
-    // Soft-delete redundant sessions atomically using a transaction
+    // Soft-delete redundant sessions atomically using a transaction with version increment
     const sessionIds = sessionsToCleanup.map(s => s.id);
     const now = new Date();
 
     // Use transaction to ensure all updates succeed or none do
+    // Increment version to maintain consistency with the locking system
     await withTransactionOrThrow(db, async (tx: TransactionContext) => {
       // Batch update all sessions at once for atomicity
+      // Using SQL expression to increment version atomically
       await tx
         .update(chatSessions)
         .set({
           deletedAt: now,
-          status: 'error' // Mark as error to indicate it was cleaned up
+          status: 'error', // Mark as error to indicate it was cleaned up
+          version: sql`${chatSessions.version} + 1`
         })
         .where(inArray(chatSessions.id, sessionIds));
     }, {
@@ -337,16 +346,40 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           const gitOutcome = remoteSession.session_context?.outcomes?.find(o => o.type === 'git_repository');
           const branch = gitOutcome?.git_info?.branches?.[0];
 
-          // Update session status
-          await db
-            .update(chatSessions)
-            .set({
-              status: newStatus,
-              completedAt: new Date(remoteSession.updated_at),
-              totalCost: totalCost || undefined,
-              branch: branch || undefined,
-            })
-            .where(eq(chatSessions.id, runningSession.id));
+          // Update session status with pessimistic locking and retry on version conflict
+          const updateResult = await retryWithBackoff(
+            async () => {
+              await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+                await updateSessionStatusWithLock(tx, runningSession.id, {
+                  status: newStatus as SessionStatus,
+                  completedAt: new Date(remoteSession.updated_at),
+                  totalCost: totalCost || null,
+                  branch: branch || null,
+                }, {
+                  validateTransition: false, // Background sync may see intermediate states
+                });
+              }, {
+                context: { operation: 'syncRunningSession', sessionId: runningSession.id },
+              });
+            },
+            {
+              maxRetries: 2,
+              baseDelayMs: 50,
+              maxDelayMs: 200,
+              operationName: 'syncRunningSessionStatus',
+              isRetryable: (error) => isVersionConflict(error),
+            }
+          );
+
+          if (!updateResult.success) {
+            logger.warn(`[SessionSync] Failed to update running session after retries`, {
+              component: 'SessionSync',
+              sessionId: runningSession.id,
+              error: updateResult.error?.message,
+            });
+            result.errors++;
+            return;
+          }
 
           // Notify subscribers about status change
           sessionListBroadcaster.notifyStatusChanged(userId, {
@@ -576,20 +609,45 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
           }
 
-          // Update existing session with remote session info
-          await db
-            .update(chatSessions)
-            .set({
+          // Update existing session with remote session info using pessimistic locking
+          const linkResult = await retryWithBackoff(
+            async () => {
+              await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+                await updateSessionStatusWithLock(tx, matchingExistingSession.id, {
+                  status: status as SessionStatus,
+                  remoteSessionId: remoteSession.id,
+                  remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
+                  branch: branch || matchingExistingSession.branch,
+                  totalCost: totalCost || matchingExistingSession.totalCost,
+                  completedAt: status === 'completed' || status === 'error'
+                    ? new Date(remoteSession.updated_at)
+                    : matchingExistingSession.completedAt,
+                }, {
+                  validateTransition: false, // Allow any transition during sync linking
+                });
+              }, {
+                context: { operation: 'linkSessionToRemote', sessionId: matchingExistingSession.id },
+              });
+            },
+            {
+              maxRetries: 2,
+              baseDelayMs: 50,
+              maxDelayMs: 200,
+              operationName: 'linkSessionToRemote',
+              isRetryable: (error) => isVersionConflict(error),
+            }
+          );
+
+          if (!linkResult.success) {
+            logger.warn(`[SessionSync] Failed to link session after retries`, {
+              component: 'SessionSync',
+              sessionId: matchingExistingSession.id,
               remoteSessionId: remoteSession.id,
-              remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
-              status: status,
-              branch: branch || matchingExistingSession.branch,
-              totalCost: totalCost || matchingExistingSession.totalCost,
-              completedAt: status === 'completed' || status === 'error'
-                ? new Date(remoteSession.updated_at)
-                : matchingExistingSession.completedAt,
-            })
-            .where(eq(chatSessions.id, matchingExistingSession.id));
+              error: linkResult.error?.message,
+            });
+            result.errors++;
+            continue;
+          }
 
           // Import any missing events using batch insert
           const existingEventUuids = await getExistingEventUuids(matchingExistingSession.id);
@@ -713,19 +771,45 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
                 totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
               }
 
-              await db
-                .update(chatSessions)
-                .set({
+              // Use pessimistic locking for sessionPath-based linking
+              const pathLinkResult = await retryWithBackoff(
+                async () => {
+                  await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+                    await updateSessionStatusWithLock(tx, sessionPathMatch.id, {
+                      status: status as SessionStatus,
+                      remoteSessionId: remoteSession.id,
+                      remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
+                      branch: branch || sessionPathMatch.branch,
+                      totalCost: totalCost || sessionPathMatch.totalCost,
+                      completedAt: status === 'completed' || status === 'error'
+                        ? new Date(remoteSession.updated_at)
+                        : sessionPathMatch.completedAt,
+                    }, {
+                      validateTransition: false, // Allow any transition during sync linking
+                    });
+                  }, {
+                    context: { operation: 'linkSessionByPath', sessionId: sessionPathMatch.id },
+                  });
+                },
+                {
+                  maxRetries: 2,
+                  baseDelayMs: 50,
+                  maxDelayMs: 200,
+                  operationName: 'linkSessionByPath',
+                  isRetryable: (error) => isVersionConflict(error),
+                }
+              );
+
+              if (!pathLinkResult.success) {
+                logger.warn(`[SessionSync] Failed to link session by sessionPath after retries`, {
+                  component: 'SessionSync',
+                  sessionId: sessionPathMatch.id,
                   remoteSessionId: remoteSession.id,
-                  remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
-                  status: status,
-                  branch: branch || sessionPathMatch.branch,
-                  totalCost: totalCost || sessionPathMatch.totalCost,
-                  completedAt: status === 'completed' || status === 'error'
-                    ? new Date(remoteSession.updated_at)
-                    : sessionPathMatch.completedAt,
-                })
-                .where(eq(chatSessions.id, sessionPathMatch.id));
+                  error: pathLinkResult.error?.message,
+                });
+                result.errors++;
+                continue;
+              }
 
               // Import any missing events using batch insert
               const existingEventUuids = await getExistingEventUuids(sessionPathMatch.id);
