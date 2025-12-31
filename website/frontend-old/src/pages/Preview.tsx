@@ -87,9 +87,11 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
         // With no-cors mode, we get an opaque response (type: 'opaque')
         // If we get here without error, the server responded - assume it's working
         stopAutoRefresh();
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Network errors mean server is down or unreachable
-        if (error.name === 'AbortError' || error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
+        const errorName = error && typeof error === 'object' && 'name' in error ? error.name : undefined;
+        const errorMessage = error instanceof Error ? error.message : '';
+        if (errorName === 'AbortError' || errorMessage.includes('network') || errorMessage.includes('Failed to fetch')) {
           setHasError(true);
         } else {
           // Other errors - assume server is working

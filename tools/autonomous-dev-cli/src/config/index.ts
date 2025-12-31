@@ -660,10 +660,11 @@ export function loadConfig(configPath?: string, options: Omit<LoadConfigOptions,
         configLoadPath = fullPath;
         logger.info(`Loaded config from ${fullPath}`);
         break;
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         const parseError = new ConfigError(
           ErrorCode.CONFIG_PARSE_ERROR,
-          `Failed to parse config file ${fullPath}: ${error.message}`,
+          `Failed to parse config file ${fullPath}: ${errorMessage}`,
           {
             context: { configPath: fullPath },
             recoveryActions: [
@@ -680,7 +681,7 @@ export function loadConfig(configPath?: string, options: Omit<LoadConfigOptions,
                 automatic: false,
               },
             ],
-            cause: error,
+            cause: error instanceof Error ? error : undefined,
           }
         );
         logger.structuredError(parseError);

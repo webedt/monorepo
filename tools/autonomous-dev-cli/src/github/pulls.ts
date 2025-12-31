@@ -343,8 +343,8 @@ export function createPRManager(client: GitHubClient): PRManager {
           `GET /repos/${owner}/${repo}/pulls/${number}`,
           { operation: 'getPR', prNumber: number }
         );
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
           return null;
         }
         return handleError(error, 'get PR', { prNumber: number });
@@ -416,9 +416,10 @@ export function createPRManager(client: GitHubClient): PRManager {
           `POST /repos/${owner}/${repo}/pulls`,
           { operation: 'createPR', head: options.head, base: options.base }
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Handle case where PR already exists
-        if (error.message?.includes('A pull request already exists')) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('A pull request already exists')) {
           const existing = await this.findPRForBranch(options.head, options.base);
           if (existing) {
             return existing;
@@ -488,13 +489,14 @@ export function createPRManager(client: GitHubClient): PRManager {
           `PUT /repos/${owner}/${repo}/pulls/${number}/merge`,
           { operation: 'mergePR', prNumber: number, method }
         );
-      } catch (error: any) {
-        logger.error('Failed to merge PR', { error: error.message, number, method });
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error('Failed to merge PR', { error: errorMessage, number, method });
 
         return {
           merged: false,
           sha: null,
-          message: error.message || 'Merge failed',
+          message: errorMessage || 'Merge failed',
         };
       }
     },
@@ -583,13 +585,14 @@ export function createPRManager(client: GitHubClient): PRManager {
           `POST /repos/${owner}/${repo}/merges`,
           { operation: 'updatePRFromBase', prNumber: number }
         );
-      } catch (error: any) {
-        if (error.status === 204) {
+      } catch (error: unknown) {
+        const statusCode = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+        if (statusCode === 204) {
           // Already up to date
           logger.info(`PR #${number} is already up to date`);
           return true;
         }
-        if (error.status === 409) {
+        if (statusCode === 409) {
           // Merge conflict
           logger.warn(`PR #${number} has merge conflicts`);
           return false;
@@ -765,12 +768,13 @@ export function createPRManager(client: GitHubClient): PRManager {
           `POST /graphql markPullRequestReadyForReview`,
           { operation: 'convertDraftToReady', prNumber: number }
         );
-      } catch (error: any) {
-        if (error.message?.includes('not a draft')) {
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('not a draft')) {
           logger.debug(`PR #${number} is already ready for review`);
           return true;
         }
-        logger.error(`Failed to convert PR #${number} to ready`, { error: error.message });
+        logger.error(`Failed to convert PR #${number} to ready`, { error: errorMessage });
         return false;
       }
     },
@@ -852,12 +856,13 @@ export function createPRManager(client: GitHubClient): PRManager {
           `POST /repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
           { operation: 'requestReviewers', prNumber: number, reviewers }
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Some reviewers might be invalid (not collaborators), log but don't fail
-        if (error.status === 422) {
+        const statusCode = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+        if (statusCode === 422) {
           logger.warn(`Some reviewers could not be assigned to PR #${number}`, {
             reviewers,
-            error: error.message,
+            error: error instanceof Error ? error.message : String(error),
           });
           return;
         }
@@ -897,9 +902,10 @@ export function createPRManager(client: GitHubClient): PRManager {
             logger.debug(`Loaded CODEOWNERS from ${path}`, { entryCount: entries.length });
             return entries;
           }
-        } catch (error: any) {
-          if (error.status !== 404) {
-            logger.debug(`Error checking ${path} for CODEOWNERS`, { error: error.message });
+        } catch (error: unknown) {
+          const statusCode = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+          if (statusCode !== 404) {
+            logger.debug(`Error checking ${path} for CODEOWNERS`, { error: error instanceof Error ? error.message : String(error) });
           }
         }
       }
@@ -970,9 +976,10 @@ export function createPRManager(client: GitHubClient): PRManager {
             logger.debug(`Loaded PR template from ${path}`);
             return content;
           }
-        } catch (error: any) {
-          if (error.status !== 404) {
-            logger.debug(`Error checking ${path} for PR template`, { error: error.message });
+        } catch (error: unknown) {
+          const statusCode = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+          if (statusCode !== 404) {
+            logger.debug(`Error checking ${path} for PR template`, { error: error instanceof Error ? error.message : String(error) });
           }
         }
       }
@@ -1032,13 +1039,15 @@ export function createPRManager(client: GitHubClient): PRManager {
         status.allowsDeletion = data.allow_deletions?.enabled ?? false;
 
         logger.debug(`Retrieved branch protection for ${branch}`, status);
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        const statusCode = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (statusCode === 404) {
           // Branch is not protected or doesn't have protection rules
           logger.debug(`No branch protection found for ${branch}`);
         } else {
-          status.errors.push(`Failed to get branch protection: ${error.message}`);
-          logger.warn(`Error getting branch protection for ${branch}`, { error: error.message });
+          status.errors.push(`Failed to get branch protection: ${errorMessage}`);
+          logger.warn(`Error getting branch protection for ${branch}`, { error: errorMessage });
         }
       }
 
@@ -1096,10 +1105,10 @@ export function createPRManager(client: GitHubClient): PRManager {
           allowed: reasons.length === 0,
           reasons,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         return {
           allowed: false,
-          reasons: [`Error checking merge status: ${error.message}`],
+          reasons: [`Error checking merge status: ${error instanceof Error ? error.message : String(error)}`],
         };
       }
     },

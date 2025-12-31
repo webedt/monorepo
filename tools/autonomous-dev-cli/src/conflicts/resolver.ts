@@ -254,11 +254,11 @@ export class ConflictResolver {
         this.log.info('Merge succeeded without conflicts');
         await repoGit.push(['origin', branchName]);
         return true;
-      } catch (mergeError: any) {
+      } catch (mergeError: unknown) {
         // Check if there are conflicts
         const status = await repoGit.status();
         if (status.conflicted.length === 0) {
-          this.log.error('Merge failed but no conflicts detected', { error: mergeError.message });
+          this.log.error('Merge failed but no conflicts detected', { error: mergeError instanceof Error ? mergeError.message : String(mergeError) });
           return false;
         }
 
@@ -339,8 +339,8 @@ Start by checking the status.`;
 
       this.log.success('Conflicts resolved and pushed successfully');
       return true;
-    } catch (error: any) {
-      this.log.error('AI conflict resolution failed', { error: error.message });
+    } catch (error: unknown) {
+      this.log.error('AI conflict resolution failed', { error: error instanceof Error ? error.message : String(error) });
       return false;
     } finally {
       // Cleanup

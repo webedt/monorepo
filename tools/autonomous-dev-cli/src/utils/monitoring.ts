@@ -151,8 +151,8 @@ export class MonitoringServer {
 
       res.writeHead(statusCode, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result, null, 2));
-    } catch (error: any) {
-      this.sendError(res, 500, `Health check error: ${error.message}`);
+    } catch (error: unknown) {
+      this.sendError(res, 500, `Health check error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

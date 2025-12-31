@@ -585,9 +585,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       // Expand root folders by default
       setExpandedFolders(new Set());
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create branch:', error);
-      setInitError(error.message || 'Failed to create branch');
+      setInitError(error instanceof Error ? error.message : 'Failed to create branch');
     } finally {
       setIsInitializing(false);
     }
@@ -629,9 +629,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           console.error(`[Code] Image not found: ${path}`);
           setFileContent(`// Error: Image not found in storage`);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Failed to load image:', error);
-        setFileContent(`// Error loading image: ${error.message}`);
+        setFileContent(`// Error loading image: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
         setIsLoadingFile(false);
       }
@@ -651,9 +651,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           console.error(`[Code] Audio file not found: ${path}`);
           setFileContent(`// Error: Audio file not found in storage`);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Failed to load audio:', error);
-        setFileContent(`// Error loading audio: ${error.message}`);
+        setFileContent(`// Error loading audio: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
         setIsLoadingFile(false);
       }
@@ -702,9 +702,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           return next;
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load file:', error);
-      setFileContent(`// Error loading file: ${error.message}`);
+      setFileContent(`// Error loading file: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsLoadingFile(false);
     }
@@ -1030,7 +1030,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       return null; // No SHA needed for storage-worker
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to save file ${path}:`, error);
       throw error;
     }
@@ -1101,9 +1101,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setTimeout(() => {
         setSaveStatus(prev => prev === 'saved' ? 'idle' : prev);
       }, 2000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSaveStatus('error');
-      setLastSaveError(error.message || 'Failed to save');
+      setLastSaveError(error instanceof Error ? error.message : 'Failed to save');
     }
   }, [saveFile, logCodeMessage]);
 
@@ -1337,10 +1337,10 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setTimeout(() => {
         setCommitStatus(prev => prev === 'committed' ? 'idle' : prev);
       }, 2000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to commit changes:', error);
       setCommitStatus('error');
-      setLastSaveError(error.message || 'Failed to commit');
+      setLastSaveError(error instanceof Error ? error.message : 'Failed to commit');
     }
   }, [codeSession, pendingChanges, debouncedSave, saveFile, logCodeMessage]);
 
@@ -1476,9 +1476,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       closeModal();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Rename error:', error);
-      setOperationError(error.message || 'Failed to rename');
+      setOperationError(error instanceof Error ? error.message : 'Failed to rename');
     } finally {
       setIsOperating(false);
     }
@@ -1609,9 +1609,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       closeModal();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Delete error:', error);
-      setOperationError(error.message || 'Failed to delete');
+      setOperationError(error instanceof Error ? error.message : 'Failed to delete');
     } finally {
       setIsOperating(false);
     }
@@ -1689,9 +1689,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
         closeModal();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Create error:', error);
-      setOperationError(error.message || 'Failed to create');
+      setOperationError(error instanceof Error ? error.message : 'Failed to create');
     } finally {
       setIsOperating(false);
     }

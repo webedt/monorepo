@@ -168,9 +168,11 @@ export async function runTests(options: TestOptions): Promise<TestResult> {
         totalTests += stats.total;
         passedTests += stats.passed;
         failedTests += stats.failed;
-      } catch (execError: any) {
-        const stderr = execError.stderr?.toString() || '';
-        const stdout = execError.stdout?.toString() || '';
+      } catch (execError: unknown) {
+        const stderr = execError && typeof execError === 'object' && 'stderr' in execError
+          ? String(execError.stderr) : '';
+        const stdout = execError && typeof execError === 'object' && 'stdout' in execError
+          ? String(execError.stdout) : '';
         const output = `${stdout}\n${stderr}`;
 
         combinedOutput += `\n=== ${command} (FAILED) ===\n${output}`;
@@ -251,28 +253,29 @@ export async function runTests(options: TestOptions): Promise<TestResult> {
       testsPassed: passedTests,
       testsFailed: failedTests,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Record error in phase tracking
     if (correlationId) {
       recordPhaseError(correlationId, 'evaluation', 'TEST_EXECUTION_ERROR');
       endPhase(correlationId, 'evaluation', false, {
         operation: 'tests',
-        error: error.message,
+        error: errorMessage,
         duration,
       });
     }
 
     // Log operation failure
     const operationMetadata = finalizeOperationContext(operationContext, false, {
-      error: error.message,
+      error: errorMessage,
       duration,
     });
     logger.operationComplete('Tests', 'runTests', false, operationMetadata);
 
     logger.error('Test execution failed', {
-      error: error.message,
+      error: errorMessage,
       correlationId,
       duration,
     });
@@ -284,7 +287,7 @@ export async function runTests(options: TestOptions): Promise<TestResult> {
       testsRun: 0,
       testsPassed: 0,
       testsFailed: 0,
-      error: error.message,
+      error: errorMessage,
     };
   }
 }

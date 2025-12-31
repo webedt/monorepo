@@ -163,9 +163,9 @@ export function SceneEditorContent({ sessionId: sessionIdProp, isEmbedded: _isEm
       });
 
       navigate(`/session/${dbSessionId}/scene-editor`, { replace: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create branch:', error);
-      setInitError(error.message || 'Failed to create branch');
+      setInitError(error instanceof Error ? error.message : 'Failed to create branch');
     } finally {
       setIsInitializing(false);
     }

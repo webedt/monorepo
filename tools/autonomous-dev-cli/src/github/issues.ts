@@ -222,8 +222,8 @@ export function createIssueManager(client: GitHubClient): IssueManager {
             { operation: 'getIssue', issueNumber: number }
           );
         });
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
           return null;
         }
         return handleError(error, 'get issue', { issueNumber: number });
@@ -359,9 +359,9 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           `DELETE /repos/${owner}/${repo}/issues/${issueNumber}/labels/${label}`,
           { operation: 'removeLabel', issueNumber, label }
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Ignore if label doesn't exist
-        if (error.status !== 404) {
+        if (!(error && typeof error === 'object' && 'status' in error && error.status === 404)) {
           handleError(error, 'remove label', { issueNumber, label });
         }
       }
@@ -510,8 +510,8 @@ export function createIssueManager(client: GitHubClient): IssueManager {
             { operation: 'getComment', commentId }
           );
         });
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
           return null;
         }
         return handleError(error, 'get comment', { commentId });
@@ -577,9 +577,9 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           `DELETE /repos/${owner}/${repo}/issues/comments/${commentId}`,
           { operation: 'deleteComment', commentId }
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Ignore if comment doesn't exist
-        if (error.status !== 404) {
+        if (!(error && typeof error === 'object' && 'status' in error && error.status === 404)) {
           handleError(error, 'delete comment', { commentId });
         }
       }
