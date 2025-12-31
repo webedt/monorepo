@@ -363,3 +363,12 @@ class PresenceStore extends Store<PresenceState> {
 
 // Singleton instance
 export const presenceStore = new PresenceStore();
+
+// HMR setup
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    // Clean up all timers and connections to prevent memory leaks on HMR
+    presenceStore.disconnect();
+  });
+}

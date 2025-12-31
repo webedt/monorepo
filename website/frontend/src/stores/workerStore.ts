@@ -148,6 +148,14 @@ export class WorkerStore extends Store<WorkerState> {
       this.heartbeatTimeout = null;
     }
   }
+
+  /**
+   * Dispose of all resources (timers) when the store is being destroyed.
+   * Called during HMR to prevent memory leaks.
+   */
+  dispose(): void {
+    this.stopHeartbeatMonitor();
+  }
 }
 
 // Singleton instance with HMR support
@@ -157,6 +165,8 @@ export const workerStore = new WorkerStore().enableHmr('worker');
 if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
+    // Clean up heartbeat monitor to prevent timer leak on HMR
+    workerStore.dispose();
     workerStore.saveForHmr();
   });
 }

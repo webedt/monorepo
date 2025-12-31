@@ -6,6 +6,7 @@
 import { authStore } from '../../stores/authStore';
 import { registerPage, unregisterPage } from '../../lib/hmr';
 import { ListenerRegistry } from '../../lib/listenerRegistry';
+import { TimerRegistry } from '../../lib/timerRegistry';
 
 export interface PageOptions {
   params?: Record<string, string>;
@@ -24,6 +25,13 @@ export abstract class Page<T extends PageOptions = PageOptions> {
    * automatically removed when the page is unmounted.
    */
   protected readonly listeners: ListenerRegistry = new ListenerRegistry();
+
+  /**
+   * Registry for tracking timers (setTimeout/setInterval) with automatic cleanup.
+   * Use this.timers.setTimeout() or this.timers.setInterval() to register timers
+   * that will be automatically cleared when the page is unmounted.
+   */
+  protected readonly timers: TimerRegistry = new TimerRegistry();
 
   /** Route pattern (e.g., '/chat/:id') */
   abstract readonly route: string;
@@ -88,6 +96,9 @@ export abstract class Page<T extends PageOptions = PageOptions> {
     // Clean up all listeners registered via the ListenerRegistry
     this.listeners.removeAll();
 
+    // Clean up all timers registered via the TimerRegistry
+    this.timers.clearAll();
+
     // Clean up legacy event listeners (for backward compatibility)
     for (const { el, type, handler } of this.eventListeners) {
       el.removeEventListener(type, handler);
@@ -110,6 +121,9 @@ export abstract class Page<T extends PageOptions = PageOptions> {
 
     // Clean up all listeners registered via the ListenerRegistry
     this.listeners.removeAll();
+
+    // Clean up all timers registered via the TimerRegistry
+    this.timers.clearAll();
 
     // Clean up legacy event listeners
     for (const { el, type, handler } of this.eventListeners) {

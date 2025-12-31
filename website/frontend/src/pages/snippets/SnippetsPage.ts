@@ -507,13 +507,11 @@ export class SnippetsPage extends Page {
       }
     });
 
-    // Search - using addListener for automatic cleanup
+    // Search - using addListener and timerRegistry for automatic cleanup
     const searchInput = this.$('#search-input') as HTMLInputElement;
     if (searchInput) {
-      let debounceTimeout: number;
       this.addListener(searchInput, 'input', () => {
-        clearTimeout(debounceTimeout);
-        debounceTimeout = window.setTimeout(() => {
+        this.timers.debounce('snippets-search', () => {
           this.searchQuery = searchInput.value;
           this.handleSearch();
         }, 300);
