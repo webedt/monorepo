@@ -34,6 +34,17 @@ import {
 const MAX_CONCURRENT_API_CALLS = 5;
 
 /**
+ * Shared retry configuration for version conflict handling.
+ * Used by all session update operations to ensure consistent retry behavior.
+ */
+const VERSION_CONFLICT_RETRY_CONFIG = {
+  maxRetries: 2,
+  baseDelayMs: 50,
+  maxDelayMs: 200,
+  isRetryable: (error: Error) => isVersionConflict(error),
+} as const;
+
+/**
  * Helper to run promises in parallel with a concurrency limit
  * Uses a worker pool pattern for correct concurrency control
  */
@@ -144,10 +155,11 @@ let syncIntervalId: NodeJS.Timeout | null = null;
 let initialTimeoutId: NodeJS.Timeout | null = null;
 
 /**
- * Map Anthropic session status to our internal status
+ * Map Anthropic session status to our internal status.
+ * Returns a valid SessionStatus type to ensure type safety.
  */
-function mapStatus(anthropicStatus: string): string {
-  const statusMap: Record<string, string> = {
+function mapStatus(anthropicStatus: string): SessionStatus {
+  const statusMap: Record<string, SessionStatus> = {
     'idle': 'completed',
     'running': 'running',
     'completed': 'completed',
@@ -220,15 +232,18 @@ async function cleanupRedundantSessions(
       return 0;
     }
 
-    // Soft-delete redundant sessions atomically using a transaction with version increment
+    // Soft-delete redundant sessions atomically using a transaction with version increment.
+    // Note: This batch update does not use pessimistic locking. If a session is concurrently
+    // modified by another transaction, that session's update will be overwritten. This is
+    // acceptable for cleanup since these sessions are orphaned/redundant and being soft-deleted.
     const sessionIds = sessionsToCleanup.map(s => s.id);
     const now = new Date();
 
-    // Use transaction to ensure all updates succeed or none do
-    // Increment version to maintain consistency with the locking system
+    // Use transaction to ensure all updates succeed or none do.
+    // Increment version to maintain consistency with the locking system.
     await withTransactionOrThrow(db, async (tx: TransactionContext) => {
-      // Batch update all sessions at once for atomicity
-      // Using SQL expression to increment version atomically
+      // Batch update all sessions at once for atomicity.
+      // Using SQL expression to increment version atomically.
       await tx
         .update(chatSessions)
         .set({
@@ -351,7 +366,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             async () => {
               await withTransactionOrThrow(db, async (tx: TransactionContext) => {
                 await updateSessionStatusWithLock(tx, runningSession.id, {
-                  status: newStatus as SessionStatus,
+                  status: newStatus,
                   completedAt: new Date(remoteSession.updated_at),
                   totalCost: totalCost || null,
                   branch: branch || null,
@@ -363,11 +378,8 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
               });
             },
             {
-              maxRetries: 2,
-              baseDelayMs: 50,
-              maxDelayMs: 200,
+              ...VERSION_CONFLICT_RETRY_CONFIG,
               operationName: 'syncRunningSessionStatus',
-              isRetryable: (error) => isVersionConflict(error),
             }
           );
 
@@ -614,7 +626,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             async () => {
               await withTransactionOrThrow(db, async (tx: TransactionContext) => {
                 await updateSessionStatusWithLock(tx, matchingExistingSession.id, {
-                  status: status as SessionStatus,
+                  status: status,
                   remoteSessionId: remoteSession.id,
                   remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
                   branch: branch || matchingExistingSession.branch,
@@ -630,11 +642,8 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
               });
             },
             {
-              maxRetries: 2,
-              baseDelayMs: 50,
-              maxDelayMs: 200,
+              ...VERSION_CONFLICT_RETRY_CONFIG,
               operationName: 'linkSessionToRemote',
-              isRetryable: (error) => isVersionConflict(error),
             }
           );
 
@@ -776,7 +785,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
                 async () => {
                   await withTransactionOrThrow(db, async (tx: TransactionContext) => {
                     await updateSessionStatusWithLock(tx, sessionPathMatch.id, {
-                      status: status as SessionStatus,
+                      status: status,
                       remoteSessionId: remoteSession.id,
                       remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
                       branch: branch || sessionPathMatch.branch,
@@ -792,11 +801,8 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
                   });
                 },
                 {
-                  maxRetries: 2,
-                  baseDelayMs: 50,
-                  maxDelayMs: 200,
+                  ...VERSION_CONFLICT_RETRY_CONFIG,
                   operationName: 'linkSessionByPath',
-                  isRetryable: (error) => isVersionConflict(error),
                 }
               );
 
