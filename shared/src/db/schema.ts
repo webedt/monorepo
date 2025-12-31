@@ -97,6 +97,9 @@ export const chatSessions = pgTable('chat_sessions', {
   shareExpiresAt: timestamp('share_expires_at'), // Optional expiration date
   // Optimistic locking - version counter for concurrent update detection
   version: integer('version').default(1).notNull(), // Increments on each update
+  // Full-text search vector - auto-updated by trigger (see migrations)
+  // Combines: userRequest (weight A), repositoryName (weight B), branch (weight C)
+  searchVector: text('search_vector'), // PostgreSQL tsvector type, managed by trigger
 });
 
 export const messages = pgTable('messages', {
@@ -437,6 +440,9 @@ export const games = pgTable('games', {
   downloadCount: integer('download_count').default(0).notNull(),
   featured: boolean('featured').default(false).notNull(), // Featured on store front
   status: text('status').default('published').notNull(), // 'draft' | 'published' | 'archived'
+  // Full-text search vector - auto-updated by trigger (see migrations)
+  // Combines: title (weight A), description (weight B), developer/publisher (weight C)
+  searchVector: text('search_vector'), // PostgreSQL tsvector type, managed by trigger
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -506,6 +512,9 @@ export const communityPosts = pgTable('community_posts', {
   pinned: boolean('pinned').default(false).notNull(), // Pinned by moderator
   locked: boolean('locked').default(false).notNull(), // Comments disabled
   status: text('status').default('published').notNull(), // 'draft' | 'published' | 'removed'
+  // Full-text search vector - auto-updated by trigger (see migrations)
+  // Combines: title (weight A), content (weight B)
+  searchVector: text('search_vector'), // PostgreSQL tsvector type, managed by trigger
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

@@ -1,10 +1,30 @@
 /**
  * Universal Search Routes
  * Searches across all fields (title, description, tags, creator, etc.)
+ *
+ * Uses PostgreSQL tsvector full-text search for indexed, ranked search results.
+ * Falls back to ILIKE for tables without search_vector columns.
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, users, chatSessions, communityPosts, eq, and, or, desc, sql, ilike, LIMITS } from '@webedt/shared';
+import {
+  db,
+  games,
+  users,
+  chatSessions,
+  communityPosts,
+  eq,
+  and,
+  or,
+  desc,
+  sql,
+  ilike,
+  LIMITS,
+  buildSearchCondition,
+  buildRankSelect,
+  buildHeadlineSelect,
+  sanitizeSearchQuery,
+} from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { searchRateLimiter } from '../middleware/rateLimit.js';
@@ -27,6 +47,10 @@ interface SearchResultItem {
   image?: string;
   tags?: string[];
   matchedFields?: string[];
+  /** Relevance rank from full-text search (0-1, higher is better) */
+  rank?: number;
+  /** Highlighted excerpt with matching terms */
+  highlight?: string;
 }
 
 interface SearchResponse {
@@ -36,27 +60,47 @@ interface SearchResponse {
 }
 
 /**
- * Search games using database-level ILIKE filtering
+ * Search games using PostgreSQL full-text search with tsvector
+ * Uses indexed search for 10-100x faster queries with relevance ranking
  */
 async function searchGames(searchTerm: string): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
-  const searchPattern = `%${searchTerm}%`;
+  const sanitized = sanitizeSearchQuery(searchTerm);
 
-  // Use database-level filtering with ILIKE for better performance
+  if (!sanitized) {
+    return results;
+  }
+
+  // Use full-text search with tsvector for indexed, ranked results
   const matchedGames = await db
-    .select()
+    .select({
+      id: games.id,
+      title: games.title,
+      description: games.description,
+      shortDescription: games.shortDescription,
+      developer: games.developer,
+      publisher: games.publisher,
+      coverImage: games.coverImage,
+      tags: games.tags,
+      genres: games.genres,
+      // Get relevance rank from tsvector search
+      rank: buildRankSelect(games.searchVector, searchTerm),
+      // Get highlighted excerpt from description
+      highlight: buildHeadlineSelect(games.description, searchTerm, {
+        startSel: '<mark>',
+        stopSel: '</mark>',
+        maxWords: 25,
+        minWords: 10,
+      }),
+    })
     .from(games)
     .where(
       and(
         eq(games.status, 'published'),
-        or(
-          ilike(games.title, searchPattern),
-          ilike(games.description, searchPattern),
-          ilike(games.developer, searchPattern),
-          ilike(games.publisher, searchPattern)
-        )
+        buildSearchCondition(games.searchVector, searchTerm)
       )
     )
+    .orderBy(sql`${buildRankSelect(games.searchVector, searchTerm)} DESC`)
     .limit(LIMITS.SEARCH.GAMES);
 
   for (const game of matchedGames) {
@@ -83,18 +127,18 @@ async function searchGames(searchTerm: string): Promise<SearchResultItem[]> {
       matchedFields.push('genres');
     }
 
-    if (matchedFields.length > 0) {
-      results.push({
-        id: game.id,
-        type: 'game',
-        title: game.title,
-        subtitle: game.developer ?? game.publisher ?? undefined,
-        description: game.shortDescription ?? game.description?.substring(0, 100),
-        image: game.coverImage ?? undefined,
-        tags: game.tags?.slice(0, 5),
-        matchedFields,
-      });
-    }
+    results.push({
+      id: game.id,
+      type: 'game',
+      title: game.title,
+      subtitle: game.developer ?? game.publisher ?? undefined,
+      description: game.highlight || game.shortDescription || game.description?.substring(0, 100),
+      image: game.coverImage ?? undefined,
+      tags: game.tags?.slice(0, 5),
+      matchedFields: matchedFields.length > 0 ? matchedFields : ['relevance'],
+      rank: game.rank,
+      highlight: game.highlight,
+    });
   }
 
   return results;
@@ -133,27 +177,41 @@ async function searchUsers(searchTerm: string): Promise<SearchResultItem[]> {
 }
 
 /**
- * Search sessions for authenticated user using database-level ILIKE filtering
+ * Search sessions for authenticated user using PostgreSQL full-text search
+ * Uses indexed tsvector search for fast, ranked results
  */
 async function searchSessions(searchTerm: string, userId: string): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
-  const searchPattern = `%${searchTerm}%`;
+  const sanitized = sanitizeSearchQuery(searchTerm);
+
+  if (!sanitized) {
+    return results;
+  }
 
   const matchedSessions = await db
-    .select()
+    .select({
+      id: chatSessions.id,
+      userRequest: chatSessions.userRequest,
+      repositoryOwner: chatSessions.repositoryOwner,
+      repositoryName: chatSessions.repositoryName,
+      branch: chatSessions.branch,
+      rank: buildRankSelect(chatSessions.searchVector, searchTerm),
+      highlight: buildHeadlineSelect(chatSessions.userRequest, searchTerm, {
+        startSel: '<mark>',
+        stopSel: '</mark>',
+        maxWords: 20,
+        minWords: 8,
+      }),
+    })
     .from(chatSessions)
     .where(
       and(
         eq(chatSessions.userId, userId),
         sql`${chatSessions.deletedAt} IS NULL`,
-        or(
-          ilike(chatSessions.userRequest, searchPattern),
-          ilike(chatSessions.repositoryName, searchPattern),
-          ilike(chatSessions.branch, searchPattern)
-        )
+        buildSearchCondition(chatSessions.searchVector, searchTerm)
       )
     )
-    .orderBy(desc(chatSessions.createdAt))
+    .orderBy(sql`${buildRankSelect(chatSessions.searchVector, searchTerm)} DESC`)
     .limit(LIMITS.SEARCH.SESSIONS);
 
   const lowerSearchTerm = searchTerm.toLowerCase();
@@ -171,41 +229,55 @@ async function searchSessions(searchTerm: string, userId: string): Promise<Searc
       matchedFields.push('branch');
     }
 
-    if (matchedFields.length > 0) {
-      results.push({
-        id: session.id,
-        type: 'session',
-        title: session.userRequest?.substring(0, 50) || 'Untitled Session',
-        subtitle: session.repositoryName ? `${session.repositoryOwner}/${session.repositoryName}` : undefined,
-        description: session.userRequest?.substring(0, 100),
-        matchedFields,
-      });
-    }
+    results.push({
+      id: session.id,
+      type: 'session',
+      title: session.userRequest?.substring(0, 50) || 'Untitled Session',
+      subtitle: session.repositoryName ? `${session.repositoryOwner}/${session.repositoryName}` : undefined,
+      description: session.highlight || session.userRequest?.substring(0, 100),
+      matchedFields: matchedFields.length > 0 ? matchedFields : ['relevance'],
+      rank: session.rank,
+      highlight: session.highlight,
+    });
   }
 
   return results;
 }
 
 /**
- * Search community posts using database-level ILIKE filtering
+ * Search community posts using PostgreSQL full-text search
+ * Uses indexed tsvector search for fast, ranked results
  */
 async function searchPosts(searchTerm: string): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
-  const searchPattern = `%${searchTerm}%`;
+  const sanitized = sanitizeSearchQuery(searchTerm);
+
+  if (!sanitized) {
+    return results;
+  }
 
   const matchedPosts = await db
-    .select()
+    .select({
+      id: communityPosts.id,
+      title: communityPosts.title,
+      content: communityPosts.content,
+      type: communityPosts.type,
+      rank: buildRankSelect(communityPosts.searchVector, searchTerm),
+      highlight: buildHeadlineSelect(communityPosts.content, searchTerm, {
+        startSel: '<mark>',
+        stopSel: '</mark>',
+        maxWords: 25,
+        minWords: 10,
+      }),
+    })
     .from(communityPosts)
     .where(
       and(
         eq(communityPosts.status, 'published'),
-        or(
-          ilike(communityPosts.title, searchPattern),
-          ilike(communityPosts.content, searchPattern)
-        )
+        buildSearchCondition(communityPosts.searchVector, searchTerm)
       )
     )
-    .orderBy(desc(communityPosts.createdAt))
+    .orderBy(sql`${buildRankSelect(communityPosts.searchVector, searchTerm)} DESC`)
     .limit(LIMITS.SEARCH.POSTS);
 
   const lowerSearchTerm = searchTerm.toLowerCase();
@@ -220,16 +292,16 @@ async function searchPosts(searchTerm: string): Promise<SearchResultItem[]> {
       matchedFields.push('content');
     }
 
-    if (matchedFields.length > 0) {
-      results.push({
-        id: post.id,
-        type: 'post',
-        title: post.title,
-        subtitle: post.type.charAt(0).toUpperCase() + post.type.slice(1),
-        description: post.content.substring(0, 100),
-        matchedFields,
-      });
-    }
+    results.push({
+      id: post.id,
+      type: 'post',
+      title: post.title,
+      subtitle: post.type.charAt(0).toUpperCase() + post.type.slice(1),
+      description: post.highlight || post.content.substring(0, 100),
+      matchedFields: matchedFields.length > 0 ? matchedFields : ['relevance'],
+      rank: post.rank,
+      highlight: post.highlight,
+    });
   }
 
   return results;
@@ -337,13 +409,17 @@ router.get('/', searchRateLimiter, async (req: Request, res: Response) => {
     // Combine all results
     const results: SearchResultItem[] = searchResults.flat();
 
-    // Sort by relevance (more matched fields = higher relevance)
+    // Sort by relevance using full-text search rank (higher is better)
     results.sort((a, b) => {
-      // First, sort by number of matched fields
+      // Primary: Sort by tsvector rank (if available from full-text search)
+      const rankDiff = (b.rank ?? 0) - (a.rank ?? 0);
+      if (Math.abs(rankDiff) > 0.01) return rankDiff;
+
+      // Secondary: Sort by number of matched fields
       const fieldDiff = (b.matchedFields?.length || 0) - (a.matchedFields?.length || 0);
       if (fieldDiff !== 0) return fieldDiff;
 
-      // Then, prioritize title matches
+      // Tertiary: Prioritize title matches
       const aHasTitle = a.matchedFields?.includes('title') ? 1 : 0;
       const bHasTitle = b.matchedFields?.includes('title') ? 1 : 0;
       return bHasTitle - aHasTitle;

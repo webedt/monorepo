@@ -68,6 +68,9 @@ import {
   sql,
   parseOffsetPagination,
   buildLegacyPaginatedResponse,
+  buildSearchCondition,
+  buildRankSelect,
+  sanitizeSearchQuery,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -358,34 +361,41 @@ router.get('/browse', async (req: Request, res: Response) => {
 
     const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
-    // Build query - start with published games only
-    let baseQuery = db
-      .select()
-      .from(games)
-      .where(eq(games.status, 'published'));
+    // Use full-text search with tsvector when query is provided
+    // This uses GIN indexes for 10-100x faster searches
+    let allGames: typeof games.$inferSelect[];
 
-    // NOTE: We fetch all published games and filter in-memory due to:
-    // 1. JSON array containment queries (genre/tag filters) require raw SQL
-    // 2. Text search across multiple fields needs in-memory processing
-    // 3. Complex multi-field sorting with dynamic order
-    //
-    // For large catalogs (10k+ games), consider:
-    // - Using PostgreSQL-specific JSON operators (@> for containment)
-    // - Implementing a search service (Elasticsearch/Meilisearch)
-    // - Adding database indexes on frequently-filtered columns
-    let allGames = await baseQuery;
-
-    // Apply filters
     if (query) {
-      const searchTerm = (query as string).toLowerCase();
-      allGames = allGames.filter(
-        (g) =>
-          g.title.toLowerCase().includes(searchTerm) ||
-          g.description?.toLowerCase().includes(searchTerm) ||
-          g.developer?.toLowerCase().includes(searchTerm) ||
-          g.publisher?.toLowerCase().includes(searchTerm)
-      );
+      const sanitized = sanitizeSearchQuery(query as string);
+      if (sanitized) {
+        // Use indexed full-text search
+        allGames = await db
+          .select()
+          .from(games)
+          .where(
+            and(
+              eq(games.status, 'published'),
+              buildSearchCondition(games.searchVector, query as string)
+            )
+          )
+          .orderBy(sql`${buildRankSelect(games.searchVector, query as string)} DESC`);
+      } else {
+        // Empty query - return all published games
+        allGames = await db
+          .select()
+          .from(games)
+          .where(eq(games.status, 'published'));
+      }
+    } else {
+      // No query - return all published games
+      allGames = await db
+        .select()
+        .from(games)
+        .where(eq(games.status, 'published'));
     }
+
+    // Apply additional filters (genre, tag, price) in-memory
+    // NOTE: For large catalogs, consider adding PostgreSQL JSON operators
 
     if (genre) {
       const genreFilter = (genre as string).toLowerCase();
