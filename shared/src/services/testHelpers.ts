@@ -7,9 +7,9 @@
  * ## Type Safety Approach
  *
  * Mocks implement a subset of abstract service methods needed for testing.
- * The `MockServiceFor<T>` type ensures type safety by explicitly marking
- * the mock as a test-only implementation that satisfies the service contract
- * for the methods that are implemented.
+ * The `PartialMock<T>` type is a transparent alias that documents when a value
+ * is a test-only implementation satisfying the service contract for the
+ * methods that are implemented.
  *
  * ## Usage
  *
