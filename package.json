@@ -20,6 +20,9 @@
     "lint:catch": "eslint --rule 'no-empty: [error, {allowEmptyCatch: false}]' shared/src cli/src website/frontend/src website/backend/src"
   },
   "devDependencies": {
+    "@types/express-rate-limit": "^5.1.3",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "concurrently": "^8.2.2",
