@@ -23,6 +23,7 @@ import {
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { publicShareRateLimiter, collaborationRateLimiter, standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -104,7 +105,8 @@ interface ChannelUpdateData {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get all active channels
-router.get('/', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const channels = await db
       .select({
@@ -155,7 +157,8 @@ router.get('/', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get channel by slug
-router.get('/by-slug/:slug', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/by-slug/:slug', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
 
@@ -216,7 +219,8 @@ router.get('/by-slug/:slug', async (req: Request, res: Response) => {
  */
 // Get recent messages across all channels (for activity feed)
 // NOTE: This route MUST be defined before /:id to avoid being caught by the param route
-router.get('/activity/recent', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/activity/recent', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
@@ -289,7 +293,8 @@ router.get('/activity/recent', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get channel by ID
-router.get('/:id', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/:id', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const channelId = req.params.id;
 
@@ -372,7 +377,8 @@ router.get('/:id', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get messages for a channel
-router.get('/:id/messages', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/:id/messages', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const channelId = req.params.id;
     const query = req.query as PaginationQueryParams;
@@ -587,7 +593,8 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Post a message to a channel (requires auth)
-router.post('/:id/messages', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 60 requests/minute (collaborationRateLimiter - for real-time messaging)
+router.post('/:id/messages', collaborationRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const channelId = req.params.id;
@@ -733,7 +740,8 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
  *         $ref: '#/components/responses/InternalError'
  */
 // Edit a message
-router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 60 requests/minute (collaborationRateLimiter - for real-time messaging)
+router.patch('/messages/:id', collaborationRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const messageId = req.params.id;
@@ -820,7 +828,8 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
  *         $ref: '#/components/responses/InternalError'
  */
 // Delete a message
-router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 60 requests/minute (collaborationRateLimiter - for real-time messaging)
+router.delete('/messages/:id', collaborationRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const messageId = req.params.id;
@@ -906,7 +915,8 @@ router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) 
  *         $ref: '#/components/responses/InternalError'
  */
 // Admin: Create a new channel
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
@@ -1025,7 +1035,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Admin: Update a channel
-router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.patch('/:id', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 

@@ -28,6 +28,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, chatSessions, events, users, eq, desc, asc, and, isNull, isNotNull, sessionSoftDeleteService } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { standardRateLimiter, aiOperationRateLimiter, sseRateLimiter } from '../middleware/rateLimit.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
   logger,
@@ -173,7 +174,8 @@ async function storeEvent(chatSessionId: string, eventData: Record<string, unkno
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
 
@@ -253,7 +255,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 10 requests/minute (aiOperationRateLimiter - AI execution is expensive)
+router.post('/', aiOperationRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   let chatSessionId: string | null = null;
@@ -473,7 +476,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/:id/status', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;
@@ -544,7 +548,8 @@ router.get('/:id/status', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/:id/events', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;
@@ -623,6 +628,8 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
+// Stream handler is used by both GET /:id and GET /:id/stream
+// Rate limit: 10 reconnects/minute (sseRateLimiter)
 const streamHandler = async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
@@ -749,8 +756,8 @@ const streamHandler = async (req: Request, res: Response) => {
   }
 };
 
-router.get('/:id', requireAuth, streamHandler);
-router.get('/:id/stream', requireAuth, streamHandler);
+router.get('/:id', sseRateLimiter, requireAuth, streamHandler);
+router.get('/:id/stream', sseRateLimiter, requireAuth, streamHandler);
 
 // ============================================================================
 // RESUME - POST /sessions/:id
@@ -799,7 +806,8 @@ router.get('/:id/stream', requireAuth, streamHandler);
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 10 requests/minute (aiOperationRateLimiter - AI execution is expensive)
+router.post('/:id', aiOperationRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;
@@ -998,7 +1006,8 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.patch('/:id', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;
@@ -1082,7 +1091,8 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/:id/archive', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;
@@ -1159,7 +1169,8 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.delete('/:id', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;
@@ -1232,7 +1243,8 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/:id/interrupt', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   const { id } = req.params;

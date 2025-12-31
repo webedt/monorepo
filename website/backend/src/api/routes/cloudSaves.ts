@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { CloudSavesService, logger } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { fileOperationRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -17,8 +18,10 @@ const router = Router();
  *     description: Game save synchronization across devices
  */
 
-// All routes require authentication
+// All routes require authentication and rate limiting
+// Rate limit: 100 requests/minute (fileOperationRateLimiter - for file sync operations)
 router.use(requireAuth);
+router.use(fileOperationRateLimiter);
 
 /**
  * @openapi

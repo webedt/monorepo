@@ -23,10 +23,15 @@ import {
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { standardRateLimiter } from '../middleware/rateLimit.js';
 import type { TransactionContext } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
+
+// Apply rate limiting to all collection routes
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.use(standardRateLimiter);
 
 /**
  * @openapi

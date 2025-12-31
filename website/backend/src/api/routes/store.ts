@@ -71,6 +71,7 @@ import {
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { publicShareRateLimiter, standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -109,7 +110,8 @@ const router = Router();
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/featured', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/featured', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
 
@@ -156,7 +158,8 @@ router.get('/featured', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/new', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/new', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
     const daysBack = Math.min(parseInt(req.query.days as string) || 30, 90);
@@ -225,7 +228,8 @@ router.get('/new', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/highlights', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/highlights', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const featuredLimit = Math.min(parseInt(req.query.featuredLimit as string) || 6, 20);
     const newLimit = Math.min(parseInt(req.query.newLimit as string) || 6, 20);
@@ -343,7 +347,8 @@ router.get('/highlights', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/browse', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/browse', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const {
       q: query,
@@ -480,7 +485,8 @@ router.get('/browse', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/games/:id', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/games/:id', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const gameId = req.params.id;
 
@@ -545,7 +551,8 @@ router.get('/games/:id', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/games/:id/owned', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.id;
@@ -592,7 +599,8 @@ router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) 
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/genres', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/genres', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const allGames = await db
       .select({ genres: games.genres })
@@ -647,7 +655,8 @@ router.get('/genres', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/tags', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/tags', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const allGames = await db
       .select({ tags: games.tags })
@@ -714,7 +723,8 @@ router.get('/tags', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/wishlist/:gameId', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.gameId;
@@ -797,7 +807,8 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.delete('/wishlist/:gameId', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.gameId;
@@ -853,7 +864,8 @@ router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Respon
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/wishlist', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const pagination = parseOffsetPagination(req.query as Record<string, unknown>);

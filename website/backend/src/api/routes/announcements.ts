@@ -18,6 +18,7 @@ import {
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { publicShareRateLimiter, standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -138,7 +139,8 @@ const MAX_CONTENT_LENGTH = 50000;
  *         $ref: '#/components/responses/InternalError'
  */
 // Get published announcements (public)
-router.get('/', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const { type, priority, pinned } = req.query;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
@@ -283,7 +285,8 @@ router.get('/', async (req: Request, res: Response) => {
  */
 // IMPORTANT: Admin routes must be defined BEFORE /:id to avoid route conflicts
 // List all announcements for admin (including drafts and archived)
-router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/admin/all', standardRateLimiter, requireAdmin, async (req: Request, res: Response) => {
   try {
     const { type, priority, status } = req.query;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
@@ -405,7 +408,8 @@ router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get single announcement (public for published, admin for all)
-router.get('/:id', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/:id', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const announcementId = req.params.id;
     const authReq = req as AuthRequest;
@@ -527,7 +531,8 @@ router.get('/:id', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Create announcement (admin only)
-router.post('/', requireAdmin, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/', standardRateLimiter, requireAdmin, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { title, content, type, priority, status, pinned, expiresAt } = req.body;
@@ -691,7 +696,8 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Update announcement (admin only)
-router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.patch('/:id', standardRateLimiter, requireAdmin, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const announcementId = req.params.id;
@@ -826,7 +832,8 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Delete announcement (admin only)
-router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.delete('/:id', standardRateLimiter, requireAdmin, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const announcementId = req.params.id;
