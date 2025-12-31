@@ -291,11 +291,18 @@ function canLeaveOrganization(
   return { valid: true };
 }
 
+/**
+ * Validates if a user can update another member's role.
+ * Note: This function assumes the current user is an owner, which is a
+ * precondition enforced by the route's permission middleware before this
+ * validation runs. Only owners can modify member roles.
+ */
 function canUpdateMemberRole(
   currentUserId: string,
   targetUserId: string,
   newRole: string
 ): ValidationResult {
+  // Owners cannot demote themselves (must transfer ownership first)
   if (currentUserId === targetUserId && newRole !== 'owner') {
     return { valid: false, error: 'Cannot demote yourself from owner' };
   }

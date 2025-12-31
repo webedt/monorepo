@@ -774,9 +774,10 @@ describe('Taxonomies Routes - Query Operations', () => {
         return a.name.localeCompare(b.name);
       });
 
-      assert.strictEqual(sorted[0].name, 'Beta'); // sortOrder 0, Alpha < Zebra
-      assert.strictEqual(sorted[1].name, 'Zebra'); // sortOrder 0
-      assert.strictEqual(sorted[2].name, 'Alpha'); // sortOrder 1
+      // Sorted by sortOrder first, then alphabetically by name
+      assert.strictEqual(sorted[0].name, 'Beta'); // sortOrder 0, 'Beta' < 'Zebra' alphabetically
+      assert.strictEqual(sorted[1].name, 'Zebra'); // sortOrder 0, comes after 'Beta'
+      assert.strictEqual(sorted[2].name, 'Alpha'); // sortOrder 1, sorted last despite name
     });
   });
 

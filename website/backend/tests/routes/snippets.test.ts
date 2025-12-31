@@ -109,6 +109,8 @@ function createMockCollection(overrides: Partial<MockCollection> = {}): MockColl
 
 // ============================================================================
 // Validation Constants (mirror route constants)
+// These are intentionally duplicated from shared/db/schema.ts to maintain
+// test isolation and ensure tests don't break if implementation changes.
 // ============================================================================
 
 const MAX_TITLE_LENGTH = 100;
