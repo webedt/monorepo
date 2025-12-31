@@ -29,7 +29,7 @@ export class Modal extends Component<HTMLDivElement> {
 
   constructor(options: ModalOptions = {}) {
     // Generate unique ID for accessibility (used for aria-labelledby)
-    const uniqueId = `modal-${Math.random().toString(36).substr(2, 9)}`;
+    const uniqueId = `modal-${Math.random().toString(36).slice(2, 11)}`;
 
     // The component root is the backdrop
     super('div', {
@@ -129,12 +129,20 @@ export class Modal extends Component<HTMLDivElement> {
   }
 
   /**
+   * Check if an element is visible (works with position:fixed elements)
+   */
+  private isElementVisible(el: HTMLElement): boolean {
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  }
+
+  /**
    * Get all focusable elements within the modal
    */
   private getFocusableElements(): HTMLElement[] {
     const selector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
     return Array.from(this.modalElement.querySelectorAll<HTMLElement>(selector))
-      .filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);
+      .filter(el => !el.hasAttribute('disabled') && this.isElementVisible(el));
   }
 
   /**
@@ -149,6 +157,13 @@ export class Modal extends Component<HTMLDivElement> {
 
       const firstElement = focusableElements[0];
       const lastElement = focusableElements[focusableElements.length - 1];
+
+      // If focus is outside the modal, bring it back
+      if (!this.modalElement.contains(document.activeElement)) {
+        e.preventDefault();
+        firstElement.focus();
+        return;
+      }
 
       if (e.shiftKey) {
         // Shift+Tab: if on first element, go to last
@@ -260,11 +275,35 @@ export class Modal extends Component<HTMLDivElement> {
    * Set the modal title
    */
   setTitle(title: string): this {
+    // Ensure aria-labelledby is set
+    if (!this.backdropElement.hasAttribute('aria-labelledby')) {
+      this.backdropElement.setAttribute('aria-labelledby', this.titleId);
+    }
+
     if (this.headerElement) {
-      const titleEl = this.headerElement.querySelector('.modal-title');
+      let titleEl = this.headerElement.querySelector('.modal-title');
       if (titleEl) {
         titleEl.textContent = title;
+      } else {
+        // Create title element if it doesn't exist
+        const newTitleEl = document.createElement('h2');
+        newTitleEl.className = 'modal-title';
+        newTitleEl.id = this.titleId;
+        newTitleEl.textContent = title;
+        this.headerElement.prepend(newTitleEl);
       }
+    } else {
+      // Create header with title if header doesn't exist
+      this.headerElement = document.createElement('header');
+      this.headerElement.className = 'modal-header';
+
+      const newTitleEl = document.createElement('h2');
+      newTitleEl.className = 'modal-title';
+      newTitleEl.id = this.titleId;
+      newTitleEl.textContent = title;
+      this.headerElement.appendChild(newTitleEl);
+
+      this.modalElement.prepend(this.headerElement);
     }
     return this;
   }

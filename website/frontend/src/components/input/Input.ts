@@ -49,7 +49,7 @@ export class Input extends Component<HTMLDivElement> {
     };
 
     // Generate unique IDs for accessibility
-    const uniqueId = options.id || `input-${Math.random().toString(36).substr(2, 9)}`;
+    const uniqueId = options.id || `input-${Math.random().toString(36).slice(2, 11)}`;
     this.inputId = uniqueId;
     this.errorId = `${uniqueId}-error`;
 
@@ -324,7 +324,7 @@ export class TextArea extends Component<HTMLDivElement> {
     };
 
     // Generate unique IDs for accessibility
-    const uniqueId = options.id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
+    const uniqueId = options.id || `textarea-${Math.random().toString(36).slice(2, 11)}`;
     this.textareaId = uniqueId;
     this.errorId = `${uniqueId}-error`;
 

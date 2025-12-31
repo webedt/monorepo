@@ -42,7 +42,8 @@ class StatusAnnouncer {
    */
   private createRegion(politeness: AnnouncementPoliteness): HTMLDivElement {
     const region = document.createElement('div');
-    region.setAttribute('role', 'status');
+    // Use 'alert' role for assertive (urgent) and 'status' for polite (non-urgent)
+    region.setAttribute('role', politeness === 'assertive' ? 'alert' : 'status');
     region.setAttribute('aria-live', politeness);
     region.setAttribute('aria-atomic', 'true');
     region.className = 'sr-only';
