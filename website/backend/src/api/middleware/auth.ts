@@ -113,14 +113,10 @@ export function requireRole(requiredRole: UserRole) {
  * Middleware that requires editor role or higher
  * Editors have full access to the editor suite for game creation
  */
-export function requireEditor(req: Request, res: Response, next: NextFunction): void {
-  return requireRole('editor')(req, res, next);
-}
+export const requireEditor = requireRole('editor');
 
 /**
  * Middleware that requires developer role or higher
  * Developers have full access plus development tools and API access
  */
-export function requireDeveloper(req: Request, res: Response, next: NextFunction): void {
-  return requireRole('developer')(req, res, next);
-}
+export const requireDeveloper = requireRole('developer');
