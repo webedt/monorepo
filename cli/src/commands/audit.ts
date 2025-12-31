@@ -11,6 +11,19 @@ import {
 
 import type { AuditAction, AuditEntityType } from '@webedt/shared';
 
+/**
+ * Validate and parse a date string.
+ * Returns a valid Date object or null if the string is invalid.
+ */
+function parseDate(dateStr: string): Date | null {
+  const date = new Date(dateStr);
+  // Check if the date is valid (Invalid Date has NaN time)
+  if (isNaN(date.getTime())) {
+    return null;
+  }
+  return date;
+}
+
 export const auditCommand = new Command('audit')
   .description('Admin audit log operations');
 
@@ -53,13 +66,34 @@ auditCommand
       const limit = parseInt(options.limit, 10);
       const offset = parseInt(options.offset, 10);
 
+      // Validate date strings if provided
+      let startDate: Date | undefined;
+      if (options.startDate) {
+        startDate = parseDate(options.startDate) ?? undefined;
+        if (!startDate) {
+          console.error(`Invalid start date: ${options.startDate}`);
+          console.error('Use ISO 8601 format (e.g., 2024-01-15 or 2024-01-15T10:30:00Z)');
+          process.exit(1);
+        }
+      }
+
+      let endDate: Date | undefined;
+      if (options.endDate) {
+        endDate = parseDate(options.endDate) ?? undefined;
+        if (!endDate) {
+          console.error(`Invalid end date: ${options.endDate}`);
+          console.error('Use ISO 8601 format (e.g., 2024-01-15 or 2024-01-15T10:30:00Z)');
+          process.exit(1);
+        }
+      }
+
       const result = await listAuditLogs({
         adminId: options.admin,
         action: validatedAction,
         entityType: validatedEntityType,
         entityId: options.entityId,
-        startDate: options.startDate ? new Date(options.startDate) : undefined,
-        endDate: options.endDate ? new Date(options.endDate) : undefined,
+        startDate,
+        endDate,
         limit,
         offset,
       });
@@ -87,7 +121,7 @@ auditCommand
 
       for (const log of result.logs) {
         const timestamp = new Date(log.createdAt).toISOString().slice(0, 19).replace('T', ' ');
-        const adminEmail = log.admin?.email || log.adminId.slice(0, 26);
+        const adminEmail = log.admin?.email || (log.adminId?.slice(0, 26) ?? '[deleted]');
         const entityId = log.entityId || '-';
 
         console.log(
@@ -132,7 +166,7 @@ auditCommand
       console.log('-'.repeat(60));
       console.log(`ID:           ${log.id}`);
       console.log(`Timestamp:    ${new Date(log.createdAt).toISOString()}`);
-      console.log(`Admin ID:     ${log.adminId}`);
+      console.log(`Admin ID:     ${log.adminId ?? '[deleted]'}`);
       if (log.admin) {
         console.log(`Admin Email:  ${log.admin.email}`);
         console.log(`Admin Name:   ${log.admin.displayName || 'N/A'}`);

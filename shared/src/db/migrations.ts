@@ -124,6 +124,13 @@ const EXPECTED_TABLES = [
     requiredColumns: [
       'id', 'session_id', 'collection_id', 'added_at'
     ]
+  },
+  {
+    name: 'admin_audit_logs',
+    requiredColumns: [
+      'id', 'admin_id', 'action', 'entity_type', 'entity_id',
+      'previous_state', 'new_state', 'metadata', 'ip_address', 'created_at'
+    ]
   }
 ];
 
@@ -729,6 +736,26 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       added_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
 
+    -- Admin Audit Logs - Immutable audit trail for security-sensitive operations
+    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+      id TEXT PRIMARY KEY,
+      admin_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      previous_state JSONB,
+      new_state JSONB,
+      metadata JSONB,
+      ip_address TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Indexes for admin audit logs
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_admin ON admin_audit_logs(admin_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_action ON admin_audit_logs(action);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_entity ON admin_audit_logs(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs(created_at);
+
     -- Indexes for collections
     CREATE UNIQUE INDEX IF NOT EXISTS collection_user_name_idx ON collections(user_id, name);
     CREATE INDEX IF NOT EXISTS idx_collections_user ON collections(user_id);
@@ -794,6 +821,11 @@ const INDEX_DEFINITIONS: string[] = [
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_uuid ON events(chat_session_id, ((event_data->>\'uuid\')::text)) WHERE event_data->>\'uuid\' IS NOT NULL',
   // Unique index for event deduplication by UUID column (for newer schema)
   'CREATE UNIQUE INDEX IF NOT EXISTS events_session_uuid_idx ON events(chat_session_id, uuid)',
+  // Admin audit logs indexes
+  'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_admin ON admin_audit_logs(admin_id)',
+  'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_action ON admin_audit_logs(action)',
+  'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_entity ON admin_audit_logs(entity_type, entity_id)',
+  'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs(created_at)',
 ];
 
 /**

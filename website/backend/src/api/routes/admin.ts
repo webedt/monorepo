@@ -446,7 +446,7 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
       return;
     }
 
-    const updatedUser = await db.update(users)
+    const [updatedUser] = await db.update(users)
       .set(updateData)
       .where(eq(users.id, id))
       .returning({
@@ -456,11 +456,6 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
         isAdmin: users.isAdmin,
         createdAt: users.createdAt,
       });
-
-    if (!updatedUser || updatedUser.length === 0) {
-      sendNotFound(res, 'User not found');
-      return;
-    }
 
     // Determine which audit action to use
     const hasAdminStatusChange = isAdmin !== undefined && previousUser.isAdmin !== isAdmin;
@@ -473,13 +468,13 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
       entityId: id,
       previousState: previousUser,
       newState: {
-        email: updatedUser[0].email,
-        displayName: updatedUser[0].displayName,
-        isAdmin: updatedUser[0].isAdmin,
+        email: updatedUser.email,
+        displayName: updatedUser.displayName,
+        isAdmin: updatedUser.isAdmin,
       },
     });
 
-    sendSuccess(res, updatedUser[0]);
+    sendSuccess(res, updatedUser);
   } catch (error) {
     console.error('Error updating user:', error);
     sendInternalError(res, 'Failed to update user');

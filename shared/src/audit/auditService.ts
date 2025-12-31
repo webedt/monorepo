@@ -338,6 +338,15 @@ export async function getAuditStats(
 /**
  * Helper to extract IP address from Express request.
  * Handles common proxy headers.
+ *
+ * SECURITY NOTE: This function trusts the X-Forwarded-For and X-Real-IP headers.
+ * These headers can be spoofed by clients if the application is not behind a
+ * trusted reverse proxy. Ensure your Express app is configured to trust only
+ * the proxy in front of it by setting `app.set('trust proxy', true)` or by
+ * specifying trusted proxy addresses. Without proper configuration, attackers
+ * could forge their IP address in audit logs.
+ *
+ * @see https://expressjs.com/en/guide/behind-proxies.html
  */
 export function getClientIp(req: {
   headers: Record<string, string | string[] | undefined>;

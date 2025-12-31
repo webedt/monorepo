@@ -1289,8 +1289,7 @@ export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];
 export const adminAuditLogs = pgTable('admin_audit_logs', {
   id: text('id').primaryKey(), // UUID
   adminId: text('admin_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'set null' }), // Admin who performed the action
+    .references(() => users.id, { onDelete: 'set null' }), // Admin who performed the action (nullable if admin is deleted)
   action: text('action').notNull(), // The action performed (from AUDIT_ACTIONS)
   entityType: text('entity_type').notNull(), // Type of entity affected (from AUDIT_ENTITY_TYPES)
   entityId: text('entity_id'), // ID of the affected entity (nullable for bulk operations)
