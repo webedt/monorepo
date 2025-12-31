@@ -518,6 +518,9 @@ export class MidiParser {
    * Read a single byte
    */
   private readByte(): number {
+    if (this.position >= this.data.length) {
+      throw new Error('Unexpected end of file while reading byte');
+    }
     return this.data[this.position++];
   }
 
@@ -525,6 +528,9 @@ export class MidiParser {
    * Read a 16-bit unsigned integer (big-endian)
    */
   private readUint16(): number {
+    if (this.position + 2 > this.data.length) {
+      throw new Error('Unexpected end of file while reading 16-bit integer');
+    }
     const value = (this.data[this.position] << 8) | this.data[this.position + 1];
     this.position += 2;
     return value;
@@ -534,6 +540,9 @@ export class MidiParser {
    * Read a 32-bit unsigned integer (big-endian)
    */
   private readUint32(): number {
+    if (this.position + 4 > this.data.length) {
+      throw new Error('Unexpected end of file while reading 32-bit integer');
+    }
     const value =
       (this.data[this.position] << 24) |
       (this.data[this.position + 1] << 16) |
@@ -547,6 +556,9 @@ export class MidiParser {
    * Read a string of specified length
    */
   private readString(length: number): string {
+    if (this.position + length > this.data.length) {
+      throw new Error(`Unexpected end of file while reading string of length ${length}`);
+    }
     let result = '';
     for (let i = 0; i < length; i++) {
       result += String.fromCharCode(this.data[this.position++]);
