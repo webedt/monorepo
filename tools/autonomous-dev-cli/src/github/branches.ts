@@ -1,5 +1,6 @@
 import { GitHubClient } from './client.js';
 import { logger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/errors.js';
 import type { CacheKeyType } from '../utils/githubCache.js';
 
 export interface Branch {
@@ -159,8 +160,8 @@ export function createBranchManager(client: GitHubClient): BranchManager {
             sha: data.commit.sha,
             protected: data.protected,
           };
-        } catch (error: any) {
-          if (error.status === 404) {
+        } catch (error: unknown) {
+          if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
             return null;
           }
           throw error;
@@ -240,16 +241,18 @@ export function createBranchManager(client: GitHubClient): BranchManager {
           sha: baseBranchData.commit.sha,
           protected: false,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Check if branch already exists
-        if (error.status === 422 && error.message?.includes('Reference already exists')) {
+        const statusCode = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+        const errorMessage = getErrorMessage(error);
+        if (statusCode === 422 && errorMessage.includes('Reference already exists')) {
           logger.warn(`Branch '${name}' already exists`);
           const existing = await this.getBranch(name);
           if (existing) {
             return existing;
           }
         }
-        logger.error('Failed to create branch', { error, name, baseBranch });
+        logger.error('Failed to create branch', { error: errorMessage, name, baseBranch });
         throw error;
       }
     },
@@ -262,12 +265,12 @@ export function createBranchManager(client: GitHubClient): BranchManager {
           ref: `heads/${name}`,
         });
         logger.info(`Deleted branch '${name}'`);
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
           logger.warn(`Branch '${name}' not found (may already be deleted)`);
           return;
         }
-        logger.error('Failed to delete branch', { error, name });
+        logger.error('Failed to delete branch', { error: getErrorMessage(error), name });
         throw error;
       }
     },
@@ -324,13 +327,13 @@ export function createBranchManager(client: GitHubClient): BranchManager {
 
           logger.debug(`Retrieved protection rules for branch '${branch}'`, { rules });
           return rules;
-        } catch (error: any) {
-          if (error.status === 404) {
+        } catch (error: unknown) {
+          if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
             // No protection rules exist
             logger.debug(`No protection rules found for branch '${branch}'`);
             return defaultRules;
           }
-          logger.error('Failed to get branch protection rules', { error, branch });
+          logger.error('Failed to get branch protection rules', { error: getErrorMessage(error), branch });
           throw error;
         }
       });
@@ -539,11 +542,11 @@ export function createBranchManager(client: GitHubClient): BranchManager {
           warnings,
           statusChecks,
         };
-      } catch (error: any) {
-        logger.error('Failed to check merge readiness', { error, headBranch, baseBranch });
+      } catch (error: unknown) {
+        logger.error('Failed to check merge readiness', { error: getErrorMessage(error), headBranch, baseBranch });
         return {
           ready: false,
-          blockers: [`Error checking merge readiness: ${error.message}`],
+          blockers: [`Error checking merge readiness: ${getErrorMessage(error)}`],
           warnings: [],
           statusChecks: [],
         };
@@ -576,10 +579,10 @@ export function createBranchManager(client: GitHubClient): BranchManager {
           files: data.files?.map(f => f.filename) ?? [],
           commits: data.total_commits,
         };
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
           // One of the branches doesn't exist
-          logger.warn(`Could not compare branches '${base}' and '${head}'`, { error: error.message });
+          logger.warn(`Could not compare branches '${base}' and '${head}'`, { error: getErrorMessage(error) });
           return {
             ahead: 0,
             behind: 0,
@@ -587,7 +590,7 @@ export function createBranchManager(client: GitHubClient): BranchManager {
             commits: 0,
           };
         }
-        logger.error('Failed to compare branches', { error, base, head });
+        logger.error('Failed to compare branches', { error: getErrorMessage(error), base, head });
         throw error;
       }
     },

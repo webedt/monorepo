@@ -289,8 +289,8 @@ export class HealthServer {
         'X-Response-Time': `${responseTime}ms`,
       });
       res.end(JSON.stringify(result, null, 2));
-    } catch (error: any) {
-      this.sendError(res, 500, `Health check error: ${error.message}`);
+    } catch (error: unknown) {
+      this.sendError(res, 500, `Health check error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -303,8 +303,8 @@ export class HealthServer {
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(status, null, 2));
-    } catch (error: any) {
-      this.sendError(res, 500, `Status check error: ${error.message}`);
+    } catch (error: unknown) {
+      this.sendError(res, 500, `Status check error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -402,11 +402,11 @@ export class HealthServer {
           ...result,
           responseTime: Date.now() - checkStart,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         return {
           name: 'unknown',
           status: 'fail' as const,
-          message: error.message,
+          message: error instanceof Error ? error.message : String(error),
           responseTime: Date.now() - checkStart,
         };
       }

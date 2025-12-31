@@ -343,8 +343,8 @@ export function createChecksManager(client: GitHubClient): ChecksManager {
           `GET /repos/${owner}/${repo}/check-runs/${checkRunId}`,
           { operation: 'getCheckRun', checkRunId }
         );
-      } catch (error: any) {
-        if (error.status === 404) {
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
           return null;
         }
         return handleError(error, 'get check run', { checkRunId });
@@ -602,10 +602,10 @@ export function createChecksManager(client: GitHubClient): ChecksManager {
           `POST /repos/${owner}/${repo}/check-runs/${checkRunId}/rerequest`,
           { operation: 'rerunCheck', checkRunId }
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
         log.error('Failed to re-run check', {
           checkRunId,
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error),
         });
         return false;
       }

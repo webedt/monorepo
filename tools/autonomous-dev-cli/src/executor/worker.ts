@@ -2608,10 +2608,10 @@ Implements #${issue.number}
     try {
       const commitResult = await git.commit(commitMessage);
       commitSha = commitResult.commit;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Use typed GitExecutorError for commit failures
       throw new GitExecutorError(
-        `Failed to commit changes: ${error.message}`,
+        `Failed to commit changes: ${error instanceof Error ? error.message : String(error)}`,
         {
           operation: 'commit',
           context: {
@@ -2625,7 +2625,7 @@ Implements #${issue.number}
             branchName,
             workerId: this.workerId,
           },
-          cause: error,
+          cause: error instanceof Error ? error : undefined,
         }
       );
     }
