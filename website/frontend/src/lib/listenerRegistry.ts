@@ -17,9 +17,14 @@ export interface ListenerEntry {
   options?: AddEventListenerOptions | boolean;
 }
 
+export interface EventSourceHandlerEntry {
+  type: string;
+  handler: EventListener;
+}
+
 export interface EventSourceEntry {
   eventSource: EventSource;
-  handlers: Map<string, EventListener>;
+  handlers: EventSourceHandlerEntry[];
 }
 
 export interface TimerEntry {
@@ -31,7 +36,7 @@ export class ListenerRegistry {
   private listeners: ListenerEntry[] = [];
   private abortController: AbortController | null = null;
   private eventSources: EventSourceEntry[] = [];
-  private timers: TimerEntry[] = [];
+  private timers: Map<ReturnType<typeof setTimeout>, TimerEntry> = new Map();
   private subscriptions: Array<() => void> = [];
 
   /**
@@ -257,7 +262,7 @@ export class ListenerRegistry {
     const eventSource = new EventSource(url, options);
     const entry: EventSourceEntry = {
       eventSource,
-      handlers: new Map(),
+      handlers: [],
     };
     this.eventSources.push(entry);
     return eventSource;
@@ -265,6 +270,7 @@ export class ListenerRegistry {
 
   /**
    * Add an event listener to a tracked EventSource.
+   * Supports multiple handlers per event type.
    * Both the EventSource and listener will be cleaned up on removeAll().
    */
   addEventSourceListener(
@@ -274,7 +280,7 @@ export class ListenerRegistry {
   ): this {
     const entry = this.eventSources.find(e => e.eventSource === eventSource);
     if (entry) {
-      entry.handlers.set(type, handler);
+      entry.handlers.push({ type, handler });
     }
     eventSource.addEventListener(type, handler);
     return this;
@@ -289,7 +295,7 @@ export class ListenerRegistry {
     if (index !== -1) {
       const entry = this.eventSources[index];
       // Remove all event listeners
-      for (const [type, handler] of entry.handlers) {
+      for (const { type, handler } of entry.handlers) {
         entry.eventSource.removeEventListener(type, handler);
       }
       entry.eventSource.close();
@@ -304,7 +310,7 @@ export class ListenerRegistry {
    */
   closeAllEventSources(): void {
     for (const entry of this.eventSources) {
-      for (const [type, handler] of entry.handlers) {
+      for (const { type, handler } of entry.handlers) {
         entry.eventSource.removeEventListener(type, handler);
       }
       entry.eventSource.close();
@@ -329,11 +335,11 @@ export class ListenerRegistry {
    */
   setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
     const id = setTimeout(() => {
-      // Remove from tracking after execution
-      this.timers = this.timers.filter(t => t.id !== id);
+      // Remove from tracking after execution (O(1) with Map)
+      this.timers.delete(id);
       callback();
     }, delay);
-    this.timers.push({ id, type: 'timeout' });
+    this.timers.set(id, { id, type: 'timeout' });
     return id;
   }
 
@@ -343,7 +349,7 @@ export class ListenerRegistry {
    */
   setInterval(callback: () => void, delay: number): ReturnType<typeof setInterval> {
     const id = setInterval(callback, delay);
-    this.timers.push({ id, type: 'interval' });
+    this.timers.set(id, { id, type: 'interval' });
     return id;
   }
 
@@ -352,15 +358,14 @@ export class ListenerRegistry {
    * Returns true if the timer was found and cleared.
    */
   clearTimer(id: ReturnType<typeof setTimeout>): boolean {
-    const index = this.timers.findIndex(t => t.id === id);
-    if (index !== -1) {
-      const entry = this.timers[index];
+    const entry = this.timers.get(id);
+    if (entry) {
       if (entry.type === 'timeout') {
         clearTimeout(entry.id);
       } else {
         clearInterval(entry.id);
       }
-      this.timers.splice(index, 1);
+      this.timers.delete(id);
       return true;
     }
     return false;
@@ -370,21 +375,21 @@ export class ListenerRegistry {
    * Clear all tracked timers.
    */
   clearAllTimers(): void {
-    for (const entry of this.timers) {
+    for (const entry of this.timers.values()) {
       if (entry.type === 'timeout') {
         clearTimeout(entry.id);
       } else {
         clearInterval(entry.id);
       }
     }
-    this.timers = [];
+    this.timers.clear();
   }
 
   /**
    * Get the count of tracked timers.
    */
   get timerCount(): number {
-    return this.timers.length;
+    return this.timers.size;
   }
 
   // ============================================

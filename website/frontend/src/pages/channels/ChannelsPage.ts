@@ -282,6 +282,10 @@ export class ChannelsPage extends Page {
   }
 
   private setupEventListeners(): void {
+    // Clear existing listeners before re-adding to prevent accumulation
+    // when page re-renders (all listeners here are on elements within this.element)
+    this.listeners.removeAll();
+
     // Channel selection - use addListenerToAll for all matching elements
     this.addListenerToAll('.channel-item', 'click', async (e) => {
       const item = e.currentTarget as HTMLElement;
