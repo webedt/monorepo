@@ -698,6 +698,24 @@ export {
   type DataLoaderOptions,
 } from './dataLoader.js';
 
+// Re-export entity-specific DataLoader factories
+export {
+  // User loaders
+  createUserLoader,
+  createUserInfoLoader,
+  createAuthorInfoLoader,
+  formatAuthorInfo,
+  // Session loaders
+  createSessionLoader,
+  createActiveSessionLoader,
+  createSessionSummaryLoader,
+  createUserSessionsLoader,
+  // Types
+  type UserInfo,
+  type AuthorInfo,
+  type SessionSummary,
+} from './loaders/index.js';
+
 // Re-export query logging utilities for development
 export {
   QueryLogger,
