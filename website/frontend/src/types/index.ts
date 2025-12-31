@@ -4,12 +4,28 @@
 
 /**
  * User role - defines access levels for the platform
+ * NOTE: Keep in sync with shared/src/db/schema.ts
  * - user: Basic user access (read-only, limited features)
  * - editor: Full access to the editor suite for game creation
  * - developer: Full access plus development tools and API access
  * - admin: Full administrative access including user management
  */
 export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
+/**
+ * Role hierarchy for permission checks (lower index = less permissions)
+ * NOTE: Keep in sync with shared/src/db/schema.ts
+ */
+export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+
+/**
+ * Check if a role has at least the required permission level
+ */
+export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
+  const userLevel = ROLE_HIERARCHY.indexOf(userRole);
+  const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
+  return userLevel >= requiredLevel;
+}
 
 // User types
 export interface User {

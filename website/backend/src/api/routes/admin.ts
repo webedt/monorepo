@@ -159,9 +159,18 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       updateData.isAdmin = role === 'admin';
     } else if (isAdmin !== undefined) {
       updateData.isAdmin = isAdmin;
-      // Sync role with isAdmin - only change role if going to/from admin
+      // Sync role with isAdmin
       if (isAdmin) {
+        // Promoting to admin
         updateData.role = 'admin';
+      } else {
+        // Demoting from admin - need to get current role to determine new role
+        const [currentUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+        if (currentUser?.role === 'admin') {
+          // Was admin, demote to user (most restrictive non-admin role)
+          updateData.role = 'user';
+        }
+        // If not currently admin, keep existing role
       }
     }
 

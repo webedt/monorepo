@@ -1,13 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, liveChatMessages, eq, and, desc } from '@webedt/shared';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 
 const router = Router();
 
-// All routes require authentication
+// All routes require authentication and editor role (live chat is part of editor suite)
 router.use(requireAuth);
+router.use(requireEditor);
 
 /**
  * GET /api/live-chat/:owner/:repo/:branch/messages

@@ -1,13 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc } from '@webedt/shared';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 
 const router = Router();
 
-// All routes require authentication
+// All routes require authentication and editor role (workspace is part of editor suite)
 router.use(requireAuth);
+router.use(requireEditor);
 
 // Offline threshold: 30 seconds
 const OFFLINE_THRESHOLD_MS = 30 * 1000;

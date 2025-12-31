@@ -7,7 +7,7 @@ import { Router, Request, Response } from 'express';
 import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -73,8 +73,8 @@ router.use((req: Request, res: Response, next) => {
   next();
 });
 
-// Create a new code session
-router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
+// Create a new code session (requires editor role)
+router.post('/create-code-session', requireAuth, requireEditor, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const {
