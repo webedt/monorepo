@@ -14,6 +14,7 @@ import { Router, Request, Response } from 'express';
 import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPaymentService, FRONTEND_URL, FRONTEND_PORT } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { standardRateLimiter, paymentRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -62,7 +63,8 @@ router.use(requireAuth);
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/stats/summary', async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/stats/summary', standardRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
@@ -152,7 +154,8 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/history', async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/history', standardRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
@@ -292,7 +295,8 @@ router.get('/history', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/buy/:gameId', async (req: Request, res: Response) => {
+// Rate limit: 10 requests/minute (paymentRateLimiter - payment operations are sensitive)
+router.post('/buy/:gameId', paymentRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.gameId;
@@ -494,7 +498,8 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/:purchaseId', async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/:purchaseId', standardRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const purchaseId = req.params.purchaseId;
@@ -585,7 +590,8 @@ router.get('/:purchaseId', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
+// Rate limit: 10 requests/minute (paymentRateLimiter - refund operations are sensitive)
+router.post('/:purchaseId/refund', paymentRateLimiter, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const purchaseId = req.params.purchaseId;

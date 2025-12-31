@@ -38,12 +38,15 @@ import { Router, Request, Response } from 'express';
 import { db, games, userLibrary, purchases, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 
 const router = Router();
 
-// All routes require authentication
+// All routes require authentication and rate limiting
+// Rate limit: 100 requests/minute (standardRateLimiter)
 router.use(requireAuth);
+router.use(standardRateLimiter);
 
 /**
  * @openapi

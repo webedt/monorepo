@@ -14,8 +14,13 @@ import fs from 'fs/promises';
 import { fetchFromUrl, validateUrl, WORKSPACE_DIR, db, chatSessions, eq, and } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { fileOperationRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
+
+// Apply rate limiting to all import routes
+// Rate limit: 100 requests/minute (fileOperationRateLimiter - for file import operations)
+router.use(fileOperationRateLimiter);
 
 /**
  * Verify that the user has access to the specified session path

@@ -5,11 +5,16 @@
 
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { searchRateLimiter } from '../middleware/rateLimit.js';
 import { AutocompleteService } from '@webedt/shared';
 
 import type { AutocompleteRequest } from '@webedt/shared';
 
 const router = Router();
+
+// Apply rate limiting to all autocomplete routes
+// Rate limit: 30 requests/minute (searchRateLimiter - for search/autocomplete operations)
+router.use(searchRateLimiter);
 
 /**
  * @openapi
