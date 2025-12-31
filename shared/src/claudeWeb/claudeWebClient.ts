@@ -495,7 +495,36 @@ export class ClaudeWebClient extends AClaudeWebClient {
         }
       });
 
+      let settled = false;
+
+      const cleanup = () => {
+        ws.off('open', openHandler);
+        ws.off('error', errorHandler);
+      };
+
+      const openHandler = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        cleanup();
+        resolve(ws);
+      };
+
+      const errorHandler = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        cleanup();
+        reject(new ClaudeRemoteError(
+          `WebSocket connection error: ${error.message}`,
+          500
+        ));
+      };
+
       const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
         ws.close();
         reject(new ClaudeRemoteError(
           `WebSocket connection timeout after ${timeoutMs}ms`,
@@ -503,18 +532,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
         ));
       }, timeoutMs);
 
-      ws.on('open', () => {
-        clearTimeout(timeout);
-        resolve(ws);
-      });
-
-      ws.on('error', (error: Error) => {
-        clearTimeout(timeout);
-        reject(new ClaudeRemoteError(
-          `WebSocket connection error: ${error.message}`,
-          500
-        ));
-      });
+      ws.on('open', openHandler);
+      ws.on('error', errorHandler);
     });
   }
 
@@ -526,20 +545,20 @@ export class ClaudeWebClient extends AClaudeWebClient {
   ): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const requestId = randomUUID();
+      let settled = false;
 
-      const timeout = setTimeout(() => {
-        reject(new ClaudeRemoteError(
-          `Control request '${subtype}' timeout after ${timeoutMs}ms`,
-          408
-        ));
-      }, timeoutMs);
+      const cleanup = () => {
+        clearTimeout(timeout);
+        ws.off('message', messageHandler);
+      };
 
       const messageHandler = (data: Buffer | string) => {
         try {
           const message = JSON.parse(data.toString());
           if (message.type === 'control_response' && message.response?.request_id === requestId) {
-            clearTimeout(timeout);
-            ws.off('message', messageHandler);
+            if (settled) return;
+            settled = true;
+            cleanup();
 
             if (message.response.subtype === 'success') {
               resolve(message.response);
@@ -561,6 +580,16 @@ export class ClaudeWebClient extends AClaudeWebClient {
           }
         }
       };
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new ClaudeRemoteError(
+          `Control request '${subtype}' timeout after ${timeoutMs}ms`,
+          408
+        ));
+      }, timeoutMs);
 
       ws.on('message', messageHandler);
 
