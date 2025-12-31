@@ -5,7 +5,7 @@
  * problems when fetching session information across multiple operations.
  */
 
-import { inArray, and, eq, isNull } from 'drizzle-orm';
+import { inArray, and, isNull } from 'drizzle-orm';
 import { db, chatSessions } from '../index.js';
 import { DataLoader, createResultMap } from '../dataLoader.js';
 

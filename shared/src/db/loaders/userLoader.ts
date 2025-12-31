@@ -34,6 +34,14 @@ export interface AuthorInfo {
 /**
  * Create a DataLoader for batch loading users by ID
  *
+ * **SECURITY WARNING**: This loader returns full User objects including sensitive
+ * fields (passwordHash, githubAccessToken, claudeAuth, codexAuth, geminiAuth, etc.).
+ * Only use this for internal operations that require full user data.
+ *
+ * For public/display purposes, prefer:
+ * - `createUserInfoLoader()` - safe subset of user fields
+ * - `createAuthorInfoLoader()` - minimal author display info
+ *
  * @example
  * const userLoader = createUserLoader();
  * const [user1, user2] = await Promise.all([

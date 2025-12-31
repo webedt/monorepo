@@ -123,15 +123,18 @@ export function batchContextMiddleware(): RequestHandler {
     // Attach to request
     (req as BatchContextRequest).loaders = loaders;
 
-    // Clean up loaders when response finishes
-    res.on('finish', () => {
-      loaders.context.clear();
-    });
+    // Track cleanup state to prevent double-clearing
+    let cleaned = false;
+    const cleanup = () => {
+      if (!cleaned) {
+        cleaned = true;
+        loaders.context.clear();
+      }
+    };
 
-    // Also clean up on close (client disconnect)
-    res.on('close', () => {
-      loaders.context.clear();
-    });
+    // Clean up loaders when response finishes or client disconnects
+    // 'close' fires in both cases: normal completion and client disconnect
+    res.on('close', cleanup);
 
     next();
   };
