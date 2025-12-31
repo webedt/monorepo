@@ -17,6 +17,8 @@
     "db:check": "tsx src/scripts/db-check.ts",
     "db:backup": "tsx src/scripts/db-backup.ts",
     "db:validate": "tsx src/scripts/db-validate.ts",
+    "db:validate:ci": "tsx src/scripts/db-validate.ts --ci",
+    "db:validate:suggestions": "tsx src/scripts/db-validate.ts --show-suggestions",
     "db:seed-channels": "tsx src/scripts/seed-channels.ts",
     "openapi:generate": "tsx src/scripts/generate-openapi.ts",
     "clean": "rm -rf dist *.tsbuildinfo"

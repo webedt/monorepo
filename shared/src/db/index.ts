@@ -616,6 +616,22 @@ export {
   type BackupResult,
 } from './migrations.js';
 
+// Re-export schema drift detection utilities
+export {
+  detectSchemaDrift,
+  formatSchemaDriftResult,
+  getDrizzleTableSchemas,
+  generateExpectedTables,
+  formatExpectedTablesAsCode,
+  type ColumnInfo,
+  type IndexInfo,
+  type ForeignKeyInfo,
+  type TableSchema,
+  type SchemaDiff,
+  type SchemaDriftResult,
+  type ExpectedTable,
+} from './schemaDrift.js';
+
 // Re-export connection utilities
 export {
   DatabaseConnection,
