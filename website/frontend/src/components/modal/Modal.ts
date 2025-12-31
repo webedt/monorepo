@@ -24,8 +24,13 @@ export class Modal extends Component<HTMLDivElement> {
   private options: ModalOptions;
   private isOpen: boolean = false;
   private previousActiveElement: HTMLElement | null = null;
+  private titleId: string;
+  private focusTrapHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(options: ModalOptions = {}) {
+    // Generate unique ID for accessibility (used for aria-labelledby)
+    const uniqueId = `modal-${Math.random().toString(36).slice(2, 11)}`;
+
     // The component root is the backdrop
     super('div', {
       className: 'modal-backdrop',
@@ -35,6 +40,8 @@ export class Modal extends Component<HTMLDivElement> {
         'aria-hidden': 'true',
       },
     });
+
+    this.titleId = `${uniqueId}-title`;
 
     this.options = {
       size: 'md',
@@ -47,6 +54,11 @@ export class Modal extends Component<HTMLDivElement> {
     this.backdropElement = this.element;
     this.modalElement = document.createElement('div');
     this.modalElement.className = `modal modal--${this.options.size}`;
+
+    // Add aria-labelledby if title will be present
+    if (this.options.title) {
+      this.backdropElement.setAttribute('aria-labelledby', this.titleId);
+    }
 
     this.backdropElement.appendChild(this.modalElement);
 
@@ -65,6 +77,7 @@ export class Modal extends Component<HTMLDivElement> {
       if (title) {
         const titleEl = document.createElement('h2');
         titleEl.className = 'modal-title';
+        titleEl.id = this.titleId;
         titleEl.textContent = title;
         this.headerElement.appendChild(titleEl);
       }
@@ -116,6 +129,71 @@ export class Modal extends Component<HTMLDivElement> {
   }
 
   /**
+   * Check if an element is visible (works with position:fixed elements)
+   */
+  private isElementVisible(el: HTMLElement): boolean {
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  }
+
+  /**
+   * Get all focusable elements within the modal
+   */
+  private getFocusableElements(): HTMLElement[] {
+    const selector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    return Array.from(this.modalElement.querySelectorAll<HTMLElement>(selector))
+      .filter(el => !el.hasAttribute('disabled') && this.isElementVisible(el));
+  }
+
+  /**
+   * Enable focus trap within the modal
+   */
+  private enableFocusTrap(): void {
+    this.focusTrapHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !this.isOpen) return;
+
+      const focusableElements = this.getFocusableElements();
+      if (focusableElements.length === 0) return;
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      // If focus is outside the modal, bring it back
+      if (!this.modalElement.contains(document.activeElement)) {
+        e.preventDefault();
+        firstElement.focus();
+        return;
+      }
+
+      if (e.shiftKey) {
+        // Shift+Tab: if on first element, go to last
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        // Tab: if on last element, go to first
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', this.focusTrapHandler);
+  }
+
+  /**
+   * Disable focus trap
+   */
+  private disableFocusTrap(): void {
+    if (this.focusTrapHandler) {
+      document.removeEventListener('keydown', this.focusTrapHandler);
+      this.focusTrapHandler = null;
+    }
+  }
+
+  /**
    * Open the modal
    */
   open(): this {
@@ -139,13 +217,14 @@ export class Modal extends Component<HTMLDivElement> {
 
     this.isOpen = true;
 
+    // Enable focus trap
+    this.enableFocusTrap();
+
     // Focus first focusable element in modal
     requestAnimationFrame(() => {
-      const focusable = this.modalElement.querySelector<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusable) {
-        focusable.focus();
+      const focusableElements = this.getFocusableElements();
+      if (focusableElements.length > 0) {
+        focusableElements[0].focus();
       }
     });
 
@@ -158,6 +237,9 @@ export class Modal extends Component<HTMLDivElement> {
    */
   close(): this {
     if (!this.isOpen) return this;
+
+    // Disable focus trap
+    this.disableFocusTrap();
 
     this.element.classList.remove('modal-backdrop--open');
     this.element.setAttribute('aria-hidden', 'true');
@@ -193,11 +275,35 @@ export class Modal extends Component<HTMLDivElement> {
    * Set the modal title
    */
   setTitle(title: string): this {
+    // Ensure aria-labelledby is set
+    if (!this.backdropElement.hasAttribute('aria-labelledby')) {
+      this.backdropElement.setAttribute('aria-labelledby', this.titleId);
+    }
+
     if (this.headerElement) {
-      const titleEl = this.headerElement.querySelector('.modal-title');
+      let titleEl = this.headerElement.querySelector('.modal-title');
       if (titleEl) {
         titleEl.textContent = title;
+      } else {
+        // Create title element if it doesn't exist
+        const newTitleEl = document.createElement('h2');
+        newTitleEl.className = 'modal-title';
+        newTitleEl.id = this.titleId;
+        newTitleEl.textContent = title;
+        this.headerElement.prepend(newTitleEl);
       }
+    } else {
+      // Create header with title if header doesn't exist
+      this.headerElement = document.createElement('header');
+      this.headerElement.className = 'modal-header';
+
+      const newTitleEl = document.createElement('h2');
+      newTitleEl.className = 'modal-title';
+      newTitleEl.id = this.titleId;
+      newTitleEl.textContent = title;
+      this.headerElement.appendChild(newTitleEl);
+
+      this.modalElement.prepend(this.headerElement);
     }
     return this;
   }
@@ -260,6 +366,7 @@ export class Modal extends Component<HTMLDivElement> {
    * Cleanup on unmount
    */
   protected onUnmount(): void {
+    this.disableFocusTrap();
     if (this.isOpen) {
       document.body.style.overflow = '';
     }
