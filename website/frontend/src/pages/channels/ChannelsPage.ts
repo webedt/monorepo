@@ -282,36 +282,31 @@ export class ChannelsPage extends Page {
   }
 
   private setupEventListeners(): void {
-    // Channel selection
-    const channelItems = this.$$('.channel-item');
-    channelItems.forEach((item) => {
-      item.addEventListener('click', async () => {
-        const channelId = (item as HTMLElement).dataset.channelId;
-        const channel = this.channels.find((c) => c.id === channelId);
-        if (channel && channel.id !== this.selectedChannel?.id) {
-          this.selectedChannel = channel;
-          this.messageInputValue = '';
-          this.element.innerHTML = this.render();
-          this.setupEventListeners();
-          await this.loadMessages();
+    // Channel selection - use addListenerToAll for all matching elements
+    this.addListenerToAll('.channel-item', 'click', async (e) => {
+      const item = e.currentTarget as HTMLElement;
+      const channelId = item.dataset.channelId;
+      const channel = this.channels.find((c) => c.id === channelId);
+      if (channel && channel.id !== this.selectedChannel?.id) {
+        this.selectedChannel = channel;
+        this.messageInputValue = '';
+        this.element.innerHTML = this.render();
+        this.setupEventListeners();
+        await this.loadMessages();
 
-          // Update URL without full navigation
-          const newUrl = `#/channels/${channel.slug}`;
-          history.replaceState(null, '', newUrl);
-        }
-      });
+        // Update URL without full navigation
+        const newUrl = `#/channels/${channel.slug}`;
+        history.replaceState(null, '', newUrl);
+      }
     });
 
     // Message form
-    const messageForm = this.$('#message-form') as HTMLFormElement;
-    if (messageForm) {
-      messageForm.addEventListener('submit', (e) => this.handleSendMessage(e));
-    }
+    this.addListenerBySelector('#message-form', 'submit', (e) => this.handleSendMessage(e));
 
     // Message input - save value on input
     const messageInput = this.$('#message-input') as HTMLInputElement;
     if (messageInput) {
-      messageInput.addEventListener('input', () => {
+      this.addListener(messageInput, 'input', () => {
         this.messageInputValue = messageInput.value;
       });
       // Focus input
@@ -319,13 +314,10 @@ export class ChannelsPage extends Page {
     }
 
     // Load more messages
-    const loadMoreBtn = this.$('#load-more-messages');
-    if (loadMoreBtn) {
-      loadMoreBtn.addEventListener('click', async () => {
-        this.messageOffset += this.messageLimit;
-        await this.loadMessages(true);
-      });
-    }
+    this.addListenerBySelector('#load-more-messages', 'click', async () => {
+      this.messageOffset += this.messageLimit;
+      await this.loadMessages(true);
+    });
   }
 
   private async handleSendMessage(e: Event): Promise<void> {
