@@ -163,23 +163,20 @@ export class CodePage extends Page<CodePageOptions> {
   protected onMount(): void {
     super.onMount();
 
-    // Setup back button
-    const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
-    if (backBtn) {
-      backBtn.addEventListener('click', () => this.navigate(`/session/${this.options.params?.sessionId}/chat`));
-    }
+    // Setup back button using tracked listener
+    this.addListenerBySelector('[data-action="back"]', 'click', () => {
+      this.navigate(`/session/${this.options.params?.sessionId}/chat`);
+    });
 
-    // Setup refresh button
-    const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => this.loadFiles());
-    }
+    // Setup refresh button using tracked listener
+    this.addListenerBySelector('[data-action="refresh"]', 'click', () => {
+      this.loadFiles();
+    });
 
-    // Setup import from URL button
-    const importBtn = this.$('[data-action="import-url"]') as HTMLButtonElement;
-    if (importBtn) {
-      importBtn.addEventListener('click', () => this.openUrlImportDialog());
-    }
+    // Setup import from URL button using tracked listener
+    this.addListenerBySelector('[data-action="import-url"]', 'click', () => {
+      this.openUrlImportDialog();
+    });
 
     // Setup compare button
     const compareBtnContainer = this.$('.compare-btn-container') as HTMLElement;
@@ -237,15 +234,9 @@ export class CodePage extends Page<CodePageOptions> {
       saveBtn.mount(saveBtnContainer);
     }
 
-    // Setup undo/redo buttons (CodeMirror handles undo/redo internally)
-    const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
-    const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
-    if (undoBtn) {
-      undoBtn.addEventListener('click', () => this.handleUndo());
-    }
-    if (redoBtn) {
-      redoBtn.addEventListener('click', () => this.handleRedo());
-    }
+    // Setup undo/redo buttons using tracked listeners
+    this.addListenerBySelector('[data-action="undo"]', 'click', () => this.handleUndo());
+    this.addListenerBySelector('[data-action="redo"]', 'click', () => this.handleRedo());
 
     // Initialize MultiCursorEditor
     this.initializeMultiCursorEditor();
@@ -299,6 +290,10 @@ export class CodePage extends Page<CodePageOptions> {
       });
       this.lintingPanel.mount(lintingContainer);
     }
+
+    // Setup delegated event handlers for dynamic content (once, not on each render)
+    this.setupFileTreeDelegation();
+    this.setupTabsDelegation();
 
     // Subscribe to offline status changes
     this.unsubscribeOffline = offlineManager.subscribe((status, wasOffline) => {
@@ -578,19 +573,31 @@ export class CodePage extends Page<CodePageOptions> {
     if (!container) return;
 
     container.innerHTML = this.renderTreeNodes(this.fileTree, 0);
+    // Note: Click handlers are delegated via setupFileTreeDelegation() called in onMount()
+  }
 
-    // Add click handlers
-    container.querySelectorAll('.tree-item').forEach(item => {
-      item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const path = (item as HTMLElement).dataset.path;
-        const type = (item as HTMLElement).dataset.type;
-        if (path && type === 'file') {
-          this.openFile(path);
-        } else if (path && type === 'directory') {
-          this.toggleFolder(path);
-        }
-      });
+  /**
+   * Setup delegated event handling for file tree (called once in onMount)
+   */
+  private setupFileTreeDelegation(): void {
+    const container = this.$('.file-tree') as HTMLElement;
+    if (!container) return;
+
+    // Single delegated click handler for all tree items
+    this.addListener(container, 'click', (e: Event) => {
+      const target = e.target as HTMLElement;
+      const treeItem = target.closest('.tree-item') as HTMLElement | null;
+      if (!treeItem) return;
+
+      e.stopPropagation();
+      const path = treeItem.dataset.path;
+      const type = treeItem.dataset.type;
+
+      if (path && type === 'file') {
+        this.openFile(path);
+      } else if (path && type === 'directory') {
+        this.toggleFolder(path);
+      }
     });
   }
 
@@ -766,31 +773,47 @@ export class CodePage extends Page<CodePageOptions> {
         <button class="tab-close" data-action="close-tab" data-index="${i}">×</button>
       </div>
     `).join('');
+    // Note: Click handlers are delegated via setupTabsDelegation() called in onMount()
+  }
 
-    // Add click handlers
-    container.querySelectorAll('.tab').forEach(tab => {
-      tab.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).dataset.action !== 'close-tab') {
-          const index = parseInt((tab as HTMLElement).dataset.index || '0');
-          this.setActiveTab(index);
-        }
-      });
+  /**
+   * Setup delegated event handling for tabs (called once in onMount)
+   */
+  private setupTabsDelegation(): void {
+    const container = this.$('.tabs-bar') as HTMLElement;
+    if (!container) return;
 
-      tab.addEventListener('dblclick', () => {
-        const index = parseInt((tab as HTMLElement).dataset.index || '0');
+    // Single delegated click handler for tabs
+    this.addListener(container, 'click', (e: Event) => {
+      const target = e.target as HTMLElement;
+
+      // Handle close button clicks
+      if (target.dataset.action === 'close-tab') {
+        e.stopPropagation();
+        const index = parseInt(target.dataset.index || '0');
+        this.closeTab(index);
+        return;
+      }
+
+      // Handle tab selection clicks
+      const tabElement = target.closest('.tab') as HTMLElement | null;
+      if (tabElement) {
+        const index = parseInt(tabElement.dataset.index || '0');
+        this.setActiveTab(index);
+      }
+    });
+
+    // Single delegated dblclick handler for tabs
+    this.addListener(container, 'dblclick', (e: Event) => {
+      const target = e.target as HTMLElement;
+      const tabElement = target.closest('.tab') as HTMLElement | null;
+      if (tabElement) {
+        const index = parseInt(tabElement.dataset.index || '0');
         if (this.tabs[index]) {
           this.tabs[index].isPreview = false;
           this.renderTabs();
         }
-      });
-    });
-
-    container.querySelectorAll('[data-action="close-tab"]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const index = parseInt((btn as HTMLElement).dataset.index || '0');
-        this.closeTab(index);
-      });
+      }
     });
   }
 
@@ -881,8 +904,8 @@ export class CodePage extends Page<CodePageOptions> {
 
     this.multiCursorEditor.mount(container);
 
-    // Add keyboard listener for autocomplete (Ctrl/Cmd+Space and dropdown navigation)
-    container.addEventListener('keydown', (e) => this.handleAutocompleteKeydown(e), true);
+    // Add tracked keyboard listener for autocomplete (Ctrl/Cmd+Space and dropdown navigation)
+    this.addListener(container, 'keydown', (e: Event) => this.handleAutocompleteKeydown(e as KeyboardEvent), { capture: true });
   }
 
   /**
