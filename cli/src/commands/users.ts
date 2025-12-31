@@ -1,8 +1,11 @@
 import { Command } from 'commander';
-import { db, users, lucia } from '@webedt/shared';
+import { db, users, lucia, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { eq, desc } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
+
+const validRoles = ROLE_HIERARCHY;
 
 export const usersCommand = new Command('users')
   .description('User management operations');
@@ -11,22 +14,34 @@ usersCommand
   .command('list')
   .description('List all users')
   .option('-l, --limit <number>', 'Limit number of results', '50')
+  .option('-r, --role <role>', 'Filter by role (user, editor, developer, admin)')
   .action(async (options) => {
     try {
       const limit = parseInt(options.limit, 10);
 
-      const userList = await db
+      // Validate role filter if specified
+      const roleFilter = options.role as UserRole | undefined;
+      if (roleFilter && !validRoles.includes(roleFilter)) {
+        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        process.exit(1);
+      }
+
+      // Build query with optional role filter
+      const baseQuery = db
         .select({
           id: users.id,
           email: users.email,
           displayName: users.displayName,
           isAdmin: users.isAdmin,
+          role: users.role,
           preferredProvider: users.preferredProvider,
           createdAt: users.createdAt,
         })
-        .from(users)
-        .orderBy(desc(users.createdAt))
-        .limit(limit);
+        .from(users);
+
+      const userList = roleFilter
+        ? await baseQuery.where(eq(users.role, roleFilter)).orderBy(desc(users.createdAt)).limit(limit)
+        : await baseQuery.orderBy(desc(users.createdAt)).limit(limit);
 
       if (userList.length === 0) {
         console.log('No users found.');
@@ -34,27 +49,27 @@ usersCommand
       }
 
       console.log('\nUsers:');
-      console.log('-'.repeat(110));
+      console.log('-'.repeat(120));
       console.log(
         'ID'.padEnd(38) +
         'Email'.padEnd(30) +
-        'Display Name'.padEnd(20) +
-        'Admin'.padEnd(8) +
+        'Display Name'.padEnd(18) +
+        'Role'.padEnd(12) +
         'Provider'.padEnd(12)
       );
-      console.log('-'.repeat(110));
+      console.log('-'.repeat(120));
 
       for (const user of userList) {
         console.log(
           (user.id || '').padEnd(38) +
           (user.email || '').slice(0, 28).padEnd(30) +
-          (user.displayName || '').slice(0, 18).padEnd(20) +
-          (user.isAdmin ? 'Yes' : 'No').padEnd(8) +
+          (user.displayName || '').slice(0, 16).padEnd(18) +
+          (user.role || 'user').padEnd(12) +
           (user.preferredProvider || 'claude').padEnd(12)
         );
       }
 
-      console.log('-'.repeat(110));
+      console.log('-'.repeat(120));
       console.log(`Total: ${userList.length} user(s)`);
     } catch (error) {
       console.error('Error listing users:', error);
@@ -83,6 +98,7 @@ usersCommand
       console.log(`ID:                ${user.id}`);
       console.log(`Email:             ${user.email}`);
       console.log(`Display Name:      ${user.displayName || 'N/A'}`);
+      console.log(`Role:              ${user.role || 'user'}`);
       console.log(`Is Admin:          ${user.isAdmin ? 'Yes' : 'No'}`);
       console.log(`Preferred Provider:${user.preferredProvider}`);
       console.log(`GitHub Connected:  ${user.githubId ? 'Yes' : 'No'}`);
@@ -102,8 +118,16 @@ usersCommand
   .description('Create a new user')
   .option('-d, --display-name <name>', 'User display name')
   .option('-a, --admin', 'Make user an admin')
+  .option('-r, --role <role>', 'User role (user, editor, developer, admin)')
   .action(async (email, password, options) => {
     try {
+      // Validate role if provided
+      const roleOption = options.role as UserRole | undefined;
+      if (roleOption && !validRoles.includes(roleOption)) {
+        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        process.exit(1);
+      }
+
       const existingUser = await db
         .select()
         .from(users)
@@ -118,19 +142,25 @@ usersCommand
       const userId = randomUUID();
       const passwordHash = await bcrypt.hash(password, 10);
 
+      // Determine role - use explicit role, or derive from admin flag
+      const role: UserRole = roleOption || (options.admin ? 'admin' : 'user');
+      const isAdmin = options.admin || role === 'admin';
+
       await db.insert(users).values({
         id: userId,
         email,
         passwordHash,
         displayName: options.displayName || null,
-        isAdmin: options.admin || false,
+        isAdmin,
+        role,
         preferredProvider: 'claude',
       });
 
       console.log(`\nUser created successfully:`);
       console.log(`  ID:       ${userId}`);
       console.log(`  Email:    ${email}`);
-      console.log(`  Admin:    ${options.admin ? 'Yes' : 'No'}`);
+      console.log(`  Role:     ${role}`);
+      console.log(`  Admin:    ${isAdmin ? 'Yes' : 'No'}`);
     } catch (error) {
       console.error('Error creating user:', error);
       process.exit(1);
@@ -155,14 +185,59 @@ usersCommand
         process.exit(1);
       }
 
+      // Sync role with admin status
+      const role = adminStatus ? 'admin' : (user.role === 'admin' ? 'user' : user.role);
+
       await db
         .update(users)
-        .set({ isAdmin: adminStatus })
+        .set({ isAdmin: adminStatus, role })
         .where(eq(users.id, userId));
 
-      console.log(`User ${user.email} admin status updated to '${adminStatus}'.`);
+      console.log(`User ${user.email}:`);
+      console.log(`  Admin status: ${adminStatus}`);
+      console.log(`  Role: ${role}`);
     } catch (error) {
       console.error('Error updating admin status:', error);
+      process.exit(1);
+    }
+  });
+
+usersCommand
+  .command('set-role <userId> <role>')
+  .description('Set user role (user, editor, developer, admin)')
+  .action(async (userId, roleArg: string) => {
+    try {
+      // Validate role
+      const newRole = roleArg as UserRole;
+      if (!validRoles.includes(newRole)) {
+        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        process.exit(1);
+      }
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!user) {
+        console.error(`User not found: ${userId}`);
+        process.exit(1);
+      }
+
+      // Sync isAdmin with role
+      const isAdmin = newRole === 'admin';
+
+      await db
+        .update(users)
+        .set({ role: newRole, isAdmin })
+        .where(eq(users.id, userId));
+
+      console.log(`User ${user.email}:`);
+      console.log(`  Role: ${newRole}`);
+      console.log(`  Admin: ${isAdmin ? 'Yes' : 'No'}`);
+    } catch (error) {
+      console.error('Error updating role:', error);
       process.exit(1);
     }
   });

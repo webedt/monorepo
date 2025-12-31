@@ -135,6 +135,8 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
 
     // Check if this email should be admin
     const isAdmin = normalizedEmail === 'etdofresh@gmail.com';
+    // Admin users get admin role, others start as basic users
+    const role = isAdmin ? 'admin' : 'user';
 
     // Create user
     const [newUser] = await db
@@ -144,6 +146,7 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
         email: normalizedEmail,
         passwordHash,
         isAdmin,
+        role,
       })
       .returning();
 
@@ -168,6 +171,7 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
         defaultLandingPage: newUser.defaultLandingPage || 'store',
         preferredModel: newUser.preferredModel,
         isAdmin: newUser.isAdmin,
+        role: newUser.role,
         createdAt: newUser.createdAt,
       },
     }, 201);
@@ -304,6 +308,7 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req:
         defaultLandingPage: user.defaultLandingPage || 'store',
         preferredModel: user.preferredModel,
         isAdmin: user.isAdmin,
+        role: user.role || 'user',
         createdAt: user.createdAt,
       },
     });
@@ -507,6 +512,7 @@ router.get('/session', async (req: Request, res: Response) => {
         defaultLandingPage: freshUser.defaultLandingPage || 'store',
         preferredModel: freshUser.preferredModel,
         isAdmin: freshUser.isAdmin,
+        role: freshUser.role || 'user',
         createdAt: freshUser.createdAt,
       },
       session: authReq.authSession,
