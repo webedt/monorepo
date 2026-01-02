@@ -179,6 +179,9 @@ export * from './audit/index.js';
 // Full-Text Search - PostgreSQL tsvector-based indexed search
 export * from './search/index.js';
 
+// MIDI - MIDI file parsing and utilities
+export * from './midi/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
