@@ -478,9 +478,9 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
       // Expand root folders by default
       setExpandedFolders(new Set());
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create branch:', error);
-      setInitError(error.message || 'Failed to create branch');
+      setInitError(error instanceof Error ? error.message : 'Failed to create branch');
     } finally {
       setIsInitializing(false);
     }

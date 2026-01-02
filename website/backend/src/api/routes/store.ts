@@ -68,9 +68,13 @@ import {
   sql,
   parseOffsetPagination,
   buildLegacyPaginatedResponse,
+  buildSearchCondition,
+  buildRankSelect,
+  sanitizeSearchQuery,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { publicShareRateLimiter, standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -109,7 +113,8 @@ const router = Router();
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/featured', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/featured', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
 
@@ -156,7 +161,8 @@ router.get('/featured', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/new', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/new', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
     const daysBack = Math.min(parseInt(req.query.days as string) || 30, 90);
@@ -225,7 +231,8 @@ router.get('/new', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/highlights', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/highlights', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const featuredLimit = Math.min(parseInt(req.query.featuredLimit as string) || 6, 20);
     const newLimit = Math.min(parseInt(req.query.newLimit as string) || 6, 20);
@@ -343,7 +350,8 @@ router.get('/highlights', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/browse', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/browse', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const {
       q: query,
@@ -358,34 +366,41 @@ router.get('/browse', async (req: Request, res: Response) => {
 
     const pagination = parseOffsetPagination(req.query as Record<string, unknown>);
 
-    // Build query - start with published games only
-    let baseQuery = db
-      .select()
-      .from(games)
-      .where(eq(games.status, 'published'));
+    // Use full-text search with tsvector when query is provided
+    // This uses GIN indexes for 10-100x faster searches
+    let allGames: typeof games.$inferSelect[];
 
-    // NOTE: We fetch all published games and filter in-memory due to:
-    // 1. JSON array containment queries (genre/tag filters) require raw SQL
-    // 2. Text search across multiple fields needs in-memory processing
-    // 3. Complex multi-field sorting with dynamic order
-    //
-    // For large catalogs (10k+ games), consider:
-    // - Using PostgreSQL-specific JSON operators (@> for containment)
-    // - Implementing a search service (Elasticsearch/Meilisearch)
-    // - Adding database indexes on frequently-filtered columns
-    let allGames = await baseQuery;
-
-    // Apply filters
     if (query) {
-      const searchTerm = (query as string).toLowerCase();
-      allGames = allGames.filter(
-        (g) =>
-          g.title.toLowerCase().includes(searchTerm) ||
-          g.description?.toLowerCase().includes(searchTerm) ||
-          g.developer?.toLowerCase().includes(searchTerm) ||
-          g.publisher?.toLowerCase().includes(searchTerm)
-      );
+      const sanitized = sanitizeSearchQuery(query as string);
+      if (sanitized) {
+        // Use indexed full-text search
+        allGames = await db
+          .select()
+          .from(games)
+          .where(
+            and(
+              eq(games.status, 'published'),
+              buildSearchCondition(games.searchVector, query as string)
+            )
+          )
+          .orderBy(sql`${buildRankSelect(games.searchVector, query as string)} DESC`);
+      } else {
+        // Empty query - return all published games
+        allGames = await db
+          .select()
+          .from(games)
+          .where(eq(games.status, 'published'));
+      }
+    } else {
+      // No query - return all published games
+      allGames = await db
+        .select()
+        .from(games)
+        .where(eq(games.status, 'published'));
     }
+
+    // Apply additional filters (genre, tag, price) in-memory
+    // NOTE: For large catalogs, consider adding PostgreSQL JSON operators
 
     if (genre) {
       const genreFilter = (genre as string).toLowerCase();
@@ -480,7 +495,8 @@ router.get('/browse', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/games/:id', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/games/:id', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const gameId = req.params.id;
 
@@ -545,7 +561,8 @@ router.get('/games/:id', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/games/:id/owned', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.id;
@@ -592,7 +609,8 @@ router.get('/games/:id/owned', requireAuth, async (req: Request, res: Response) 
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/genres', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/genres', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const allGames = await db
       .select({ genres: games.genres })
@@ -647,7 +665,8 @@ router.get('/genres', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/tags', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/tags', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const allGames = await db
       .select({ tags: games.tags })
@@ -714,7 +733,8 @@ router.get('/tags', async (req: Request, res: Response) => {
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/wishlist/:gameId', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.gameId;
@@ -797,7 +817,8 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.delete('/wishlist/:gameId', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.gameId;
@@ -853,7 +874,8 @@ router.delete('/wishlist/:gameId', requireAuth, async (req: Request, res: Respon
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.get('/wishlist', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.get('/wishlist', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const pagination = parseOffsetPagination(req.query as Record<string, unknown>);

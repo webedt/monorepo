@@ -773,6 +773,11 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
 const COLUMN_DEFINITIONS: Record<string, string> = {
   // chat_sessions columns
   'chat_sessions.remote_session_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS remote_session_id TEXT',
+  'chat_sessions.search_vector': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS search_vector TEXT',
+  // games columns (full-text search)
+  'games.search_vector': 'ALTER TABLE games ADD COLUMN IF NOT EXISTS search_vector TEXT',
+  // community_posts columns (full-text search)
+  'community_posts.search_vector': 'ALTER TABLE community_posts ADD COLUMN IF NOT EXISTS search_vector TEXT',
   'chat_sessions.remote_web_url': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS remote_web_url TEXT',
   'chat_sessions.total_cost': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_cost TEXT',
   'chat_sessions.issue_number': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS issue_number INTEGER',
@@ -826,6 +831,100 @@ const INDEX_DEFINITIONS: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_action ON admin_audit_logs(action)',
   'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_entity ON admin_audit_logs(entity_type, entity_id)',
   'CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs(created_at)',
+  // Full-text search GIN indexes for fast tsvector queries
+  'CREATE INDEX IF NOT EXISTS games_search_vector_idx ON games USING gin(search_vector::tsvector)',
+  'CREATE INDEX IF NOT EXISTS community_posts_search_vector_idx ON community_posts USING gin(search_vector::tsvector)',
+  'CREATE INDEX IF NOT EXISTS chat_sessions_search_vector_idx ON chat_sessions USING gin(search_vector::tsvector)',
+];
+
+/**
+ * Full-text search trigger function definitions
+ * These create/replace trigger functions that auto-update search_vector columns
+ */
+const FULL_TEXT_SEARCH_TRIGGERS: string[] = [
+  // Games table: combines title (A), description (B), developer (C), publisher (C)
+  `CREATE OR REPLACE FUNCTION games_search_vector_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vector := (
+    setweight(to_tsvector('english', COALESCE(NEW.title, '')), 'A') ||
+    setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'B') ||
+    setweight(to_tsvector('english', COALESCE(NEW.developer, '')), 'C') ||
+    setweight(to_tsvector('english', COALESCE(NEW.publisher, '')), 'C')
+  )::text;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql`,
+
+  // Community posts table: combines title (A), content (B)
+  `CREATE OR REPLACE FUNCTION community_posts_search_vector_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vector := (
+    setweight(to_tsvector('english', COALESCE(NEW.title, '')), 'A') ||
+    setweight(to_tsvector('english', COALESCE(NEW.content, '')), 'B')
+  )::text;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql`,
+
+  // Chat sessions table: combines user_request (A), repository_name (B), branch (C)
+  `CREATE OR REPLACE FUNCTION chat_sessions_search_vector_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vector := (
+    setweight(to_tsvector('english', COALESCE(NEW.user_request, '')), 'A') ||
+    setweight(to_tsvector('english', COALESCE(NEW.repository_name, '')), 'B') ||
+    setweight(to_tsvector('english', COALESCE(NEW.branch, '')), 'C')
+  )::text;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql`,
+
+  // Create triggers
+  `DROP TRIGGER IF EXISTS games_search_vector_trigger ON games`,
+  `CREATE TRIGGER games_search_vector_trigger
+    BEFORE INSERT OR UPDATE ON games
+    FOR EACH ROW
+    EXECUTE FUNCTION games_search_vector_update()`,
+
+  `DROP TRIGGER IF EXISTS community_posts_search_vector_trigger ON community_posts`,
+  `CREATE TRIGGER community_posts_search_vector_trigger
+    BEFORE INSERT OR UPDATE ON community_posts
+    FOR EACH ROW
+    EXECUTE FUNCTION community_posts_search_vector_update()`,
+
+  `DROP TRIGGER IF EXISTS chat_sessions_search_vector_trigger ON chat_sessions`,
+  `CREATE TRIGGER chat_sessions_search_vector_trigger
+    BEFORE INSERT OR UPDATE ON chat_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION chat_sessions_search_vector_update()`,
+];
+
+/**
+ * SQL to populate search vectors for existing rows
+ */
+const POPULATE_SEARCH_VECTORS: string[] = [
+  `UPDATE games
+   SET search_vector = (
+     setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
+     setweight(to_tsvector('english', COALESCE(description, '')), 'B') ||
+     setweight(to_tsvector('english', COALESCE(developer, '')), 'C') ||
+     setweight(to_tsvector('english', COALESCE(publisher, '')), 'C')
+   )::text
+   WHERE search_vector IS NULL`,
+
+  `UPDATE community_posts
+   SET search_vector = (
+     setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
+     setweight(to_tsvector('english', COALESCE(content, '')), 'B')
+   )::text
+   WHERE search_vector IS NULL`,
+
+  `UPDATE chat_sessions
+   SET search_vector = (
+     setweight(to_tsvector('english', COALESCE(user_request, '')), 'A') ||
+     setweight(to_tsvector('english', COALESCE(repository_name, '')), 'B') ||
+     setweight(to_tsvector('english', COALESCE(branch, '')), 'C')
+   )::text
+   WHERE search_vector IS NULL`,
 ];
 
 /**
@@ -856,12 +955,13 @@ async function deduplicateEventsByUuid(pool: pg.Pool): Promise<number> {
  * Ensure the database schema is up to date by adding any missing columns
  * This runs after initial schema creation or migrations to handle schema drift
  */
-export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[]; duplicatesRemoved: number }> {
+export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[]; duplicatesRemoved: number; fullTextSearchSetup: boolean }> {
   const columnsAdded: string[] = [];
   const columnsRemoved: string[] = [];
   const indexesCreated: string[] = [];
   const errors: string[] = [];
   let duplicatesRemoved = 0;
+  let fullTextSearchSetup = false;
 
   // Drop deprecated columns
   const COLUMNS_TO_DROP: { table: string; column: string }[] = [
@@ -945,7 +1045,53 @@ export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdde
     }
   }
 
-  return { columnsAdded, columnsRemoved, indexesCreated, errors, duplicatesRemoved };
+  // Set up full-text search triggers if search_vector columns were added
+  const searchVectorColumnsAdded = columnsAdded.some(col => col.includes('search_vector'));
+  if (searchVectorColumnsAdded) {
+    try {
+      // Create trigger functions and triggers
+      for (const triggerSql of FULL_TEXT_SEARCH_TRIGGERS) {
+        await pool.query(triggerSql);
+      }
+
+      // Populate existing rows with search vectors
+      for (const populateSql of POPULATE_SEARCH_VECTORS) {
+        await pool.query(populateSql);
+      }
+
+      fullTextSearchSetup = true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`Failed to setup full-text search: ${errorMessage}`);
+    }
+  } else {
+    // Even if columns weren't just added, ensure triggers exist (idempotent)
+    try {
+      // Check if any of the tables have the search_vector column
+      const tablesWithSearchVector = await pool.query(`
+        SELECT table_name FROM information_schema.columns
+        WHERE table_schema = 'public'
+        AND column_name = 'search_vector'
+        AND table_name IN ('games', 'community_posts', 'chat_sessions')
+      `);
+
+      if (tablesWithSearchVector.rows.length > 0) {
+        // Tables have search_vector - ensure triggers are set up
+        for (const triggerSql of FULL_TEXT_SEARCH_TRIGGERS) {
+          await pool.query(triggerSql);
+        }
+        // Populate any rows that don't have search vectors yet
+        for (const populateSql of POPULATE_SEARCH_VECTORS) {
+          await pool.query(populateSql);
+        }
+        fullTextSearchSetup = true;
+      }
+    } catch (error) {
+      // Ignore errors - triggers may already exist or tables may not exist
+    }
+  }
+
+  return { columnsAdded, columnsRemoved, indexesCreated, errors, duplicatesRemoved, fullTextSearchSetup };
 }
 
 /**

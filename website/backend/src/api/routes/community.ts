@@ -29,6 +29,7 @@ import {
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { publicShareRateLimiter, standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -115,7 +116,8 @@ const router = Router();
  *         $ref: '#/components/responses/InternalError'
  */
 // Get community posts (public)
-router.get('/posts', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/posts', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const { type, gameId, sort = 'createdAt', order = 'desc' } = req.query;
     const { limit, offset } = getPaginationParams({
@@ -202,7 +204,8 @@ router.get('/posts', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get single post with comments
-router.get('/posts/:id', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/posts/:id', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const postId = req.params.id;
 
@@ -302,7 +305,8 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Create a post (requires auth)
-router.post('/posts', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/posts', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const { type, title, content, gameId, rating, images } = req.body;
@@ -464,7 +468,8 @@ router.post('/posts', requireAuth, async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Update a post
-router.patch('/posts/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.patch('/posts/:id', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const postId = req.params.id;
@@ -551,7 +556,8 @@ router.patch('/posts/:id', requireAuth, async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Delete a post
-router.delete('/posts/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.delete('/posts/:id', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const postId = req.params.id;
@@ -646,7 +652,8 @@ router.delete('/posts/:id', requireAuth, async (req: Request, res: Response) => 
  *         $ref: '#/components/responses/InternalError'
  */
 // Add a comment
-router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/posts/:id/comments', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const postId = req.params.id;
@@ -763,7 +770,8 @@ router.post('/posts/:id/comments', requireAuth, async (req: Request, res: Respon
  *         $ref: '#/components/responses/InternalError'
  */
 // Delete a comment
-router.delete('/comments/:id', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.delete('/comments/:id', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const commentId = req.params.id;
@@ -874,7 +882,8 @@ router.delete('/comments/:id', requireAuth, async (req: Request, res: Response) 
  *         $ref: '#/components/responses/InternalError'
  */
 // Vote on a post
-router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/posts/:id/vote', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const postId = req.params.id;
@@ -1030,7 +1039,8 @@ router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) 
  *         $ref: '#/components/responses/InternalError'
  */
 // Vote on a comment
-router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Response) => {
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.post('/comments/:id/vote', standardRateLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const commentId = req.params.id;
@@ -1172,7 +1182,8 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
  *         $ref: '#/components/responses/InternalError'
  */
 // Get user's posts
-router.get('/users/:userId/posts', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/users/:userId/posts', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId;
     const { limit, offset } = getPaginationParams({
@@ -1266,7 +1277,8 @@ router.get('/users/:userId/posts', async (req: Request, res: Response) => {
  *         $ref: '#/components/responses/InternalError'
  */
 // Get reviews for a game
-router.get('/games/:gameId/reviews', async (req: Request, res: Response) => {
+// Rate limit: 30 requests/minute (publicShareRateLimiter)
+router.get('/games/:gameId/reviews', publicShareRateLimiter, async (req: Request, res: Response) => {
   try {
     const gameId = req.params.gameId;
     const { limit, offset } = getPaginationParams({

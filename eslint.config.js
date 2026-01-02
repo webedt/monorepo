@@ -61,6 +61,24 @@ export default [
         caughtErrors: 'all',
         caughtErrorsIgnorePattern: '^_',
       }],
+
+      /**
+       * Disallow explicit 'any' type annotations
+       *
+       * Using 'any' loses type safety. Particularly important in catch blocks:
+       *
+       * Bad:  catch (error: any) { ... }
+       * Good: catch (error: unknown) { ... }
+       *
+       * When handling unknown errors, use type guards from shared/src/utils/errorTypes.ts:
+       * - error instanceof Error for standard errors
+       * - isValidationError(error) for ValidationError
+       * - isAuthenticationError(error) for AuthenticationError
+       * - isDomainError(error) for any DomainError subclass
+       *
+       * Set to 'warn' to flag issues without breaking builds during migration.
+       */
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
 ];

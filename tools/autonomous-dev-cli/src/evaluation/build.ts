@@ -530,9 +530,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildResult> {
         });
 
         combinedOutput += `\n=== ${command} ===\n${output}`;
-      } catch (execError: any) {
-        const stderr = execError.stderr?.toString() || '';
-        const stdout = execError.stdout?.toString() || '';
+      } catch (execError: unknown) {
+        const stderr = execError && typeof execError === 'object' && 'stderr' in execError
+          ? String(execError.stderr) : '';
+        const stdout = execError && typeof execError === 'object' && 'stdout' in execError
+          ? String(execError.stdout) : '';
 
         logger.error(`Build failed: ${command}`, { stderr, stdout });
 
@@ -579,28 +581,29 @@ export async function runBuild(options: BuildOptions): Promise<BuildResult> {
     logger.operationComplete('Build', 'runBuild', true, operationMetadata);
 
     return result;
-  } catch (error: any) {
+  } catch (error: unknown) {
     const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Record error in phase tracking
     if (correlationId) {
       recordPhaseError(correlationId, 'evaluation', 'BUILD_FAILED');
       endPhase(correlationId, 'evaluation', false, {
         operation: 'build',
-        error: error.message,
+        error: errorMessage,
         duration,
       });
     }
 
     // Log operation failure
     const operationMetadata = finalizeOperationContext(operationContext, false, {
-      error: error.message,
+      error: errorMessage,
       duration,
     });
     logger.operationComplete('Build', 'runBuild', false, operationMetadata);
 
     logger.error('Build verification failed', {
-      error: error.message,
+      error: errorMessage,
       correlationId,
       duration,
     });
@@ -609,7 +612,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildResult> {
       success: false,
       output: '',
       duration,
-      error: error.message,
+      error: errorMessage,
     };
   }
 }
@@ -837,9 +840,11 @@ export async function runTypeCheck(repoPath: string): Promise<BuildResult> {
       output,
       duration: Date.now() - startTime,
     };
-  } catch (error: any) {
-    const stderr = error.stderr?.toString() || '';
-    const stdout = error.stdout?.toString() || '';
+  } catch (error: unknown) {
+    const stderr = error && typeof error === 'object' && 'stderr' in error
+      ? String(error.stderr) : '';
+    const stdout = error && typeof error === 'object' && 'stdout' in error
+      ? String(error.stdout) : '';
 
     logger.error('Type check failed');
 

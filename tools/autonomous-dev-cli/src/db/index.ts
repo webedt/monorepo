@@ -651,12 +651,16 @@ export async function updateChatSession(
       .where(eq(chatSessions.id, sessionId));
 
     logger.debug(`Updated chat session: ${sessionId}`, { updates });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Handle unique constraint violation on session_path (PostgreSQL error code 23505)
     // Check both direct error code and nested cause
-    const isUniqueViolation = error.code === '23505' ||
-      error.cause?.code === '23505' ||
-      (error.message && error.message.includes('unique constraint') && error.message.includes('session_path'));
+    const errorCode = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    const errorCause = error && typeof error === 'object' && 'cause' in error ? error.cause : undefined;
+    const causeCode = errorCause && typeof errorCause === 'object' && 'code' in errorCause ? errorCause.code : undefined;
+    const errorMessage = error instanceof Error ? error.message : '';
+    const isUniqueViolation = errorCode === '23505' ||
+      causeCode === '23505' ||
+      (errorMessage && errorMessage.includes('unique constraint') && errorMessage.includes('session_path'));
 
     if (isUniqueViolation && updates.sessionPath) {
       logger.warn(`Duplicate session_path, updating without it: ${updates.sessionPath}`);

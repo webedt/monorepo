@@ -270,6 +270,10 @@ async function doInitialize(): Promise<void> {
       }
     }
 
+    if (schemaUpdate.fullTextSearchSetup) {
+      console.log('  ✅ Full-text search triggers and indexes configured');
+    }
+
     if (schemaUpdate.errors.length > 0) {
       console.warn('  Schema update warnings:');
       for (const err of schemaUpdate.errors) {
@@ -277,7 +281,7 @@ async function doInitialize(): Promise<void> {
       }
     }
 
-    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0 && schemaUpdate.duplicatesRemoved === 0) {
+    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0 && schemaUpdate.duplicatesRemoved === 0 && !schemaUpdate.fullTextSearchSetup) {
       console.log('  ✅ Schema is up to date');
     }
 
@@ -627,6 +631,22 @@ export {
   type BackupResult,
 } from './migrations.js';
 
+// Re-export schema drift detection utilities
+export {
+  detectSchemaDrift,
+  formatSchemaDriftResult,
+  getDrizzleTableSchemas,
+  generateExpectedTables,
+  formatExpectedTablesAsCode,
+  type ColumnInfo,
+  type IndexInfo,
+  type ForeignKeyInfo,
+  type TableSchema,
+  type SchemaDiff,
+  type SchemaDriftResult,
+  type ExpectedTable,
+} from './schemaDrift.js';
+
 // Re-export connection utilities
 export {
   DatabaseConnection,
@@ -708,6 +728,24 @@ export {
   coalesceQueries,
   type DataLoaderOptions,
 } from './dataLoader.js';
+
+// Re-export entity-specific DataLoader factories
+export {
+  // User loaders
+  createUserLoader,
+  createUserInfoLoader,
+  createAuthorInfoLoader,
+  formatAuthorInfo,
+  // Session loaders
+  createSessionLoader,
+  createActiveSessionLoader,
+  createSessionSummaryLoader,
+  createUserSessionsLoader,
+  // Types
+  type UserInfo,
+  type AuthorInfo,
+  type SessionSummary,
+} from './loaders/index.js';
 
 // Re-export query logging utilities for development
 export {

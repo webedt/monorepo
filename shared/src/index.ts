@@ -176,6 +176,9 @@ export * from './geometry/index.js';
 // Audit - Admin audit trail for security-sensitive operations
 export * from './audit/index.js';
 
+// Full-Text Search - PostgreSQL tsvector-based indexed search
+export * from './search/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================

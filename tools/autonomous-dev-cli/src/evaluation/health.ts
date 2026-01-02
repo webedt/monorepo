@@ -309,13 +309,13 @@ async function checkUrl(
       }
 
       lastError = `Expected status ${expectedStatus}, got ${response.status}`;
-    } catch (error: any) {
+    } catch (error: unknown) {
       const responseTime = Date.now() - startTime;
 
-      if (error.name === 'AbortError') {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
         lastError = `Request timed out after ${timeout}ms`;
       } else {
-        lastError = error.message || 'Unknown error';
+        lastError = error instanceof Error ? error.message : 'Unknown error';
       }
 
       if (attempt === retries) {

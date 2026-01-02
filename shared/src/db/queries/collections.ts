@@ -192,6 +192,7 @@ export async function getCollectionSessions(
       shareExpiresAt: chatSessions.shareExpiresAt,
       version: chatSessions.version,
       organizationId: chatSessions.organizationId,
+      searchVector: chatSessions.searchVector,
       addedAt: sessionCollections.addedAt,
     })
     .from(sessionCollections)

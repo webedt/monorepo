@@ -9,11 +9,16 @@ import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { requireAuth } from '../middleware/auth.js';
 import { validatePathParam } from '../middleware/pathValidation.js';
+import { standardRateLimiter } from '../middleware/rateLimit.js';
 import { logger, parseDiff } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import type { ParsedDiff } from '@webedt/shared';
 
 const router = Router();
+
+// Apply rate limiting to all diff routes
+// Rate limit: 100 requests/minute (standardRateLimiter)
+router.use(standardRateLimiter);
 
 interface CompareResult {
   diff: ParsedDiff;
