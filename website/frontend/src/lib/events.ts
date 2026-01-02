@@ -1,6 +1,13 @@
 /**
  * SSE/EventSource Utilities
- * Manages Server-Sent Events connections with retry logic
+ * Manages Server-Sent Events connections with retry logic and stream recovery
+ *
+ * Features:
+ * - Connection state management with auto-reconnect
+ * - Event buffering with sequence validation
+ * - Gap detection and automatic replay requests
+ * - Connection quality monitoring
+ * - Last-Event-ID persistence for reliable resumption
  */
 
 /** Storage key prefix for lastEventId persistence */
@@ -9,9 +16,161 @@ const STORAGE_KEY_PREFIX = 'sse_lastEventId_';
 /** TTL for stored lastEventId in milliseconds (5 minutes) */
 const LAST_EVENT_ID_TTL_MS = 5 * 60 * 1000;
 
+/** Maximum events to buffer for sequence validation */
+const MAX_EVENT_BUFFER_SIZE = 100;
+
+/** Time window to check for gaps (ms) */
+const GAP_DETECTION_WINDOW_MS = 5000;
+
+/** Minimum time between replay requests to avoid flooding (ms) */
+const MIN_REPLAY_REQUEST_INTERVAL_MS = 2000;
+
 interface StoredEventId {
   eventId: string;
   timestamp: number;
+}
+
+/** Connection quality states */
+export type ConnectionQuality = 'excellent' | 'good' | 'poor' | 'disconnected';
+
+/** Connection quality metrics */
+export interface ConnectionMetrics {
+  /** Current connection quality */
+  quality: ConnectionQuality;
+  /** Number of reconnection attempts */
+  reconnectAttempts: number;
+  /** Total events received in current session */
+  eventsReceived: number;
+  /** Number of events that were replayed (recovered) */
+  eventsReplayed: number;
+  /** Number of detected gaps */
+  gapsDetected: number;
+  /** Last event ID received */
+  lastEventId: string | null;
+  /** Latency estimate (ms) based on heartbeat */
+  latencyMs: number | null;
+  /** Whether currently replaying events */
+  isReplaying: boolean;
+  /** Time of last successful event */
+  lastEventTime: number | null;
+}
+
+/** Buffered event for sequence tracking */
+interface BufferedEvent {
+  id: string;
+  sequenceNumber: number;
+  type: string;
+  data: unknown;
+  timestamp: number;
+}
+
+/** Event buffer for sequence validation and gap detection */
+class EventBuffer {
+  private buffer: BufferedEvent[] = [];
+  private lastProcessedSequence: number = 0;
+  private gapsDetected: number = 0;
+
+  /**
+   * Add an event to the buffer and check for gaps
+   * @returns true if a gap was detected
+   */
+  add(eventId: string, type: string, data: unknown): { hasGap: boolean; missingFrom?: number; missingTo?: number } {
+    // Parse sequence number from event ID (expected format: numeric ID or "sequence_X")
+    const sequenceNumber = this.parseSequenceNumber(eventId);
+    if (sequenceNumber === null) {
+      // Non-sequential event, just track it
+      this.buffer.push({
+        id: eventId,
+        sequenceNumber: -1,
+        type,
+        data,
+        timestamp: Date.now(),
+      });
+      this.trimBuffer();
+      return { hasGap: false };
+    }
+
+    const expectedSequence = this.lastProcessedSequence + 1;
+    const hasGap = this.lastProcessedSequence > 0 && sequenceNumber > expectedSequence;
+
+    if (hasGap) {
+      this.gapsDetected++;
+    }
+
+    this.buffer.push({
+      id: eventId,
+      sequenceNumber,
+      type,
+      data,
+      timestamp: Date.now(),
+    });
+
+    this.lastProcessedSequence = Math.max(this.lastProcessedSequence, sequenceNumber);
+    this.trimBuffer();
+
+    return hasGap
+      ? { hasGap: true, missingFrom: expectedSequence, missingTo: sequenceNumber - 1 }
+      : { hasGap: false };
+  }
+
+  /**
+   * Parse sequence number from event ID
+   */
+  private parseSequenceNumber(eventId: string): number | null {
+    // Direct numeric ID (database ID)
+    const numericId = parseInt(eventId, 10);
+    if (!isNaN(numericId) && numericId > 0) {
+      return numericId;
+    }
+
+    // Format: "sequence_X" or similar
+    const match = eventId.match(/(?:sequence[_-])?(\d+)/i);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+
+    return null;
+  }
+
+  /**
+   * Keep buffer size manageable
+   */
+  private trimBuffer(): void {
+    if (this.buffer.length > MAX_EVENT_BUFFER_SIZE) {
+      this.buffer = this.buffer.slice(-MAX_EVENT_BUFFER_SIZE);
+    }
+  }
+
+  /**
+   * Get the last known sequence number
+   */
+  getLastSequence(): number {
+    return this.lastProcessedSequence;
+  }
+
+  /**
+   * Get total gaps detected
+   */
+  getGapsDetected(): number {
+    return this.gapsDetected;
+  }
+
+  /**
+   * Reset the buffer (e.g., on new connection)
+   */
+  reset(): void {
+    this.buffer = [];
+    this.lastProcessedSequence = 0;
+  }
+
+  /**
+   * Check if there are recent events (for staleness detection)
+   */
+  hasRecentEvents(windowMs: number = GAP_DETECTION_WINDOW_MS): boolean {
+    if (this.buffer.length === 0) return false;
+    const latest = this.buffer[this.buffer.length - 1];
+    return Date.now() - latest.timestamp < windowMs;
+  }
 }
 
 /**
@@ -122,6 +281,14 @@ export interface SSEOptions {
   onError?: (error: Event) => void;
   /** Called when connection closes */
   onClose?: () => void;
+  /** Called when connection quality changes */
+  onQualityChange?: (quality: ConnectionQuality, metrics: ConnectionMetrics) => void;
+  /** Called when a gap is detected in event sequence */
+  onGapDetected?: (fromId: number, toId: number) => void;
+  /** Called during replay (recovery) of missed events */
+  onReplayStart?: (fromEventId: string) => void;
+  /** Called when replay completes */
+  onReplayEnd?: (eventsReplayed: number) => void;
   /** Auto-reconnect on error */
   reconnect?: boolean;
   /** Max reconnect attempts (default: 5) */
@@ -132,6 +299,10 @@ export interface SSEOptions {
   eventTypes?: string[];
   /** Clear stored lastEventId when connection closes (default: false) */
   clearStorageOnClose?: boolean;
+  /** Enable automatic gap detection and replay (default: true) */
+  enableGapDetection?: boolean;
+  /** Session ID for replay requests */
+  sessionId?: string;
 }
 
 export class EventSourceManager {
@@ -144,6 +315,26 @@ export class EventSourceManager {
   private lastEventId: string | null = null;
   /** Track registered event listeners for proper cleanup */
   private registeredListeners: Array<{ type: string; handler: EventListener }> = [];
+  /** Event buffer for sequence tracking and gap detection */
+  private eventBuffer: EventBuffer = new EventBuffer();
+  /** Connection quality metrics */
+  private metrics: ConnectionMetrics = {
+    quality: 'disconnected',
+    reconnectAttempts: 0,
+    eventsReceived: 0,
+    eventsReplayed: 0,
+    gapsDetected: 0,
+    lastEventId: null,
+    latencyMs: null,
+    isReplaying: false,
+    lastEventTime: null,
+  };
+  /** Last time a replay was requested (to prevent flooding) */
+  private lastReplayRequestTime: number = 0;
+  /** Heartbeat check interval */
+  private heartbeatCheckInterval: number | null = null;
+  /** Last known quality for change detection */
+  private lastReportedQuality: ConnectionQuality = 'disconnected';
 
   constructor(url: string, options: SSEOptions = {}) {
     this.url = url;
@@ -152,11 +343,144 @@ export class EventSourceManager {
       maxRetries: 5,
       retryDelay: 1000,
       clearStorageOnClose: false,
+      enableGapDetection: true,
       ...options,
     };
 
     // Restore lastEventId from sessionStorage for seamless resume across page reloads
     this.lastEventId = restoreLastEventId(url);
+    this.metrics.lastEventId = this.lastEventId;
+  }
+
+  /**
+   * Get current connection metrics
+   */
+  getMetrics(): ConnectionMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Update connection quality based on current state
+   */
+  private updateConnectionQuality(): void {
+    let quality: ConnectionQuality;
+
+    if (!this.eventSource || this.eventSource.readyState === EventSource.CLOSED) {
+      quality = 'disconnected';
+    } else if (this.eventSource.readyState === EventSource.CONNECTING) {
+      quality = 'poor';
+    } else if (this.retryCount > 2 || this.metrics.gapsDetected > 2) {
+      quality = 'poor';
+    } else if (this.retryCount > 0 || this.metrics.gapsDetected > 0) {
+      quality = 'good';
+    } else {
+      quality = 'excellent';
+    }
+
+    this.metrics.quality = quality;
+
+    // Notify if quality changed
+    if (quality !== this.lastReportedQuality) {
+      this.lastReportedQuality = quality;
+      this.options.onQualityChange?.(quality, this.getMetrics());
+    }
+  }
+
+  /**
+   * Request replay of missing events from server
+   */
+  private async requestReplay(fromEventId: string): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastReplayRequestTime < MIN_REPLAY_REQUEST_INTERVAL_MS) {
+      console.log('[SSE] Skipping replay request - too soon after last request');
+      return;
+    }
+
+    this.lastReplayRequestTime = now;
+    this.metrics.isReplaying = true;
+    this.options.onReplayStart?.(fromEventId);
+
+    try {
+      // Extract session ID from URL or use provided sessionId
+      const sessionId = this.options.sessionId || this.extractSessionId();
+      if (!sessionId) {
+        console.warn('[SSE] Cannot request replay: no session ID available');
+        return;
+      }
+
+      // Request replay from server
+      const replayUrl = `/api/resume/resume/${sessionId}?lastEventId=${encodeURIComponent(fromEventId)}`;
+      console.log('[SSE] Requesting replay from:', replayUrl);
+
+      const response = await fetch(replayUrl, { credentials: 'include' });
+      if (!response.ok) {
+        console.error('[SSE] Replay request failed:', response.status);
+        return;
+      }
+
+      // The replay will come through the SSE stream - we just need to trigger it
+      // Actually for reconnection, we already pass lastEventId in the URL
+      // This method is for explicit replay requests when we detect a gap
+      console.log('[SSE] Replay requested successfully');
+    } catch (error) {
+      console.error('[SSE] Error requesting replay:', error);
+    } finally {
+      this.metrics.isReplaying = false;
+    }
+  }
+
+  /**
+   * Extract session ID from URL
+   */
+  private extractSessionId(): string | null {
+    try {
+      const urlObj = new URL(this.url, window.location.origin);
+      // Try to match /resume/:sessionId or /sessions/:sessionId patterns
+      const match = urlObj.pathname.match(/\/(?:resume|sessions)\/([^/]+)/);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Start heartbeat monitoring for connection quality
+   */
+  private startHeartbeatMonitoring(): void {
+    this.stopHeartbeatMonitoring();
+    this.heartbeatCheckInterval = window.setInterval(() => {
+      this.checkConnectionHealth();
+    }, 5000);
+  }
+
+  /**
+   * Stop heartbeat monitoring
+   */
+  private stopHeartbeatMonitoring(): void {
+    if (this.heartbeatCheckInterval !== null) {
+      clearInterval(this.heartbeatCheckInterval);
+      this.heartbeatCheckInterval = null;
+    }
+  }
+
+  /**
+   * Check connection health based on recent activity
+   */
+  private checkConnectionHealth(): void {
+    // If we haven't received any events recently and connection is supposedly open
+    if (this.eventSource?.readyState === EventSource.OPEN) {
+      const timeSinceLastEvent = this.metrics.lastEventTime
+        ? Date.now() - this.metrics.lastEventTime
+        : null;
+
+      // If no events in 30 seconds (and heartbeats should be every 15s), consider it poor
+      if (timeSinceLastEvent && timeSinceLastEvent > 30000) {
+        if (this.metrics.quality !== 'poor') {
+          this.metrics.quality = 'poor';
+          this.options.onQualityChange?.('poor', this.getMetrics());
+        }
+      }
+    }
   }
 
   /**
@@ -185,21 +509,25 @@ export class EventSourceManager {
     this.eventSource.onopen = () => {
       console.log('[SSE] Connected');
       this.retryCount = 0;
+      this.metrics.reconnectAttempts = this.retryCount;
+      this.updateConnectionQuality();
+      this.startHeartbeatMonitoring();
       this.options.onOpen?.();
     };
 
     this.eventSource.onmessage = (event) => {
       // Track last event ID for reliable resumption on reconnect and page reload
       if (event.lastEventId) {
-        this.lastEventId = event.lastEventId;
-        persistLastEventId(this.url, event.lastEventId);
+        this.trackEventId(event.lastEventId, 'message', event.data);
       }
+      this.metrics.lastEventTime = Date.now();
       this.options.onMessage?.(event);
       this.handleEventData('message', event.data);
     };
 
     this.eventSource.onerror = (error) => {
       console.error('[SSE] Error:', error);
+      this.updateConnectionQuality();
       this.options.onError?.(error);
 
       // Check if connection is closed
@@ -218,6 +546,9 @@ export class EventSourceManager {
       'tool_result',
       'completed',
       'error',
+      'replay_start',
+      'replay_end',
+      'heartbeat',
     ];
 
     // Clear any previously registered listeners
@@ -226,16 +557,61 @@ export class EventSourceManager {
     for (const type of eventTypes) {
       const handler: EventListener = (evt: Event) => {
         const event = evt as MessageEvent;
+        this.metrics.lastEventTime = Date.now();
+        this.metrics.eventsReceived++;
+
+        // Handle special event types
+        if (type === 'replay_start') {
+          this.metrics.isReplaying = true;
+          this.options.onReplayStart?.(this.lastEventId || '0');
+        } else if (type === 'replay_end') {
+          this.metrics.isReplaying = false;
+          try {
+            const data = JSON.parse(event.data);
+            this.metrics.eventsReplayed += data.totalEvents || 0;
+            this.options.onReplayEnd?.(data.totalEvents || 0);
+          } catch {
+            this.options.onReplayEnd?.(0);
+          }
+        } else if (type === 'heartbeat') {
+          // Update latency estimate if we can calculate it
+          this.updateConnectionQuality();
+        }
+
         // Track last event ID for reliable resumption on reconnect and page reload
         if (event.lastEventId) {
-          this.lastEventId = event.lastEventId;
-          persistLastEventId(this.url, event.lastEventId);
+          this.trackEventId(event.lastEventId, type, event.data);
         }
         this.handleEventData(type, event.data);
       };
       this.eventSource.addEventListener(type, handler);
       // Track for cleanup
       this.registeredListeners.push({ type, handler });
+    }
+  }
+
+  /**
+   * Track event ID and check for gaps
+   */
+  private trackEventId(eventId: string, type: string, data: unknown): void {
+    this.lastEventId = eventId;
+    this.metrics.lastEventId = eventId;
+    persistLastEventId(this.url, eventId);
+
+    // Check for gaps if enabled
+    if (this.options.enableGapDetection) {
+      const result = this.eventBuffer.add(eventId, type, data);
+      if (result.hasGap && result.missingFrom !== undefined && result.missingTo !== undefined) {
+        console.warn(`[SSE] Gap detected: missing events from ${result.missingFrom} to ${result.missingTo}`);
+        this.metrics.gapsDetected++;
+        this.options.onGapDetected?.(result.missingFrom, result.missingTo);
+        this.updateConnectionQuality();
+
+        // Auto-request replay if we have a session ID
+        if (this.options.sessionId || this.extractSessionId()) {
+          this.requestReplay(String(result.missingFrom - 1));
+        }
+      }
     }
   }
 
@@ -268,6 +644,8 @@ export class EventSourceManager {
   private handleDisconnect(): void {
     if (this.isClosed) return;
 
+    this.stopHeartbeatMonitoring();
+    this.updateConnectionQuality();
     this.options.onClose?.();
 
     if (this.options.reconnect && this.retryCount < (this.options.maxRetries || 5)) {
@@ -282,6 +660,8 @@ export class EventSourceManager {
         // Remove this timeout from tracking since it fired
         this.pendingTimeouts = this.pendingTimeouts.filter(id => id !== timeoutId);
         this.retryCount++;
+        this.metrics.reconnectAttempts = this.retryCount;
+        this.updateConnectionQuality();
         this.connect();
       }, delay);
 
@@ -299,6 +679,9 @@ export class EventSourceManager {
 
     // Clear ALL pending reconnect timeouts to prevent memory leaks
     this.clearPendingTimeouts();
+
+    // Stop heartbeat monitoring
+    this.stopHeartbeatMonitoring();
 
     if (this.eventSource) {
       // Remove all registered event listeners to prevent memory leaks
@@ -322,6 +705,12 @@ export class EventSourceManager {
     // Reset state for potential reuse
     this.retryCount = 0;
     this.lastEventId = null;
+    this.eventBuffer.reset();
+
+    // Update metrics to show disconnected state
+    this.metrics.quality = 'disconnected';
+    this.metrics.lastEventId = null;
+    this.updateConnectionQuality();
   }
 
   /**

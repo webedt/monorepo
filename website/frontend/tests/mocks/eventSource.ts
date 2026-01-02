@@ -91,6 +91,14 @@ export class MockEventSource {
   }
 
   /**
+   * Simulate receiving a typed event with a specific event ID
+   * (Convenience method for testing gap detection)
+   */
+  simulateTypedEventWithId(type: string, data: string, eventId: string): void {
+    this.simulateTypedEvent(type, data, eventId);
+  }
+
+  /**
    * Simulate an error
    */
   simulateError(): void {

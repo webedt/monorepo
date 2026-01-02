@@ -57,6 +57,10 @@ export type { EmptyStateOptions, EmptyStateSize } from './empty-state';
 export { StatusBadge } from './status-badge';
 export type { StatusBadgeOptions, StatusType, StatusBadgeSize } from './status-badge';
 
+// ConnectionQualityIndicator
+export { ConnectionQualityIndicator } from './connection-quality-indicator';
+export type { ConnectionQualityIndicatorOptions, IndicatorSize } from './connection-quality-indicator';
+
 // SearchableSelect
 export { SearchableSelect } from './searchable-select';
 export type { SearchableSelectOptions, SearchableSelectOption } from './searchable-select';
