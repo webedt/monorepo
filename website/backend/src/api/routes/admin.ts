@@ -4,10 +4,12 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
+
+const validRoles = ROLE_HIERARCHY;
 
 const router = Router();
 
@@ -73,7 +75,6 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
     if (role && !validRoles.includes(role)) {
       res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
@@ -129,7 +130,6 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
     if (role !== undefined && !validRoles.includes(role)) {
       res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
@@ -159,9 +159,16 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       updateData.isAdmin = role === 'admin';
     } else if (isAdmin !== undefined) {
       updateData.isAdmin = isAdmin;
-      // Sync role with isAdmin - only change role if going to/from admin
+      // Sync role with isAdmin
       if (isAdmin) {
         updateData.role = 'admin';
+      } else {
+        // When removing admin status, demote role from admin to user
+        // We need to fetch current role to only demote if currently admin
+        const [currentUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+        if (currentUser?.role === 'admin') {
+          updateData.role = 'user';
+        }
       }
     }
 

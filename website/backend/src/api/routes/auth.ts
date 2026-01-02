@@ -47,8 +47,9 @@ router.post('/register', async (req: Request, res: Response) => {
     // Generate user ID
     const userId = generateIdFromEntropySize(10); // 10 bytes = 120 bits of entropy
 
-    // Check if this email should be admin
-    const isAdmin = normalizedEmail === 'etdofresh@gmail.com';
+    // Check if this email should be admin (configurable via ADMIN_EMAIL environment variable)
+    const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase().trim();
+    const isAdmin = adminEmail ? normalizedEmail === adminEmail : false;
     // Admin users get admin role, others start as basic users
     const role = isAdmin ? 'admin' : 'user';
 
@@ -89,7 +90,7 @@ router.post('/register', async (req: Request, res: Response) => {
             defaultLandingPage: newUser.defaultLandingPage || 'store',
             preferredModel: newUser.preferredModel,
             isAdmin: newUser.isAdmin,
-            role: newUser.role,
+            role: newUser.role || 'user',
             createdAt: newUser.createdAt,
           },
         },
