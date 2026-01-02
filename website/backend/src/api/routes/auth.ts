@@ -168,6 +168,7 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
         defaultLandingPage: newUser.defaultLandingPage || 'store',
         preferredModel: newUser.preferredModel,
         isAdmin: newUser.isAdmin,
+        role: newUser.role,
         createdAt: newUser.createdAt,
       },
     }, 201);
@@ -304,6 +305,7 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req:
         defaultLandingPage: user.defaultLandingPage || 'store',
         preferredModel: user.preferredModel,
         isAdmin: user.isAdmin,
+        role: user.role,
         createdAt: user.createdAt,
       },
     });
@@ -507,6 +509,7 @@ router.get('/session', async (req: Request, res: Response) => {
         defaultLandingPage: freshUser.defaultLandingPage || 'store',
         preferredModel: freshUser.preferredModel,
         isAdmin: freshUser.isAdmin,
+        role: freshUser.role,
         createdAt: freshUser.createdAt,
       },
       session: authReq.authSession,
