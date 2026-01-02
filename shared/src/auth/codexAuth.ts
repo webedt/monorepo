@@ -35,6 +35,10 @@ export class CodexTokenExpiredError extends Error {
       : 'Your Codex OAuth session has expired. Please re-authenticate through the Codex OAuth flow to continue. Note: OpenAI does not provide a public token refresh endpoint, so re-authentication is required when tokens expire.';
 
     super(`Codex OAuth token expired at ${expiredAt.toISOString()}. ${userMessage}`);
+
+    // Required for proper instanceof checks when transpiled to ES5
+    Object.setPrototypeOf(this, CodexTokenExpiredError.prototype);
+
     this.name = 'CodexTokenExpiredError';
     this.expiredAt = expiredAt;
     this.hasApiKeyFallback = hasApiKeyFallback;
@@ -115,17 +119,17 @@ export async function refreshCodexToken(codexAuth: CodexAuth): Promise<CodexAuth
 
   if (isExpired) {
     const expiredAt = new Date(codexAuth.expiresAt || now);
-    const hasApiKeyFallback = Boolean(codexAuth.apiKey);
+    // Note: hasApiKeyFallback is always false here because we return early
+    // on line 103 if codexAuth.apiKey exists. We pass false explicitly.
 
     logger.error('Codex OAuth token has expired and cannot be refreshed', {
       component: 'CodexAuth',
       expiredAt: expiredAt.toISOString(),
-      hasApiKeyFallback,
       message: 'OpenAI does not provide a public OAuth token refresh endpoint'
     });
 
     // Throw explicit error instead of silently returning stale auth
-    throw new CodexTokenExpiredError(expiredAt, hasApiKeyFallback);
+    throw new CodexTokenExpiredError(expiredAt, false);
   }
 
   // Token is expiring soon but not yet expired
@@ -217,6 +221,33 @@ export function isCodexAuthExpired(codexAuth: CodexAuth | null | undefined): boo
 }
 
 /**
+ * Check if CodexAuth has any credentials present (API key or OAuth tokens).
+ *
+ * Unlike isValidCodexAuth(), this function only checks for the presence of
+ * credentials without validating expiration. Use this when you need to know
+ * if any credentials exist, regardless of their validity.
+ *
+ * @returns true if auth has either API key or OAuth access token present
+ */
+export function hasCodexCredentials(codexAuth: CodexAuth | null | undefined): boolean {
+  if (!codexAuth) {
+    return false;
+  }
+
+  // Check for API key
+  if (codexAuth.apiKey && codexAuth.apiKey.length > 0) {
+    return true;
+  }
+
+  // Check for OAuth access token (regardless of expiration)
+  if (codexAuth.accessToken && codexAuth.accessToken.length > 0) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Validate that CodexAuth has valid, non-expired credentials.
  *
  * Returns true if auth has either:
@@ -226,6 +257,9 @@ export function isCodexAuthExpired(codexAuth: CodexAuth | null | undefined): boo
  * Note: OAuth tokens that have expired will return false, requiring
  * the user to re-authenticate since OpenAI doesn't provide a public
  * token refresh endpoint.
+ *
+ * @see hasCodexCredentials - Use this if you only need to check for presence
+ *   of credentials without validating expiration.
  */
 export function isValidCodexAuth(codexAuth: CodexAuth | null | undefined): boolean {
   if (!codexAuth) {
