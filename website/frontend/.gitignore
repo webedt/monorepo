@@ -1,3 +1,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Playwright
+e2e-results/
+playwright-report/
+playwright/.cache/
+e2e/.auth/*.json
+test-results/
