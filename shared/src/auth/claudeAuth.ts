@@ -8,8 +8,10 @@ import { existsSync, readFileSync } from 'fs';
 import { homedir, platform, userInfo } from 'os';
 import { join } from 'path';
 import { desc } from 'drizzle-orm';
-import { logger } from '../utils/logging/logger.js';
 import { CLAUDE_ACCESS_TOKEN } from '../config/env.js';
+import { ATokenRefreshProvider } from './ATokenRefreshProvider.js';
+
+import type { OAuthTokenResponse } from './ATokenRefreshProvider.js';
 
 /**
  * Source of Claude authentication credentials
@@ -53,17 +55,52 @@ export function isClaudeAuthDb(auth: ClaudeAuth): auth is ClaudeAuthDb {
 
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-// Refresh 10 minutes before expiration to provide buffer for:
-// - Network latency and retries
-// - Long-running operations that need valid tokens throughout
-// - Edge cases where refresh might fail and need retry
-const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
 
-interface RefreshTokenResponse {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number; // Seconds
+interface ClaudeTokenResponse extends OAuthTokenResponse {
+  refresh_token: string; // Claude always returns a new refresh token
 }
+
+/**
+ * Token refresh provider for Claude OAuth
+ *
+ * Handles Claude-specific token refresh:
+ * - JSON POST to Anthropic's OAuth token endpoint
+ * - Rotates refresh tokens (new refresh token with each refresh)
+ */
+class ClaudeTokenRefreshProvider extends ATokenRefreshProvider<ClaudeAuth> {
+  constructor() {
+    super({ componentName: 'ClaudeAuth' });
+  }
+
+  async refresh(auth: ClaudeAuth): Promise<ClaudeAuth> {
+    if (!auth.refreshToken) {
+      throw new Error('Cannot refresh token: no refresh token available');
+    }
+
+    const data = await this.executeRefreshRequest<ClaudeTokenResponse>(
+      CLAUDE_OAUTH_TOKEN_URL,
+      { 'Content-Type': 'application/json' },
+      JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: auth.refreshToken,
+        client_id: CLAUDE_OAUTH_CLIENT_ID,
+      })
+    );
+
+    const newExpiresAt = this.calculateExpiresAt(data.expires_in);
+    this.logRefreshSuccess(newExpiresAt);
+
+    return {
+      ...auth,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: newExpiresAt,
+    };
+  }
+}
+
+// Singleton provider instance
+const claudeRefreshProvider = new ClaudeTokenRefreshProvider();
 
 /**
  * Check if a Claude access token needs to be refreshed
@@ -71,28 +108,7 @@ interface RefreshTokenResponse {
  * Returns false if expiresAt is not set (cannot determine expiration)
  */
 export function shouldRefreshClaudeToken(claudeAuth: ClaudeAuth): boolean {
-  if (claudeAuth.expiresAt === undefined) {
-    return false;
-  }
-
-  const now = Date.now();
-  const expiresAt = claudeAuth.expiresAt;
-  const timeUntilExpiry = expiresAt - now;
-  const needsRefresh = timeUntilExpiry <= TOKEN_BUFFER_TIME;
-
-  if (needsRefresh) {
-    const isExpired = timeUntilExpiry <= 0;
-    logger.info('Token refresh check', {
-      component: 'ClaudeAuth',
-      needsRefresh: true,
-      isExpired,
-      timeUntilExpiryMs: timeUntilExpiry,
-      timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60000),
-      expiresAt: new Date(expiresAt).toISOString()
-    });
-  }
-
-  return needsRefresh;
+  return claudeRefreshProvider.shouldRefresh(claudeAuth);
 }
 
 /**
@@ -101,54 +117,7 @@ export function shouldRefreshClaudeToken(claudeAuth: ClaudeAuth): boolean {
  * Throws if refreshToken is not available
  */
 export async function refreshClaudeToken(claudeAuth: ClaudeAuth): Promise<ClaudeAuth> {
-  if (!claudeAuth.refreshToken) {
-    throw new Error('Cannot refresh token: no refresh token available');
-  }
-
-  try {
-    logger.info('Refreshing OAuth token', { component: 'ClaudeAuth' });
-
-    const response = await fetch(CLAUDE_OAUTH_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: claudeAuth.refreshToken,
-        client_id: CLAUDE_OAUTH_CLIENT_ID,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Token refresh failed', null, {
-        component: 'ClaudeAuth',
-        status: response.status,
-        error: errorText
-      });
-      throw new Error(`Failed to refresh token: ${response.status} ${errorText}`);
-    }
-
-    const data = (await response.json()) as RefreshTokenResponse;
-
-    const newExpiresAt = Date.now() + data.expires_in * 1000;
-
-    logger.info('Token refreshed successfully', {
-      component: 'ClaudeAuth',
-      newExpiration: new Date(newExpiresAt).toISOString()
-    });
-
-    return {
-      ...claudeAuth,
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      expiresAt: newExpiresAt,
-    };
-  } catch (error) {
-    logger.error('Error refreshing token', error, { component: 'ClaudeAuth' });
-    throw error;
-  }
+  return claudeRefreshProvider.refresh(claudeAuth);
 }
 
 /**
@@ -156,13 +125,7 @@ export async function refreshClaudeToken(claudeAuth: ClaudeAuth): Promise<Claude
  * Returns the original auth object if still valid, or refreshed auth if it was expiring
  */
 export async function ensureValidToken(claudeAuth: ClaudeAuth): Promise<ClaudeAuth> {
-  if (shouldRefreshClaudeToken(claudeAuth)) {
-    logger.info('Token expires soon, refreshing', { component: 'ClaudeAuth' });
-    return await refreshClaudeToken(claudeAuth);
-  }
-
-  logger.info('Token still valid, no refresh needed', { component: 'ClaudeAuth' });
-  return claudeAuth;
+  return claudeRefreshProvider.ensureValidToken(claudeAuth);
 }
 
 // Credentials file path for Claude CLI
