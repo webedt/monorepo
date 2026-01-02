@@ -295,6 +295,58 @@ export interface AdminStats {
   activeSessionCount: number;
 }
 
+// Audit log types
+export type AuditAction =
+  | 'USER_CREATE'
+  | 'USER_UPDATE'
+  | 'USER_DELETE'
+  | 'USER_ADMIN_STATUS_CHANGE'
+  | 'USER_IMPERSONATE'
+  | 'SESSION_DELETE'
+  | 'SESSION_RESTORE'
+  | 'SESSION_LOCK'
+  | 'ANNOUNCEMENT_CREATE'
+  | 'ANNOUNCEMENT_UPDATE'
+  | 'ANNOUNCEMENT_DELETE'
+  | 'ANNOUNCEMENT_PUBLISH'
+  | 'ORGANIZATION_CREATE'
+  | 'ORGANIZATION_UPDATE'
+  | 'ORGANIZATION_DELETE'
+  | 'ORGANIZATION_MEMBER_ADD'
+  | 'ORGANIZATION_MEMBER_REMOVE'
+  | 'ORGANIZATION_MEMBER_ROLE_CHANGE'
+  | 'PAYMENT_REFUND'
+  | 'PAYMENT_MANUAL_ADJUSTMENT'
+  | 'RATE_LIMIT_RESET'
+  | 'ADMIN_SETTING_CHANGE';
+
+export type AuditEntityType =
+  | 'user'
+  | 'session'
+  | 'announcement'
+  | 'organization'
+  | 'organization_member'
+  | 'payment'
+  | 'setting';
+
+export interface AuditLog {
+  id: string;
+  adminId: string | null;
+  action: AuditAction;
+  entityType: AuditEntityType;
+  entityId?: string;
+  previousState?: Record<string, unknown>;
+  newState?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  ipAddress?: string;
+  createdAt: string;
+  admin?: {
+    id: string;
+    email: string;
+    displayName?: string;
+  };
+}
+
 // Game Store types
 export interface Game {
   id: string;

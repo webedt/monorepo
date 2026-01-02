@@ -32,6 +32,7 @@ import type {
   GeminiAuth,
   ApiResponse,
   AdminStats,
+  AuditLog,
   Collection,
   SessionCollection,
   Snippet,
@@ -714,6 +715,47 @@ export const adminApi = {
 
   getLogsStatus: () =>
     fetchApi('/api/logs/status'),
+
+  // Audit log methods
+  getAuditLogs: (params?: {
+    adminId?: string;
+    action?: string;
+    entityType?: string;
+    entityId?: string;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.adminId) queryParams.append('adminId', params.adminId);
+    if (params?.action) queryParams.append('action', params.action);
+    if (params?.entityType) queryParams.append('entityType', params.entityType);
+    if (params?.entityId) queryParams.append('entityId', params.entityId);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    if (params?.limit) queryParams.append('limit', String(params.limit));
+    if (params?.offset) queryParams.append('offset', String(params.offset));
+    const queryString = queryParams.toString();
+    return fetchApi<ApiResponse<{
+      logs: AuditLog[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/admin/audit-logs${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getAuditLog: (id: string) =>
+    fetchApi<ApiResponse<AuditLog>>(`/api/admin/audit-logs/${id}`),
+
+  getAuditStats: () =>
+    fetchApi<ApiResponse<{
+      totalLogs: number;
+      logsByAction: Record<string, number>;
+      logsByEntityType: Record<string, number>;
+      recentActivityCount: number;
+    }>>('/api/admin/audit-logs/stats'),
 };
 
 // ============================================================================

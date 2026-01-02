@@ -173,6 +173,9 @@ export * from './autocomplete/index.js';
 // Geometry - 3D geometry with right-handed coordinate system
 export * from './geometry/index.js';
 
+// Audit - Admin audit trail for security-sensitive operations
+export * from './audit/index.js';
+
 // Full-Text Search - PostgreSQL tsvector-based indexed search
 export * from './search/index.js';
 
