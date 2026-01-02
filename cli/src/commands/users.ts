@@ -19,7 +19,14 @@ usersCommand
     try {
       const limit = parseInt(options.limit, 10);
 
-      let query = db
+      // Validate role filter if specified
+      if (options.role && !validRoles.includes(options.role)) {
+        console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+        process.exit(1);
+      }
+
+      // Build query with proper ordering: select -> from -> where -> orderBy -> limit
+      const baseQuery = db
         .select({
           id: users.id,
           email: users.email,
@@ -29,20 +36,16 @@ usersCommand
           preferredProvider: users.preferredProvider,
           createdAt: users.createdAt,
         })
-        .from(users)
+        .from(users);
+
+      // Apply where clause before orderBy and limit
+      const filteredQuery = options.role
+        ? baseQuery.where(eq(users.role, options.role))
+        : baseQuery;
+
+      const userList = await filteredQuery
         .orderBy(desc(users.createdAt))
         .limit(limit);
-
-      // Filter by role if specified
-      if (options.role) {
-        if (!validRoles.includes(options.role)) {
-          console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
-          process.exit(1);
-        }
-        query = query.where(eq(users.role, options.role)) as typeof query;
-      }
-
-      const userList = await query;
 
       if (userList.length === 0) {
         console.log('No users found.');
