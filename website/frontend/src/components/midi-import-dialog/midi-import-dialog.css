@@ -1,0 +1,151 @@
+/**
+ * MIDI Import Dialog Styles
+ */
+
+.midi-import-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.midi-import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: 2rem;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.midi-import-dropzone:hover,
+.midi-import-dropzone:focus {
+  border-color: var(--color-primary);
+  background: var(--color-bg-tertiary);
+  outline: none;
+}
+
+.midi-import-dropzone--dragover {
+  border-color: var(--color-primary);
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 0 0 4px var(--color-primary-alpha);
+}
+
+.midi-import-dropzone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.midi-import-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--color-text-muted);
+}
+
+.midi-import-icon.midi-icon {
+  width: 36px;
+  height: 36px;
+  color: var(--color-primary);
+}
+
+.midi-import-dropzone-text {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.midi-import-dropzone-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.midi-import-file-input {
+  display: none;
+}
+
+/* Preview */
+.midi-import-preview {
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.midi-import-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.midi-import-preview-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  color: var(--color-primary);
+}
+
+.midi-import-preview-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.midi-import-preview-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.midi-import-preview-size {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.midi-import-preview-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.midi-import-preview-remove:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-danger);
+}
+
+.midi-import-preview-remove svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Error */
+.midi-import-error {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 0.875rem;
+}
