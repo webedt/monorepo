@@ -28,6 +28,11 @@ import {
   registerActiveStream,
   unregisterActiveStream,
 } from '../activeStreamManager.js';
+import {
+  setupSSEResponse,
+  createDisconnectTracker,
+  createHeartbeat,
+} from '../utils/sseHandler.js';
 
 const router = Router();
 
@@ -129,12 +134,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const user = authReq.user!;
   let chatSession: typeof chatSessions.$inferSelect | null = null;
-  let clientDisconnected = false;
 
-  // Track client disconnect
-  req.on('close', () => {
-    clientDisconnected = true;
-  });
+  // Track client disconnect using shared utility
+  const disconnect = createDisconnectTracker(req);
 
   try {
     // Parse parameters
@@ -382,11 +384,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       images: imageAttachments.length > 0 ? imageAttachments : null,
     });
 
-    // Set up SSE response
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
+    // Set up SSE response using shared utility
+    setupSSEResponse(res);
 
     // Track event UUIDs to prevent duplicate storage
     // This is critical because the Claude API may send the same event multiple times
@@ -400,7 +399,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // Pass events through directly without modification - frontend handles all formatting
     // Use named SSE events so frontend can listen with addEventListener(eventType)
     const sendEvent = async (event: ExecutionEvent) => {
-      if (clientDisconnected) return;
+      if (disconnect.isDisconnected()) return;
 
       // Include correlation ID in event for client-side tracing
       const eventWithCorrelation = {
@@ -577,22 +576,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionEventBroadcaster.broadcast(chatSessionId, event.type, event);
     };
 
-    // Set up heartbeat - use 15 second interval to prevent proxy timeouts
-    // Traefik and other proxies often have 30-60 second idle timeouts
-    const heartbeatInterval = setInterval(() => {
-      if (!clientDisconnected) {
-        try {
-          res.write(': heartbeat\n\n');
-        } catch (error) {
-          // Client likely disconnected - stop sending heartbeats
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          logger.debug('Heartbeat write failed, stopping interval:', { chatSessionId, error: message });
-          clearInterval(heartbeatInterval);
-        }
-      } else {
-        clearInterval(heartbeatInterval);
-      }
-    }, 15000);
+    // Set up heartbeat using shared utility - 15 second interval prevents proxy timeouts
+    const heartbeat = createHeartbeat(res, {
+      isDisconnected: disconnect.isDisconnected,
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        logger.debug('Heartbeat write failed, stopping interval:', { chatSessionId, error: message });
+      },
+    });
 
     // Send input preview event immediately so user sees their request was received
     if (userRequest) {
@@ -801,10 +792,11 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     }
 
     // Clean up
-    clearInterval(heartbeatInterval);
+    heartbeat.stop();
+    disconnect.cleanup();
 
     // End response
-    if (!clientDisconnected) {
+    if (!disconnect.isDisconnected()) {
       res.end();
     }
 
