@@ -6,14 +6,14 @@
 import { parseMidi, parseMidiFromBase64 } from '@webedt/shared';
 
 import type { MidiFile } from '@webedt/shared';
-import type { MidiFileInfo } from './types';
 import type { MidiNoteEvent } from '@webedt/shared';
+import type { MidiTempoChange } from '@webedt/shared';
+import type { MidiTrack } from '@webedt/shared';
+import type { MidiFileInfo } from './types';
 import type { MidiPlayerEvent } from './types';
 import type { MidiPlayerListener } from './types';
 import type { MidiPlayerOptions } from './types';
 import type { MidiPlayerState } from './types';
-import type { MidiTempoChange } from '@webedt/shared';
-import type { MidiTrack } from '@webedt/shared';
 import type { MidiTrackInfo } from './types';
 
 /**

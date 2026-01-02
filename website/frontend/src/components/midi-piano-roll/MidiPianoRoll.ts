@@ -37,6 +37,8 @@ export class MidiPianoRoll extends Component {
   private playheadEl: HTMLElement | null = null;
   private animationFrameId: number | null = null;
   private notes: { note: MidiNoteEvent; trackIndex: number; color: string }[] = [];
+  private lastFileKey: string | null = null;
+  private lastMuteKey: string | null = null;
 
   // Colors for different tracks
   private trackColors = [
@@ -331,14 +333,34 @@ export class MidiPianoRoll extends Component {
 
   protected onMount(): void {
     this.unsubscribe = midiStore.subscribe((state) => {
-      // Re-render when file changes
-      if (state.isLoaded && this.notes.length === 0) {
+      // Check if canvas needs re-rendering (file or mute settings changed)
+      const fileKey = state.isLoaded && state.fileInfo ? state.fileInfo.fileName : null;
+      const muteKey = state.isLoaded
+        ? `${state.settings.mutedTracks.join(',')}-${state.settings.mutedChannels.join(',')}`
+        : null;
+
+      const fileChanged = fileKey !== this.lastFileKey;
+      const muteChanged = muteKey !== this.lastMuteKey;
+
+      if (state.isLoaded && (fileChanged || muteChanged)) {
+        this.lastFileKey = fileKey;
+        this.lastMuteKey = muteKey;
         this.processNotes(state);
         this.updateCanvasSize(state);
         this.renderNotes();
+      } else if (!state.isLoaded && this.lastFileKey !== null) {
+        // File was unloaded, clear the canvas
+        this.lastFileKey = null;
+        this.lastMuteKey = null;
+        this.notes = [];
+        if (this.ctx && this.canvas) {
+          const width = this.canvas.width / (window.devicePixelRatio || 1);
+          const height = this.canvas.height / (window.devicePixelRatio || 1);
+          this.ctx.clearRect(0, 0, width, height);
+        }
       }
 
-      // Update playhead
+      // Update playhead (lightweight operation)
       this.updatePlayhead();
 
       // Handle playback state changes
