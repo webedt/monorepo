@@ -39,6 +39,7 @@ import {
   db,
   eq,
   and,
+  isNull,
   logger,
   collections,
   snippets,
@@ -166,10 +167,11 @@ type ResourceFetcher = (id: string, userId: string) => Promise<{
  */
 const resourceFetchers: Record<ResourceType, ResourceFetcher> = {
   session: async (id, userId) => {
+    // Check for soft-deleted sessions using deletedAt field
     const [session] = await db
       .select()
       .from(chatSessions)
-      .where(eq(chatSessions.id, id))
+      .where(and(eq(chatSessions.id, id), isNull(chatSessions.deletedAt)))
       .limit(1);
 
     if (!session) {
@@ -336,6 +338,37 @@ function hasRequiredRole(userRole: OrganizationRole, requiredRole: OrganizationR
 /** In-memory buffer for access attempts (for batch processing) */
 const accessAttemptBuffer: AccessAttemptLog[] = [];
 const MAX_BUFFER_SIZE = 100;
+const FLUSH_INTERVAL_MS = 60000; // Flush every 60 seconds
+
+/** Periodic flush interval handle */
+let flushIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Start periodic flushing of access attempts buffer.
+ * Call this during application startup.
+ */
+export function startAccessAttemptFlush(): void {
+  if (flushIntervalHandle) return; // Already running
+  flushIntervalHandle = setInterval(() => {
+    if (accessAttemptBuffer.length > 0) {
+      flushAccessAttempts();
+    }
+  }, FLUSH_INTERVAL_MS);
+  // Don't prevent process exit
+  flushIntervalHandle.unref();
+}
+
+/**
+ * Stop periodic flushing and flush remaining attempts.
+ * Call this during application shutdown.
+ */
+export function stopAccessAttemptFlush(): AccessAttemptLog[] {
+  if (flushIntervalHandle) {
+    clearInterval(flushIntervalHandle);
+    flushIntervalHandle = null;
+  }
+  return flushAccessAttempts();
+}
 
 /**
  * Log an access attempt for audit purposes.
@@ -486,16 +519,16 @@ export function requireOwnership(
       // Log successful access
       logAccessAttempt(req, resourceType, resourceId, true, 'read');
 
-      // Attach resource to request if configured
+      // Attach authorization result (always) and resource (if configured)
+      const authorizedReq = req as unknown as Record<string, unknown>;
       if (attachToRequest) {
-        const authorizedReq = req as unknown as Record<string, unknown>;
         authorizedReq[attachKey] = resource;
-        authorizedReq.authorizationResult = {
-          authorized: true,
-          role: 'owner',
-          resource,
-        };
       }
+      authorizedReq.authorizationResult = {
+        authorized: true,
+        role: 'owner',
+        resource,
+      };
 
       next();
     } catch (error) {

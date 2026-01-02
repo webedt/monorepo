@@ -3,7 +3,7 @@
  * Covers requireOwnership, requireMembership, and requireResourceAccess
  */
 
-import { describe, it, beforeEach, mock } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { Request, Response, NextFunction } from 'express';
 import {

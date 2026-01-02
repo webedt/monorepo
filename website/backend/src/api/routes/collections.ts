@@ -26,7 +26,6 @@ import { requireAuth } from '../middleware/auth.js';
 import { standardRateLimiter } from '../middleware/rateLimit.js';
 import {
   requireCollectionOwnership,
-  requireOwnership,
   type AuthorizedRequest,
 } from '../middleware/authorization.js';
 import type { TransactionContext } from '@webedt/shared';
@@ -413,11 +412,21 @@ router.get(
   requireAuth,
   requireCollectionOwnership(req => req.params.id, { attachToRequest: true }),
   async (req: Request, res: Response) => {
-    // Collection is pre-fetched and attached by authorization middleware
-    const authorizedReq = req as AuthorizedRequest;
-    const collection = authorizedReq.authorizedResource;
+    try {
+      // Collection is pre-fetched and attached by authorization middleware
+      const authorizedReq = req as AuthorizedRequest;
+      const collection = authorizedReq.authorizedResource;
 
-    res.json({ success: true, data: { collection } });
+      if (!collection) {
+        res.status(500).json({ success: false, error: 'Authorization error' });
+        return;
+      }
+
+      res.json({ success: true, data: { collection } });
+    } catch (error) {
+      logger.error('Get collection error', error as Error, { component: 'Collections' });
+      res.status(500).json({ success: false, error: 'Failed to fetch collection' });
+    }
   }
 );
 
