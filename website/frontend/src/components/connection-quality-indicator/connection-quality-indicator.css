@@ -1,0 +1,175 @@
+/**
+ * Connection Quality Indicator Styles
+ */
+
+.connection-quality-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  position: relative;
+  cursor: default;
+}
+
+/* Sizes */
+.connection-quality-indicator--sm {
+  font-size: 0.75rem;
+}
+
+.connection-quality-indicator--md {
+  font-size: 0.875rem;
+}
+
+.connection-quality-indicator--lg {
+  font-size: 1rem;
+}
+
+.connection-quality-indicator--compact {
+  gap: 0;
+}
+
+/* Quality Dot */
+.connection-quality-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.connection-quality-indicator--sm .connection-quality-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+.connection-quality-indicator--lg .connection-quality-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+/* Quality Colors */
+.connection-quality-dot--excellent {
+  background-color: var(--color-success, #22c55e);
+  box-shadow: 0 0 6px var(--color-success, #22c55e);
+}
+
+.connection-quality-dot--good {
+  background-color: var(--color-success, #22c55e);
+}
+
+.connection-quality-dot--poor {
+  background-color: var(--color-warning, #f59e0b);
+  box-shadow: 0 0 4px var(--color-warning, #f59e0b);
+}
+
+.connection-quality-dot--disconnected {
+  background-color: var(--color-text-muted, #6b7280);
+}
+
+/* Pulse Animation */
+.connection-quality-dot--pulse {
+  animation: connection-pulse 2s ease-in-out infinite;
+}
+
+@keyframes connection-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+/* Label */
+.connection-quality-label {
+  color: var(--color-text-secondary, #9ca3af);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.connection-quality-indicator--excellent .connection-quality-label,
+.connection-quality-indicator--good .connection-quality-label {
+  color: var(--color-text-secondary, #9ca3af);
+}
+
+.connection-quality-indicator--poor .connection-quality-label {
+  color: var(--color-warning, #f59e0b);
+}
+
+.connection-quality-indicator--disconnected .connection-quality-label {
+  color: var(--color-text-muted, #6b7280);
+}
+
+/* Tooltip */
+.connection-quality-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-0.5rem);
+  background: var(--color-surface-elevated, #1f2937);
+  border: 1px solid var(--color-border, #374151);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  pointer-events: none;
+}
+
+.connection-quality-tooltip--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Tooltip Arrow */
+.connection-quality-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--color-surface-elevated, #1f2937);
+}
+
+.tooltip-header {
+  font-weight: 600;
+  color: var(--color-text-primary, #f9fafb);
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.tooltip-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.tooltip-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+}
+
+.tooltip-metric-label {
+  color: var(--color-text-muted, #9ca3af);
+}
+
+.tooltip-metric-value {
+  color: var(--color-text-secondary, #d1d5db);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltip-metric--warning .tooltip-metric-value {
+  color: var(--color-warning, #f59e0b);
+}
+
+.tooltip-metric--info .tooltip-metric-value {
+  color: var(--color-info, #3b82f6);
+}

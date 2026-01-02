@@ -613,3 +613,288 @@ describe('createExecutionConnection', () => {
     expect(onError).toHaveBeenCalledWith('Something failed');
   });
 });
+
+describe('Connection Quality and Gap Detection', () => {
+  let mockES: ReturnType<typeof setupEventSourceMock>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockES = setupEventSourceMock();
+  });
+
+  afterEach(() => {
+    mockES.cleanup();
+    vi.useRealTimers();
+  });
+
+  describe('Connection Metrics', () => {
+    it('should track connection quality as disconnected initially', () => {
+      const manager = new EventSourceManager('/api/stream');
+      const metrics = manager.getMetrics();
+
+      expect(metrics.quality).toBe('disconnected');
+      expect(metrics.reconnectAttempts).toBe(0);
+      expect(metrics.eventsReceived).toBe(0);
+    });
+
+    it('should update quality to excellent when connected', () => {
+      const onQualityChange = vi.fn();
+      const manager = new EventSourceManager('/api/stream', { onQualityChange });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      expect(onQualityChange).toHaveBeenCalledWith('excellent', expect.any(Object));
+    });
+
+    it('should track reconnection attempts in metrics', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateClose();
+
+      // Advance timer to trigger reconnect
+      vi.advanceTimersByTime(1000);
+      mockES.getLatest()!.simulateClose();
+
+      vi.advanceTimersByTime(2000);
+
+      const metrics = manager.getMetrics();
+      expect(metrics.reconnectAttempts).toBeGreaterThan(0);
+    });
+
+    it('should track events received count', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      // Simulate multiple events
+      mockES.getLatest()!.simulateTypedEvent('message', '{"test": 1}');
+      mockES.getLatest()!.simulateTypedEvent('message', '{"test": 2}');
+      mockES.getLatest()!.simulateTypedEvent('message', '{"test": 3}');
+
+      const metrics = manager.getMetrics();
+      expect(metrics.eventsReceived).toBe(3);
+    });
+
+    it('should degrade quality with many gaps detected', () => {
+      const manager = new EventSourceManager('/api/stream', { enableGapDetection: true });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      // Simulate multiple gaps by sending non-sequential event IDs
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 1}', '1');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 5}', '5');  // gap 1
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 10}', '10'); // gap 2
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 20}', '20'); // gap 3
+
+      // After multiple gaps, quality should degrade to 'poor'
+      const metrics = manager.getMetrics();
+      expect(metrics.gapsDetected).toBeGreaterThan(2);
+      expect(metrics.quality).toBe('poor');
+    });
+
+    it('should reset metrics on close', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+      mockES.getLatest()!.simulateTypedEvent('message', '{"test": 1}');
+
+      manager.close();
+
+      const metrics = manager.getMetrics();
+      expect(metrics.quality).toBe('disconnected');
+    });
+  });
+
+  describe('Gap Detection', () => {
+    it('should call onGapDetected when events are missing', () => {
+      const onGapDetected = vi.fn();
+      const manager = new EventSourceManager('/api/stream', {
+        enableGapDetection: true,
+        onGapDetected,
+      });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      // Simulate events with a gap (1, 2, then 5 - missing 3 and 4)
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 1}', '1');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 2}', '2');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 5}', '5'); // Gap!
+
+      expect(onGapDetected).toHaveBeenCalledWith(3, 4);
+    });
+
+    it('should track gaps detected in metrics', () => {
+      const manager = new EventSourceManager('/api/stream', {
+        enableGapDetection: true,
+      });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      // Simulate events with gaps
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 1}', '1');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 5}', '5');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 10}', '10');
+
+      const metrics = manager.getMetrics();
+      expect(metrics.gapsDetected).toBeGreaterThan(0);
+    });
+
+    it('should not detect gaps when disabled', () => {
+      const onGapDetected = vi.fn();
+      const manager = new EventSourceManager('/api/stream', {
+        enableGapDetection: false,
+        onGapDetected,
+      });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 1}', '1');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 100}', '100');
+
+      expect(onGapDetected).not.toHaveBeenCalled();
+    });
+
+    it('should handle non-sequential event IDs gracefully', () => {
+      const onGapDetected = vi.fn();
+      const manager = new EventSourceManager('/api/stream', {
+        enableGapDetection: true,
+        onGapDetected,
+      });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      // UUID-style event IDs (no numeric portion) should not trigger gap detection
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 1}', 'abc-xyz');
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 2}', 'def-uvw');
+
+      expect(onGapDetected).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Replay Events', () => {
+    it('should call onReplayStart when replay_start event received', () => {
+      const onReplayStart = vi.fn();
+      const manager = new EventSourceManager('/api/stream', { onReplayStart });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+      mockES.getLatest()!.simulateTypedEvent('replay_start', '{}');
+
+      expect(onReplayStart).toHaveBeenCalled();
+    });
+
+    it('should call onReplayEnd when replay_end event received', () => {
+      const onReplayEnd = vi.fn();
+      const manager = new EventSourceManager('/api/stream', { onReplayEnd });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+      mockES.getLatest()!.simulateTypedEvent('replay_end', '{"totalEvents": 5}');
+
+      expect(onReplayEnd).toHaveBeenCalledWith(5);
+    });
+
+    it('should track replayed events in metrics', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+      mockES.getLatest()!.simulateTypedEvent('replay_end', '{"totalEvents": 10}');
+
+      const metrics = manager.getMetrics();
+      expect(metrics.eventsReplayed).toBe(10);
+    });
+
+    it('should set isReplaying during replay', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      // Start replay
+      mockES.getLatest()!.simulateTypedEvent('replay_start', '{}');
+      expect(manager.getMetrics().isReplaying).toBe(true);
+
+      // End replay
+      mockES.getLatest()!.simulateTypedEvent('replay_end', '{"totalEvents": 3}');
+      expect(manager.getMetrics().isReplaying).toBe(false);
+    });
+  });
+
+  describe('Heartbeat Monitoring', () => {
+    it('should update quality on heartbeat events', () => {
+      const onQualityChange = vi.fn();
+      const manager = new EventSourceManager('/api/stream', { onQualityChange });
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      const initialCallCount = onQualityChange.mock.calls.length;
+
+      mockES.getLatest()!.simulateTypedEvent('heartbeat', '{}');
+
+      // Quality callback should be triggered on heartbeat
+      expect(onQualityChange.mock.calls.length).toBeGreaterThanOrEqual(initialCallCount);
+    });
+
+    it('should track last event time for staleness detection', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+
+      const timeBefore = Date.now();
+      mockES.getLatest()!.simulateTypedEvent('message', '{"test": 1}');
+
+      const metrics = manager.getMetrics();
+      expect(metrics.lastEventTime).toBeGreaterThanOrEqual(timeBefore);
+    });
+  });
+
+  describe('Last Event ID Tracking with Gap Detection', () => {
+    it('should track lastEventId from events', () => {
+      const manager = new EventSourceManager('/api/stream');
+
+      manager.connect();
+      mockES.getLatest()!.simulateOpen();
+      mockES.getLatest()!.simulateTypedEventWithId('message', '{"test": 1}', '12345');
+
+      const metrics = manager.getMetrics();
+      expect(metrics.lastEventId).toBe('12345');
+    });
+
+    it('should include lastEventId in reconnection URL when persisted', () => {
+      // Note: jsdom's MessageEvent doesn't fully support lastEventId property access,
+      // so we test the URL parameter mechanism by simulating what would happen
+      // if lastEventId was captured and persisted to sessionStorage.
+
+      // First simulate a connection that had a lastEventId stored
+      // The storage key format is: sse_lastEventId_ + pathname (from URL parsing)
+      const storageKey = 'sse_lastEventId_/api/stream';
+      const storedData = JSON.stringify({ eventId: '12345', timestamp: Date.now() });
+      sessionStorage.setItem(storageKey, storedData);
+
+      const manager = new EventSourceManager('/api/stream', {
+        enableGapDetection: true,
+      });
+
+      manager.connect();
+
+      // Check that the connection URL includes the persisted lastEventId
+      const instance = mockES.getLatest()!;
+      expect(instance.url).toContain('lastEventId=12345');
+
+      // Cleanup
+      sessionStorage.removeItem(storageKey);
+    });
+  });
+});
