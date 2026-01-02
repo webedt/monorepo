@@ -985,13 +985,34 @@ router.get('/audit-logs', requireAdmin, async (req, res) => {
       validatedEntityType = entityType;
     }
 
+    // Validate and parse date strings
+    let validatedStartDate: Date | undefined;
+    if (startDate && typeof startDate === 'string') {
+      const parsed = new Date(startDate);
+      if (isNaN(parsed.getTime())) {
+        sendError(res, 'Invalid startDate format. Use ISO 8601 (e.g., 2024-01-15 or 2024-01-15T10:30:00Z)', 400, ApiErrorCode.VALIDATION_ERROR);
+        return;
+      }
+      validatedStartDate = parsed;
+    }
+
+    let validatedEndDate: Date | undefined;
+    if (endDate && typeof endDate === 'string') {
+      const parsed = new Date(endDate);
+      if (isNaN(parsed.getTime())) {
+        sendError(res, 'Invalid endDate format. Use ISO 8601 (e.g., 2024-01-15 or 2024-01-15T10:30:00Z)', 400, ApiErrorCode.VALIDATION_ERROR);
+        return;
+      }
+      validatedEndDate = parsed;
+    }
+
     const result = await listAuditLogs({
       adminId: adminId as string | undefined,
       action: validatedAction,
       entityType: validatedEntityType,
       entityId: entityId as string | undefined,
-      startDate: startDate ? new Date(startDate as string) : undefined,
-      endDate: endDate ? new Date(endDate as string) : undefined,
+      startDate: validatedStartDate,
+      endDate: validatedEndDate,
       limit,
       offset,
     });

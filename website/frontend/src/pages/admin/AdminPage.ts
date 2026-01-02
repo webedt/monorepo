@@ -324,10 +324,10 @@ export class AdminPage extends Page<PageOptions> {
               </tr>
             </thead>
             <tbody>
-              ${data.logs.map((log: { createdAt: string; admin?: { email: string }; adminId: string; action: string; entityType: string; entityId?: string }) => `
+              ${data.logs.map((log: { createdAt: string; admin?: { email: string }; adminId: string | null; action: string; entityType: string; entityId?: string }) => `
                 <tr>
                   <td>${this.formatDate(log.createdAt)}</td>
-                  <td>${this.escapeHtml(log.admin?.email || log.adminId.slice(0, 8) + '...')}</td>
+                  <td>${this.escapeHtml(log.admin?.email || (log.adminId?.slice(0, 8) + '...') || '[deleted]')}</td>
                   <td><span class="action-badge ${this.getActionClass(log.action)}">${this.formatActionName(log.action)}</span></td>
                   <td>${log.entityType}${log.entityId ? ` (${log.entityId.slice(0, 8)}...)` : ''}</td>
                 </tr>

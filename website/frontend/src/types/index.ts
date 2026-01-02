@@ -331,7 +331,7 @@ export type AuditEntityType =
 
 export interface AuditLog {
   id: string;
-  adminId: string;
+  adminId: string | null;
   action: AuditAction;
   entityType: AuditEntityType;
   entityId?: string;
