@@ -8,7 +8,7 @@
  * - Response formatting
  */
 
-import { eq, and, isNull, desc, asc, sql, inArray, ne } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, desc, asc, sql, inArray, ne, gte, lte } from 'drizzle-orm';
 import type { SQL, SQLWrapper } from 'drizzle-orm';
 import type { PgColumn, PgTable, TableConfig } from 'drizzle-orm/pg-core';
 
@@ -213,4 +213,89 @@ export function orderByDesc(column: SQLWrapper): SQLWrapper {
  */
 export function countExpression(): SQL<number> {
   return sql<number>`count(*)::int`;
+}
+
+// =============================================================================
+// SOFT-DELETE HELPERS
+// =============================================================================
+
+/**
+ * Build a condition to exclude soft-deleted records.
+ * Use this for any table that has a deletedAt column.
+ *
+ * @param deletedAtColumn - The deletedAt column from the table
+ * @param includeDeleted - If true, don't filter deleted records
+ * @returns SQL condition or undefined if includeDeleted is true
+ *
+ * @example
+ * const conditions = [
+ *   eq(chatSessions.userId, userId),
+ *   excludeDeleted(chatSessions.deletedAt),
+ * ].filter(Boolean);
+ */
+export function excludeDeleted(
+  deletedAtColumn: SQLWrapper,
+  includeDeleted?: boolean
+): SQL | undefined {
+  if (includeDeleted) {
+    return undefined;
+  }
+  return isNull(deletedAtColumn);
+}
+
+/**
+ * Build a condition to only include soft-deleted records.
+ * Useful for "trash" or "recycle bin" views.
+ *
+ * @param deletedAtColumn - The deletedAt column from the table
+ * @returns SQL condition for deletedAt IS NOT NULL
+ */
+export function onlyDeleted(deletedAtColumn: SQLWrapper): SQL {
+  return isNotNull(deletedAtColumn);
+}
+
+/**
+ * Build time range conditions for filtering by date.
+ *
+ * @param column - The timestamp column to filter on
+ * @param options - Start and/or end dates
+ * @returns Array of SQL conditions (may be empty)
+ */
+export function buildTimeRangeConditions(
+  column: SQLWrapper,
+  options?: { start?: Date; end?: Date }
+): SQL[] {
+  const conditions: SQL[] = [];
+
+  if (options?.start) {
+    conditions.push(gte(column, options.start));
+  }
+
+  if (options?.end) {
+    conditions.push(lte(column, options.end));
+  }
+
+  return conditions;
+}
+
+/**
+ * Build a condition for filtering by status.
+ * Supports single status or array of statuses.
+ *
+ * @param statusColumn - The status column to filter on
+ * @param status - Single status value or array of values
+ * @returns SQL condition or undefined if no status provided
+ */
+export function buildStatusCondition(
+  statusColumn: SQLWrapper,
+  status?: string | string[]
+): SQL | undefined {
+  if (!status) return undefined;
+
+  if (Array.isArray(status)) {
+    if (status.length === 0) return undefined;
+    return inArray(statusColumn as unknown as PgColumn, status);
+  }
+
+  return eq(statusColumn as unknown as PgColumn, status);
 }
