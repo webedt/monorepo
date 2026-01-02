@@ -13,11 +13,25 @@ import { trace, context, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import type { Span, Tracer, Context } from '@opentelemetry/api';
 import type { Request, Response } from 'express';
 
-/** Tracer instance for the backend service */
-const tracer: Tracer = trace.getTracer('webedt-backend');
+/** Cached tracer instance (lazy initialized after SDK starts) */
+let cachedTracer: Tracer | null = null;
+
+/**
+ * Get the tracer instance, lazily initialized after SDK starts.
+ * This ensures the tracer is created after initializeTelemetry() is called.
+ */
+function getTracerInstance(): Tracer {
+  if (!cachedTracer) {
+    cachedTracer = trace.getTracer('webedt-backend');
+  }
+  return cachedTracer;
+}
 
 /**
  * Standard attribute names for WebEDT spans
+ *
+ * Note: User email is intentionally omitted to avoid PII in trace data.
+ * Use user ID for correlation; email can be looked up from the database if needed.
  */
 export const SpanAttributes = {
   // Session attributes
@@ -26,9 +40,8 @@ export const SpanAttributes = {
   SESSION_STATUS: 'webedt.session.status',
   SESSION_BRANCH: 'webedt.session.branch',
 
-  // User attributes
+  // User attributes (ID only - no PII)
   USER_ID: 'webedt.user.id',
-  USER_EMAIL: 'webedt.user.email',
 
   // SSE attributes
   SSE_EVENT_TYPE: 'webedt.sse.event_type',
@@ -53,7 +66,7 @@ export const SpanAttributes = {
  * Get the current tracer instance
  */
 export function getTracer(): Tracer {
-  return tracer;
+  return getTracerInstance();
 }
 
 /**
@@ -86,7 +99,7 @@ export function startSseSpan(
   sessionId: string,
   req: Request
 ): { span: Span; ctx: Context } {
-  const span = tracer.startSpan(name, {
+  const span = getTracerInstance().startSpan(name, {
     kind: SpanKind.SERVER,
     attributes: {
       [SpanAttributes.SESSION_ID]: sessionId,
@@ -171,15 +184,12 @@ export class SseSpanManager {
   }
 
   /**
-   * Set user information on span
+   * Set user ID on span (email omitted to avoid PII in traces)
    */
-  setUser(userId: string, email?: string): void {
+  setUser(userId: string): void {
     if (this.closed) return;
 
     this.span.setAttribute(SpanAttributes.USER_ID, userId);
-    if (email) {
-      this.span.setAttribute(SpanAttributes.USER_EMAIL, email);
-    }
   }
 
   /**
@@ -227,7 +237,7 @@ export function startClaudeSpan(
   operation: string,
   attributes: Record<string, string | number | boolean> = {}
 ): Span {
-  return tracer.startSpan(`claude.${operation}`, {
+  return getTracerInstance().startSpan(`claude.${operation}`, {
     kind: SpanKind.CLIENT,
     attributes: {
       [SpanAttributes.CLAUDE_OPERATION]: operation,
@@ -249,7 +259,7 @@ export function startGitHubSpan(
   repo: string,
   attributes: Record<string, string | number | boolean> = {}
 ): Span {
-  return tracer.startSpan(`github.${operation}`, {
+  return getTracerInstance().startSpan(`github.${operation}`, {
     kind: SpanKind.CLIENT,
     attributes: {
       [SpanAttributes.GITHUB_OPERATION]: operation,
@@ -275,7 +285,7 @@ export function startDbSpan(
   table: string,
   attributes: Record<string, string | number | boolean> = {}
 ): Span {
-  return tracer.startSpan(`db.${operation}`, {
+  return getTracerInstance().startSpan(`db.${operation}`, {
     kind: SpanKind.CLIENT,
     attributes: {
       'db.system': 'postgresql',
@@ -299,7 +309,7 @@ export async function withSpan<T>(
   fn: (span: Span) => Promise<T>,
   attributes: Record<string, string | number | boolean> = {}
 ): Promise<T> {
-  const span = tracer.startSpan(name, { attributes });
+  const span = getTracerInstance().startSpan(name, { attributes });
 
   try {
     const result = await context.with(trace.setSpan(context.active(), span), () => fn(span));
@@ -330,7 +340,7 @@ export function withSpanSync<T>(
   fn: (span: Span) => T,
   attributes: Record<string, string | number | boolean> = {}
 ): T {
-  const span = tracer.startSpan(name, { attributes });
+  const span = getTracerInstance().startSpan(name, { attributes });
 
   try {
     const result = context.with(trace.setSpan(context.active(), span), () => fn(span));

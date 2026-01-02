@@ -36,15 +36,10 @@ export function telemetryMiddleware(
       span.setAttribute(SpanAttributes.CORRELATION_ID, req.correlationId);
     }
 
-    // Add user context if available (from auth middleware)
-    // Note: authMiddleware runs before this, so req.user may be set
-    const user = (req as Request & { user?: { id: string; email?: string } }).user;
-    if (user) {
-      span.setAttribute(SpanAttributes.USER_ID, user.id);
-      if (user.email) {
-        span.setAttribute(SpanAttributes.USER_EMAIL, user.email);
-      }
-    }
+    // Note: User context is NOT set here because authMiddleware runs AFTER
+    // telemetryMiddleware. User ID should be added to spans in route handlers
+    // where req.user is available, or use SseSpanManager.setUser() for SSE streams.
+    // Email is intentionally omitted to avoid PII in trace data.
 
     // Propagate trace context in response headers
     propagateTraceContext(res);

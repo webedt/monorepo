@@ -13,7 +13,7 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
+import { ConsoleSpanExporter, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
 import {
   ATTR_SERVICE_NAME,
@@ -99,11 +99,15 @@ export function initializeTelemetry(overrideConfig?: Partial<TelemetryConfig>): 
     '@opentelemetry/instrumentation-net': { enabled: false },
   });
 
+  // Configure sampler based on sample rate
+  const sampler = new TraceIdRatioBasedSampler(config.sampleRate);
+
   // Initialize the SDK
   sdk = new NodeSDK({
     resource,
     traceExporter,
     instrumentations,
+    sampler,
   });
 
   try {
@@ -111,11 +115,7 @@ export function initializeTelemetry(overrideConfig?: Partial<TelemetryConfig>): 
     logTelemetryConfig(config);
     console.log('[Telemetry] SDK initialized successfully');
     isInitialized = true;
-
-    // Register shutdown handler
-    process.on('SIGTERM', async () => {
-      await shutdownTelemetry();
-    });
+    // Note: Shutdown is handled by gracefulShutdown.ts to avoid duplicate handlers
   } catch (error) {
     console.error('[Telemetry] Failed to initialize SDK:', error);
     isInitialized = true; // Prevent retry

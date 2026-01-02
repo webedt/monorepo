@@ -1,6 +1,6 @@
 // Initialize OpenTelemetry BEFORE any other imports
 // This ensures auto-instrumentation captures all module loads
-import { initializeTelemetry, shutdownTelemetry, telemetryMiddleware } from './telemetry/index.js';
+import { initializeTelemetry, telemetryMiddleware } from './telemetry/index.js';
 initializeTelemetry();
 
 import 'dotenv/config';
