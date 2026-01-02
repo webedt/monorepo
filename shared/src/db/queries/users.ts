@@ -5,7 +5,7 @@
  * Reduces duplication in auth/admin routes.
  */
 
-import { eq, desc, sql, ilike, or, and } from 'drizzle-orm';
+import { eq, desc, sql, ilike, or, and, inArray } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { db, users, sessions } from '../index.js';
 import type { User, Session } from '../schema.js';
@@ -60,6 +60,18 @@ export interface UserFilterOptions {
 }
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Escape special characters in LIKE patterns to prevent SQL injection
+ * Escapes: % (wildcard), _ (single char), \ (escape char)
+ */
+function escapeLikePattern(pattern: string): string {
+  return pattern.replace(/[%_\\]/g, '\\$&');
+}
+
+// =============================================================================
 // SELECT FIELD SETS
 // =============================================================================
 
@@ -111,7 +123,7 @@ export function buildUserConditions(
   }
 
   if (options.search) {
-    const searchPattern = `%${options.search}%`;
+    const searchPattern = `%${escapeLikePattern(options.search)}%`;
     conditions.push(
       or(
         ilike(users.email, searchPattern),
@@ -145,7 +157,8 @@ export async function findUserById(id: string): Promise<User | null> {
 }
 
 /**
- * Find a user by email (case-insensitive)
+ * Find a user by email
+ * Note: Emails are normalized to lowercase on storage, so input is lowercased before comparison.
  */
 export async function findUserByEmail(email: string): Promise<User | null> {
   const [user] = await db
@@ -406,7 +419,7 @@ export async function findUsersByIds(ids: string[]): Promise<UserInfo[]> {
   return db
     .select(userInfoFields)
     .from(users)
-    .where(sql`${users.id} = ANY(${ids})`);
+    .where(inArray(users.id, ids));
 }
 
 /**

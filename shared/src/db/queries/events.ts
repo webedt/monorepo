@@ -5,7 +5,7 @@
  * Reduces duplication in session/resume routes.
  */
 
-import { eq, and, desc, asc, sql, gte, lte, isNull, isNotNull, gt } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, gt } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { db, events, chatSessions } from '../index.js';
 import type { Event, ChatSession } from '../schema.js';
@@ -90,8 +90,9 @@ export function buildEventConditions(
 
   if (options.eventType) {
     if (Array.isArray(options.eventType)) {
-      const typesJson = JSON.stringify(options.eventType);
-      conditions.push(sql`${events.eventData}->>'type' = ANY(${typesJson}::text[])`);
+      // Use IN clause with properly parameterized values
+      const typeValues = options.eventType.map(t => sql`${t}`);
+      conditions.push(sql`${events.eventData}->>'type' IN (${sql.join(typeValues, sql`, `)})`);
     } else {
       conditions.push(sql`${events.eventData}->>'type' = ${options.eventType}`);
     }
