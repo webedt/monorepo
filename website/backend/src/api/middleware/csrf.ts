@@ -58,9 +58,10 @@ const EXEMPT_PATH_PATTERNS: RegExp[] = [
   /^\/api\/auth\/register$/,
 
   // Webhook callbacks (external services calling our API)
+  // These endpoints receive callbacks from external services that cannot include CSRF tokens
   /^\/api\/github\/callback$/,
-  /^\/api\/payments\/webhook$/,
-  /^\/api\/payments\/webhook\/.+$/,
+  /^\/api\/payments\/webhooks\/stripe$/,
+  /^\/api\/payments\/webhooks\/paypal$/,
 
   // Health check and infrastructure endpoints
   /^\/health/,
@@ -286,3 +287,17 @@ export const CSRF_CONSTANTS = {
   COOKIE_NAME: CSRF_COOKIE_NAME,
   HEADER_NAME: CSRF_HEADER_NAME,
 };
+
+/**
+ * Get the list of exempt path patterns
+ * Useful for testing and documentation purposes
+ */
+export function getExemptPatterns(): RegExp[] {
+  return [...EXEMPT_PATH_PATTERNS];
+}
+
+/**
+ * Check if a specific path is exempt from CSRF protection
+ * Exported for testing purposes
+ */
+export { isExemptPath };
