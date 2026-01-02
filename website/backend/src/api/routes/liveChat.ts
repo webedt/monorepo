@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, liveChatMessages, users, eq, and, desc, StorageService, ServiceProvider, ASseHelper, SSEWriter } from '@webedt/shared';
+import { db, liveChatMessages, users, eq, and, desc, StorageService, ServiceProvider, ASseHelper } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
 import {
   requireStorageQuota,
@@ -26,14 +26,7 @@ import {
   DEDUPLICATION,
 } from '@webedt/shared';
 import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
-
-/**
- * Create an SSEWriter for a response with automatic heartbeat management.
- */
-function createSSEWriter(res: Response): SSEWriter {
-  const sseHelper = ServiceProvider.get(ASseHelper);
-  return SSEWriter.create(res, sseHelper);
-}
+import { createSSEWriter } from '../utils/sseHandler.js';
 
 const router = Router();
 

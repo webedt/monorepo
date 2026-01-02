@@ -17,6 +17,7 @@ import { sseRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { writeSSEHeaders, onClientDisconnect } from '../utils/sseHandler.js';
 
 const router = Router();
 
@@ -120,14 +121,8 @@ router.get('/resume/:sessionId', requireAuth, sseRateLimiter, async (req: Reques
       status: session.status
     });
 
-    // Setup SSE response with correlation ID header
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-      'X-Request-ID': correlationId,
-    });
+    // Setup SSE response with correlation ID header using shared utility
+    writeSSEHeaders(res, { correlationId });
 
     // Send submission preview event immediately so user sees their request was received
     // userRequest contains the session title (updated when session_name event is received)
@@ -338,8 +333,8 @@ router.get('/resume/:sessionId', requireAuth, sseRateLimiter, async (req: Reques
         }
       });
 
-      // Handle client disconnect
-      req.on('close', () => {
+      // Handle client disconnect using shared utility
+      onClientDisconnect(req, () => {
         clientDisconnected = true;
         unsubscribe();
         logger.info('Client disconnected from live stream', {

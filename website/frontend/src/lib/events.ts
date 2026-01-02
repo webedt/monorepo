@@ -3,6 +3,114 @@
  * Manages Server-Sent Events connections with retry logic
  */
 
+/** Storage key prefix for lastEventId persistence */
+const STORAGE_KEY_PREFIX = 'sse_lastEventId_';
+
+/** TTL for stored lastEventId in milliseconds (5 minutes) */
+const LAST_EVENT_ID_TTL_MS = 5 * 60 * 1000;
+
+interface StoredEventId {
+  eventId: string;
+  timestamp: number;
+}
+
+/**
+ * Generate a storage key from URL
+ * Uses URL pathname to create a unique key per session endpoint
+ */
+function getStorageKey(url: string): string {
+  try {
+    // Handle both absolute and relative URLs
+    const urlObj = new URL(url, window.location.origin);
+    // Use pathname + search params as key (excludes lastEventId param)
+    const params = new URLSearchParams(urlObj.search);
+    params.delete('lastEventId'); // Remove lastEventId from key generation
+    const cleanSearch = params.toString();
+    const keyBase = cleanSearch ? `${urlObj.pathname}?${cleanSearch}` : urlObj.pathname;
+    return `${STORAGE_KEY_PREFIX}${keyBase}`;
+  } catch {
+    // Fallback to using URL as-is
+    return `${STORAGE_KEY_PREFIX}${url}`;
+  }
+}
+
+/**
+ * Persist lastEventId to sessionStorage with timestamp
+ */
+function persistLastEventId(url: string, eventId: string): void {
+  try {
+    const key = getStorageKey(url);
+    const data: StoredEventId = {
+      eventId,
+      timestamp: Date.now(),
+    };
+    sessionStorage.setItem(key, JSON.stringify(data));
+  } catch (error) {
+    // sessionStorage may be unavailable (private browsing, quota exceeded)
+    console.warn('[SSE] Failed to persist lastEventId:', error);
+  }
+}
+
+/**
+ * Restore lastEventId from sessionStorage if not expired
+ */
+function restoreLastEventId(url: string): string | null {
+  try {
+    const key = getStorageKey(url);
+    const stored = sessionStorage.getItem(key);
+    if (!stored) return null;
+
+    const data: StoredEventId = JSON.parse(stored);
+    const age = Date.now() - data.timestamp;
+
+    if (age > LAST_EVENT_ID_TTL_MS) {
+      // Expired - remove and return null
+      sessionStorage.removeItem(key);
+      console.log('[SSE] Stored lastEventId expired, discarding');
+      return null;
+    }
+
+    console.log('[SSE] Restored lastEventId from storage:', data.eventId);
+    return data.eventId;
+  } catch (error) {
+    console.warn('[SSE] Failed to restore lastEventId:', error);
+    return null;
+  }
+}
+
+/**
+ * Clear stored lastEventId for a URL
+ */
+function clearStoredEventId(url: string): void {
+  try {
+    const key = getStorageKey(url);
+    sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Clear all stored lastEventIds (for logout)
+ */
+export function clearAllStoredEventIds(): void {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith(STORAGE_KEY_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      sessionStorage.removeItem(key);
+    }
+    console.log('[SSE] Cleared all stored lastEventIds');
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export interface SSEOptions {
   /** Called when connection is established */
   onOpen?: () => void;
@@ -22,6 +130,8 @@ export interface SSEOptions {
   retryDelay?: number;
   /** Event types to listen for (default: all) */
   eventTypes?: string[];
+  /** Clear stored lastEventId when connection closes (default: false) */
+  clearStorageOnClose?: boolean;
 }
 
 export class EventSourceManager {
@@ -41,8 +151,12 @@ export class EventSourceManager {
       reconnect: true,
       maxRetries: 5,
       retryDelay: 1000,
+      clearStorageOnClose: false,
       ...options,
     };
+
+    // Restore lastEventId from sessionStorage for seamless resume across page reloads
+    this.lastEventId = restoreLastEventId(url);
   }
 
   /**
@@ -75,9 +189,10 @@ export class EventSourceManager {
     };
 
     this.eventSource.onmessage = (event) => {
-      // Track last event ID for reliable resumption on reconnect
+      // Track last event ID for reliable resumption on reconnect and page reload
       if (event.lastEventId) {
         this.lastEventId = event.lastEventId;
+        persistLastEventId(this.url, event.lastEventId);
       }
       this.options.onMessage?.(event);
       this.handleEventData('message', event.data);
@@ -111,9 +226,10 @@ export class EventSourceManager {
     for (const type of eventTypes) {
       const handler: EventListener = (evt: Event) => {
         const event = evt as MessageEvent;
-        // Track last event ID for reliable resumption on reconnect
+        // Track last event ID for reliable resumption on reconnect and page reload
         if (event.lastEventId) {
           this.lastEventId = event.lastEventId;
+          persistLastEventId(this.url, event.lastEventId);
         }
         this.handleEventData(type, event.data);
       };
@@ -176,8 +292,9 @@ export class EventSourceManager {
 
   /**
    * Close the connection and clean up all resources
+   * @param clearStorage - Override clearStorageOnClose option for this call
    */
-  close(): void {
+  close(clearStorage?: boolean): void {
     this.isClosed = true;
 
     // Clear ALL pending reconnect timeouts to prevent memory leaks
@@ -195,9 +312,24 @@ export class EventSourceManager {
       console.log('[SSE] Closed');
     }
 
+    // Clear storage if requested (explicit param or option)
+    const shouldClearStorage = clearStorage ?? this.options.clearStorageOnClose;
+    if (shouldClearStorage) {
+      clearStoredEventId(this.url);
+      console.log('[SSE] Cleared stored lastEventId');
+    }
+
     // Reset state for potential reuse
     this.retryCount = 0;
     this.lastEventId = null;
+  }
+
+  /**
+   * Clear the stored lastEventId without closing the connection
+   * Useful for explicit session completion
+   */
+  clearStoredEventId(): void {
+    clearStoredEventId(this.url);
   }
 
   /**
@@ -250,7 +382,8 @@ export function createSSEConnection(
         } else {
           handlers.onComplete?.();
         }
-        manager.close();
+        // Clear storage on completion/error since session is done
+        manager.close(true);
       }
     },
     onClose: () => {
@@ -264,7 +397,7 @@ export function createSSEConnection(
   manager.connect();
 
   return {
-    close: () => manager.close(),
+    close: () => manager.close(true),
   };
 }
 

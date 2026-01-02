@@ -24,6 +24,13 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.52.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.56.0",
+    "@opentelemetry/resources": "^1.29.0",
+    "@opentelemetry/sdk-node": "^0.56.0",
+    "@opentelemetry/sdk-trace-base": "^1.29.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0",
     "@webedt/shared": "file:../../shared",
     "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
