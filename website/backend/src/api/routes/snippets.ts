@@ -29,6 +29,7 @@ import {
   isValidCategory,
   parseOffsetPagination,
   PAGINATION_PRESETS,
+  withTransactionOrThrow,
 } from '@webedt/shared';
 import type { SnippetLanguage, SnippetCategory } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -432,45 +433,54 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const snippetId = uuidv4();
     const validatedTags = validateTags(tags);
 
-    // Create snippet
-    const [newSnippet] = await db
-      .insert(snippets)
-      .values({
-        id: snippetId,
-        userId: authReq.user!.id,
-        title: title.trim(),
-        description: description?.trim() || null,
-        code: code.trim(),
-        language: isValidLanguage(language) ? language : 'other',
-        category: isValidCategory(category) ? category : 'snippet',
-        tags: validatedTags,
-        variables: validateVariables(variables),
-        isFavorite: Boolean(isFavorite),
-        isPublic: Boolean(isPublic),
-      })
-      .returning();
+    // Create snippet and add to collections atomically
+    const newSnippet = await withTransactionOrThrow(
+      db,
+      async (tx) => {
+        // Create snippet
+        const [createdSnippet] = await tx
+          .insert(snippets)
+          .values({
+            id: snippetId,
+            userId: authReq.user!.id,
+            title: title.trim(),
+            description: description?.trim() || null,
+            code: code.trim(),
+            language: isValidLanguage(language) ? language : 'other',
+            category: isValidCategory(category) ? category : 'snippet',
+            tags: validatedTags,
+            variables: validateVariables(variables),
+            isFavorite: Boolean(isFavorite),
+            isPublic: Boolean(isPublic),
+          })
+          .returning();
 
-    // Add to collections if specified
-    if (Array.isArray(collectionIds) && collectionIds.length > 0) {
-      // Verify collections belong to user
-      const userCollections = await db
-        .select({ id: snippetCollections.id })
-        .from(snippetCollections)
-        .where(eq(snippetCollections.userId, authReq.user!.id));
+        // Add to collections if specified
+        if (Array.isArray(collectionIds) && collectionIds.length > 0) {
+          // Verify collections belong to user
+          const userCollections = await tx
+            .select({ id: snippetCollections.id })
+            .from(snippetCollections)
+            .where(eq(snippetCollections.userId, authReq.user!.id));
 
-      const userCollectionIds = new Set(userCollections.map(c => c.id));
-      const validCollectionIds = collectionIds.filter(id => userCollectionIds.has(id));
+          const userCollectionIds = new Set(userCollections.map(c => c.id));
+          const validCollectionIds = collectionIds.filter(id => userCollectionIds.has(id));
 
-      if (validCollectionIds.length > 0) {
-        await db.insert(snippetsInCollections).values(
-          validCollectionIds.map(collectionId => ({
-            id: uuidv4(),
-            snippetId,
-            collectionId,
-          }))
-        );
-      }
-    }
+          if (validCollectionIds.length > 0) {
+            await tx.insert(snippetsInCollections).values(
+              validCollectionIds.map(collectionId => ({
+                id: uuidv4(),
+                snippetId,
+                collectionId,
+              }))
+            );
+          }
+        }
+
+        return createdSnippet;
+      },
+      { context: { operation: 'createSnippet', snippetId, userId: authReq.user!.id } }
+    );
 
     logger.info(`Created snippet ${snippetId}`, {
       component: 'Snippets',
@@ -1008,26 +1018,35 @@ router.post('/collections', requireAuth, async (req: Request, res: Response) => 
 
     const collectionId = uuidv4();
 
-    // If this is set as default, clear other defaults first
-    if (isDefault) {
-      await db
-        .update(snippetCollections)
-        .set({ isDefault: false })
-        .where(eq(snippetCollections.userId, authReq.user!.id));
-    }
+    // Create collection with default handling atomically
+    const newCollection = await withTransactionOrThrow(
+      db,
+      async (tx) => {
+        // If this is set as default, clear other defaults first
+        if (isDefault) {
+          await tx
+            .update(snippetCollections)
+            .set({ isDefault: false })
+            .where(eq(snippetCollections.userId, authReq.user!.id));
+        }
 
-    const [newCollection] = await db
-      .insert(snippetCollections)
-      .values({
-        id: collectionId,
-        userId: authReq.user!.id,
-        name: name.trim(),
-        description: description?.trim() || null,
-        color: isValidHexColor(color) ? color : null,
-        icon: icon || null,
-        isDefault: Boolean(isDefault),
-      })
-      .returning();
+        const [createdCollection] = await tx
+          .insert(snippetCollections)
+          .values({
+            id: collectionId,
+            userId: authReq.user!.id,
+            name: name.trim(),
+            description: description?.trim() || null,
+            color: isValidHexColor(color) ? color : null,
+            icon: icon || null,
+            isDefault: Boolean(isDefault),
+          })
+          .returning();
+
+        return createdCollection;
+      },
+      { context: { operation: 'createSnippetCollection', collectionId, userId: authReq.user!.id } }
+    );
 
     logger.info(`Created snippet collection ${collectionId}`, {
       component: 'Snippets',
@@ -1125,21 +1144,31 @@ router.put('/collections/:id', requireAuth, async (req: Request, res: Response) 
       updates.sortOrder = sortOrder;
     }
     if (isDefault !== undefined) {
-      if (isDefault) {
-        // Clear other defaults first
-        await db
-          .update(snippetCollections)
-          .set({ isDefault: false })
-          .where(eq(snippetCollections.userId, authReq.user!.id));
-      }
       updates.isDefault = Boolean(isDefault);
     }
 
-    const [updated] = await db
-      .update(snippetCollections)
-      .set(updates)
-      .where(eq(snippetCollections.id, id))
-      .returning();
+    // Update collection with default handling atomically
+    const updated = await withTransactionOrThrow(
+      db,
+      async (tx) => {
+        // If setting as default, clear other defaults first
+        if (isDefault) {
+          await tx
+            .update(snippetCollections)
+            .set({ isDefault: false })
+            .where(eq(snippetCollections.userId, authReq.user!.id));
+        }
+
+        const [updatedCollection] = await tx
+          .update(snippetCollections)
+          .set(updates)
+          .where(eq(snippetCollections.id, id))
+          .returning();
+
+        return updatedCollection;
+      },
+      { context: { operation: 'updateSnippetCollection', collectionId: id, userId: authReq.user!.id } }
+    );
 
     res.json({
       success: true,

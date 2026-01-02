@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPaymentService, FRONTEND_URL, FRONTEND_PORT } from '@webedt/shared';
+import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPaymentService, FRONTEND_URL, FRONTEND_PORT, withTransactionOrThrow } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { standardRateLimiter, paymentRateLimiter } from '../middleware/rateLimit.js';
@@ -402,49 +402,59 @@ router.post('/buy/:gameId', paymentRateLimiter, async (req: Request, res: Respon
       return;
     }
 
-    // Free game - complete purchase directly
+    // Free game - complete purchase directly using transaction for atomicity
     const purchaseId = uuidv4();
-    const [purchase] = await db
-      .insert(purchases)
-      .values({
-        id: purchaseId,
-        userId: authReq.user!.id,
-        gameId,
-        amount: 0,
-        currency: game.currency,
-        status: 'completed',
-        paymentMethod: 'free',
-        completedAt: new Date(),
-      })
-      .returning();
-
-    // Add to library
     const libraryItemId = uuidv4();
-    const [libraryItem] = await db
-      .insert(userLibrary)
-      .values({
-        id: libraryItemId,
-        userId: authReq.user!.id,
-        gameId,
-        purchaseId,
-      })
-      .returning();
 
-    // Remove from wishlist if present
-    await db
-      .delete(wishlists)
-      .where(
-        and(
-          eq(wishlists.userId, authReq.user!.id),
-          eq(wishlists.gameId, gameId)
-        )
-      );
+    const { purchase, libraryItem } = await withTransactionOrThrow(
+      db,
+      async (tx) => {
+        // Create purchase record
+        const [newPurchase] = await tx
+          .insert(purchases)
+          .values({
+            id: purchaseId,
+            userId: authReq.user!.id,
+            gameId,
+            amount: 0,
+            currency: game.currency,
+            status: 'completed',
+            paymentMethod: 'free',
+            completedAt: new Date(),
+          })
+          .returning();
 
-    // Increment download count
-    await db
-      .update(games)
-      .set({ downloadCount: game.downloadCount + 1 })
-      .where(eq(games.id, gameId));
+        // Add to library
+        const [newLibraryItem] = await tx
+          .insert(userLibrary)
+          .values({
+            id: libraryItemId,
+            userId: authReq.user!.id,
+            gameId,
+            purchaseId,
+          })
+          .returning();
+
+        // Remove from wishlist if present
+        await tx
+          .delete(wishlists)
+          .where(
+            and(
+              eq(wishlists.userId, authReq.user!.id),
+              eq(wishlists.gameId, gameId)
+            )
+          );
+
+        // Increment download count
+        await tx
+          .update(games)
+          .set({ downloadCount: game.downloadCount + 1 })
+          .where(eq(games.id, gameId));
+
+        return { purchase: newPurchase, libraryItem: newLibraryItem };
+      },
+      { context: { operation: 'freeGamePurchase', gameId, userId: authReq.user!.id } }
+    );
 
     logger.info(`User ${authReq.user!.id} acquired free game ${gameId}`, {
       component: 'Purchases',
