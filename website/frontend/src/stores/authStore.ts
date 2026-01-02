@@ -5,6 +5,7 @@
 
 import { Store } from '../lib/store';
 import { authApi } from '../lib/api';
+import { clearAllStoredEventIds } from '../lib/events';
 import type { User } from '../types';
 
 interface AuthState {
@@ -127,6 +128,8 @@ export class AuthStore extends Store<AuthState> {
 
     try {
       await authApi.logout();
+      // Clear SSE event IDs on logout to prevent stale session resumption
+      clearAllStoredEventIds();
       this.setState({
         user: null,
         isLoading: false,

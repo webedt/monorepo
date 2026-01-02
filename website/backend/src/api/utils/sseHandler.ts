@@ -6,13 +6,13 @@
  *
  * Features:
  * - Standard SSE header configuration
- * - Automatic heartbeat management (15-second interval)
+ * - Automatic heartbeat management (configurable interval via SSE_HEARTBEAT_INTERVAL_MS)
  * - Client disconnect detection and cleanup
  * - Connection state tracking
  */
 
 import type { Request, Response } from 'express';
-import { ASseHelper, ServiceProvider, SSEWriter } from '@webedt/shared';
+import { ASseHelper, ServiceProvider, SSEWriter, SSE_HEARTBEAT_INTERVAL_MS } from '@webedt/shared';
 import type { SSEWriterOptions } from '@webedt/shared';
 
 /**
@@ -168,7 +168,7 @@ export function createDisconnectTracker(req: Request): {
  *
  * This is the recommended approach for SSE routes. The writer:
  * - Sets up SSE headers
- * - Manages 15-second heartbeats automatically
+ * - Manages heartbeats automatically (configurable interval)
  * - Tracks connection state
  * - Provides type-safe event writing methods
  *
@@ -247,7 +247,7 @@ export function createHeartbeat(
     onError?: (error: unknown) => void;
   } = {}
 ): { stop: () => void } {
-  const intervalMs = options.intervalMs ?? 15000;
+  const intervalMs = options.intervalMs ?? SSE_HEARTBEAT_INTERVAL_MS;
   const isDisconnected = options.isDisconnected ?? (() => false);
   const onError = options.onError;
 

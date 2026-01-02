@@ -80,6 +80,10 @@ import {
   RECOVERY_DELAY_SERVER_MS,
   RECOVERY_DELAY_CONFLICT_MS,
   RECOVERY_DELAY_UNKNOWN_MS,
+  // Request deduplication
+  REQUEST_DEDUP_DEFAULT_TTL_MS,
+  REQUEST_DEDUP_SYNC_TTL_MS,
+  REQUEST_DEDUP_MESSAGE_TTL_MS,
 } from './env.js';
 
 /**
@@ -513,4 +517,35 @@ export const CONTEXT_RETRY = {
   DB_CONNECTION: {
     MAX_RETRIES: DB_CONNECTION_MAX_RETRIES,
   },
+} as const;
+
+/**
+ * DEDUPLICATION - Request deduplication TTL configuration
+ *
+ * These values control how long deduplicated requests are cached.
+ * Adjust based on expected operation duration and duplicate prevention needs.
+ *
+ * Safe ranges:
+ * - Sync operations: 15000-60000ms (15s-60s)
+ * - Message posting: 2000-10000ms (2s-10s)
+ * - Default: 30000-120000ms (30s-2min)
+ */
+export const DEDUPLICATION = {
+  /**
+   * Default TTL for deduplicated requests (default: 60s)
+   * Used when no specific TTL is configured
+   */
+  DEFAULT_TTL_MS: REQUEST_DEDUP_DEFAULT_TTL_MS,
+
+  /**
+   * TTL for sync operation deduplication (default: 30s)
+   * Used for session sync, event sync operations
+   */
+  SYNC_TTL_MS: REQUEST_DEDUP_SYNC_TTL_MS,
+
+  /**
+   * TTL for message posting deduplication (default: 5s)
+   * Shorter TTL to allow quick re-posting after failed attempts
+   */
+  MESSAGE_TTL_MS: REQUEST_DEDUP_MESSAGE_TTL_MS,
 } as const;

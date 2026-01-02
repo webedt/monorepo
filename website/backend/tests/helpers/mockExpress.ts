@@ -10,6 +10,8 @@ export interface MockRequest extends Partial<Request> {
   params: Record<string, string>;
   query: Record<string, string>;
   headers: Record<string, string>;
+  method?: string;
+  path?: string;
   user?: User | null;
   authSession?: Session | null;
 }
@@ -27,6 +29,8 @@ export function createMockRequest(overrides: Partial<MockRequest> = {}): MockReq
     params: {},
     query: {},
     headers: {},
+    method: 'GET',
+    path: '/',
     user: null,
     authSession: null,
     ...overrides,
