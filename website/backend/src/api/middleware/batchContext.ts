@@ -26,32 +26,104 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import {
   BatchContext,
+  // User loaders
   createUserLoader,
   createUserInfoLoader,
   createAuthorInfoLoader,
+  // Session loaders
   createSessionLoader,
   createActiveSessionLoader,
   createSessionSummaryLoader,
+  // Game loaders
+  createGameLoader,
+  createPublishedGameLoader,
+  createGameSummaryLoader,
+  // Organization loaders
+  createOrganizationLoader,
+  createOrganizationBySlugLoader,
+  createOrganizationMembersLoader,
+  createOrganizationRepositoriesLoader,
+  createOrganizationMemberCountLoader,
+  // Collection loaders
+  createCollectionLoader,
+  createCollectionSessionCountLoader,
+  createSessionCollectionsLoader,
+  // Event loaders
+  createEventSummaryLoader,
+  createEventCountLoader,
 } from '@webedt/shared';
 
-import type { DataLoader, User, ChatSession, UserInfo, AuthorInfo, SessionSummary } from '@webedt/shared';
+import type {
+  DataLoader,
+  User,
+  ChatSession,
+  Game,
+  Organization,
+  Collection,
+  OrganizationRepository,
+  UserInfo,
+  AuthorInfo,
+  SessionSummary,
+  GameSummary,
+  MemberWithUser,
+  SessionCollectionInfo,
+  EventSummary,
+} from '@webedt/shared';
 
 /**
  * Collection of request-scoped entity loaders
  */
 export interface RequestLoaders {
+  // User loaders
   /** Batch load full user records by ID */
   user: DataLoader<string, User>;
   /** Batch load user info (safe for display) by ID */
   userInfo: DataLoader<string, UserInfo>;
   /** Batch load author info (id + displayName) by user ID */
   author: DataLoader<string, AuthorInfo>;
+
+  // Session loaders
   /** Batch load chat sessions by ID */
   session: DataLoader<string, ChatSession>;
   /** Batch load active (non-deleted) sessions by ID */
   activeSession: DataLoader<string, ChatSession>;
   /** Batch load session summaries by ID */
   sessionSummary: DataLoader<string, SessionSummary>;
+
+  // Game/Store loaders
+  /** Batch load games by ID */
+  game: DataLoader<string, Game>;
+  /** Batch load published games only by ID */
+  publishedGame: DataLoader<string, Game>;
+  /** Batch load game summaries (lightweight) by ID */
+  gameSummary: DataLoader<string, GameSummary>;
+
+  // Organization loaders
+  /** Batch load organizations by ID */
+  organization: DataLoader<string, Organization>;
+  /** Batch load organizations by slug */
+  organizationBySlug: DataLoader<string, Organization>;
+  /** Batch load organization members with user info */
+  organizationMembers: DataLoader<string, MemberWithUser[]>;
+  /** Batch load organization repositories */
+  organizationRepos: DataLoader<string, OrganizationRepository[]>;
+  /** Batch load organization member counts */
+  organizationMemberCount: DataLoader<string, number>;
+
+  // Collection loaders
+  /** Batch load collections by ID */
+  collection: DataLoader<string, Collection>;
+  /** Batch load collection session counts */
+  collectionSessionCount: DataLoader<string, number>;
+  /** Batch load collections a session belongs to */
+  sessionCollections: DataLoader<string, SessionCollectionInfo[]>;
+
+  // Event loaders
+  /** Batch load event summaries by session ID */
+  eventSummary: DataLoader<string, EventSummary>;
+  /** Batch load event counts by session ID */
+  eventCount: DataLoader<string, number>;
+
   /** The underlying BatchContext for custom loaders */
   context: BatchContext;
 }
@@ -87,12 +159,37 @@ function createRequestLoaders(): RequestLoaders {
   const context = new BatchContext();
 
   return {
+    // User loaders
     user: createUserLoader(),
     userInfo: createUserInfoLoader(),
     author: createAuthorInfoLoader(),
+
+    // Session loaders
     session: createSessionLoader(),
     activeSession: createActiveSessionLoader(),
     sessionSummary: createSessionSummaryLoader(),
+
+    // Game/Store loaders
+    game: createGameLoader(),
+    publishedGame: createPublishedGameLoader(),
+    gameSummary: createGameSummaryLoader(),
+
+    // Organization loaders
+    organization: createOrganizationLoader(),
+    organizationBySlug: createOrganizationBySlugLoader(),
+    organizationMembers: createOrganizationMembersLoader(),
+    organizationRepos: createOrganizationRepositoriesLoader(),
+    organizationMemberCount: createOrganizationMemberCountLoader(),
+
+    // Collection loaders
+    collection: createCollectionLoader(),
+    collectionSessionCount: createCollectionSessionCountLoader(),
+    sessionCollections: createSessionCollectionsLoader(),
+
+    // Event loaders
+    eventSummary: createEventSummaryLoader(),
+    eventCount: createEventCountLoader(),
+
     context,
   };
 }

@@ -218,6 +218,121 @@ try {
 | File parsing | Wrap and Throw | Add file path context |
 | Optional features | Recover with Fallback | Feature flag checks |
 
+## DataLoader Patterns
+
+DataLoaders prevent N+1 query problems by batching multiple individual lookups into single bulk queries. Use DataLoaders when fetching related entities in loops.
+
+### Available Loaders
+
+Loaders are available via `req.loaders` in Express routes (requires `batchContextMiddleware()`):
+
+| Category | Loader | Description |
+|----------|--------|-------------|
+| **User** | `user` | Full user records by ID |
+| | `userInfo` | User info (safe for display) by ID |
+| | `author` | Author info (id + displayName) by ID |
+| **Session** | `session` | Chat sessions by ID |
+| | `activeSession` | Active (non-deleted) sessions by ID |
+| | `sessionSummary` | Session summaries by ID |
+| **Game/Store** | `game` | Games by ID |
+| | `publishedGame` | Published games only by ID |
+| | `gameSummary` | Lightweight game summaries by ID |
+| **Organization** | `organization` | Organizations by ID |
+| | `organizationBySlug` | Organizations by slug |
+| | `organizationMembers` | Members with user info by org ID |
+| | `organizationRepos` | Repositories by org ID |
+| | `organizationMemberCount` | Member counts by org ID |
+| **Collection** | `collection` | Collections by ID |
+| | `collectionSessionCount` | Session counts by collection ID |
+| | `sessionCollections` | Collections a session belongs to |
+| **Event** | `eventSummary` | Event summaries by session ID |
+| | `eventCount` | Event counts by session ID |
+
+### Usage Pattern
+
+```typescript
+// Setup: Add middleware to Express app
+app.use(batchContextMiddleware());
+
+// Usage in routes
+router.get('/posts', async (req: BatchContextRequest, res) => {
+  const posts = await getPosts();
+
+  // Bad: N+1 queries (one per author)
+  for (const post of posts) {
+    post.author = await db.select().from(users).where(eq(users.id, post.authorId));
+  }
+
+  // Good: Batched into single query
+  const authors = await Promise.all(
+    posts.map(p => req.loaders.author.load(p.authorId))
+  );
+  posts.forEach((post, i) => post.author = authors[i]);
+});
+```
+
+### Creating Custom Loaders
+
+Use `createCustomLoader` for one-off batch loading needs:
+
+```typescript
+import { createCustomLoader } from '../middleware/batchContext.js';
+import { createResultMap } from '@webedt/shared';
+
+router.get('/items', async (req, res) => {
+  const commentLoader = createCustomLoader(req, 'comments', async (ids) => {
+    const comments = await db.select().from(comments).where(inArray(comments.id, ids));
+    return createResultMap(comments, 'id');
+  });
+
+  const comments = await commentLoader.loadMany(commentIds);
+});
+```
+
+### Creating New Entity Loaders
+
+Add new loaders to `shared/src/db/loaders/`:
+
+```typescript
+// shared/src/db/loaders/myEntityLoader.ts
+import { DataLoader, createResultMap } from '../dataLoader.js';
+import { db, myTable } from '../index.js';
+import type { DataLoaderOptions } from '../dataLoader.js';
+
+export function createMyEntityLoader(options?: DataLoaderOptions): DataLoader<string, MyEntity> {
+  return new DataLoader<string, MyEntity>(
+    async (ids: string[]) => {
+      const results = await db
+        .select()
+        .from(myTable)
+        .where(inArray(myTable.id, ids));
+      return createResultMap(results, 'id');
+    },
+    options
+  );
+}
+```
+
+Then export from `loaders/index.ts` and add to `batchContext.ts`.
+
+### Best Practices
+
+1. **Request-scoped loaders**: Create loaders per request, not globally
+2. **Use for related entities**: Best for loading related data in loops (authors, tags, etc.)
+3. **Prefer JOINs for single queries**: If you only need data once, use a JOIN
+4. **Loader caching**: Loaders cache within a request - same ID returns same instance
+5. **Error handling**: Individual load failures don't fail the batch
+
+### Reference Examples
+
+See `shared/src/db/loaders/` for canonical examples:
+- [userLoader.ts](shared/src/db/loaders/userLoader.ts) - User entity loaders
+- [sessionLoader.ts](shared/src/db/loaders/sessionLoader.ts) - Session loaders
+- [gameLoader.ts](shared/src/db/loaders/gameLoader.ts) - Game/store loaders
+- [organizationLoader.ts](shared/src/db/loaders/organizationLoader.ts) - Organization loaders
+- [collectionLoader.ts](shared/src/db/loaders/collectionLoader.ts) - Collection loaders
+- [eventLoader.ts](shared/src/db/loaders/eventLoader.ts) - Event loaders
+
 ## Reference Examples
 
 See `shared/src/claudeWeb/` for canonical examples:

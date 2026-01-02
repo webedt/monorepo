@@ -741,10 +741,48 @@ export {
   createActiveSessionLoader,
   createSessionSummaryLoader,
   createUserSessionsLoader,
+  // Game/Store loaders
+  createGameLoader,
+  createPublishedGameLoader,
+  createGameSummaryLoader,
+  createGameOwnershipLoader,
+  createUserLibraryGamesLoader,
+  createUserWishlistGamesLoader,
+  // Organization loaders
+  createOrganizationLoader,
+  createOrganizationBySlugLoader,
+  createUserOrganizationsLoader,
+  createOrganizationMembersLoader,
+  createOrganizationMembershipLoader,
+  createOrganizationRepositoriesLoader,
+  createOrganizationMemberCountLoader,
+  // Collection loaders
+  createCollectionLoader,
+  createUserCollectionsLoader,
+  createCollectionSessionCountLoader,
+  createSessionCollectionsLoader,
+  createCollectionSessionsLoader,
+  createSessionInCollectionLoader,
+  // Event loaders
+  createEventSummaryLoader,
+  createEventCountLoader,
+  createLatestEventsLoader,
+  createEventsByTypeLoader,
+  createToolUseEventsLoader,
+  createErrorEventsLoader,
+  createAssistantEventsLoader,
   // Types
   type UserInfo,
   type AuthorInfo,
   type SessionSummary,
+  type GameSummary,
+  type GameOwnership,
+  type OrganizationWithRole,
+  type MemberWithUser,
+  type CollectionWithCount,
+  type SessionCollectionInfo,
+  type EventSummary,
+  type EventTypeCount,
 } from './loaders/index.js';
 
 // Re-export query logging utilities for development

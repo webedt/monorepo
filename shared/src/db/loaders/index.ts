@@ -48,6 +48,68 @@ export type {
   SessionSummary,
 } from './sessionLoader.js';
 
+// Game/Store loaders
+export {
+  createGameLoader,
+  createPublishedGameLoader,
+  createGameSummaryLoader,
+  createGameOwnershipLoader,
+  createUserLibraryGamesLoader,
+  createUserWishlistGamesLoader,
+} from './gameLoader.js';
+
+export type {
+  GameSummary,
+  GameOwnership,
+} from './gameLoader.js';
+
+// Organization loaders
+export {
+  createOrganizationLoader,
+  createOrganizationBySlugLoader,
+  createUserOrganizationsLoader,
+  createOrganizationMembersLoader,
+  createOrganizationMembershipLoader,
+  createOrganizationRepositoriesLoader,
+  createOrganizationMemberCountLoader,
+} from './organizationLoader.js';
+
+export type {
+  OrganizationWithRole,
+  MemberWithUser,
+} from './organizationLoader.js';
+
+// Collection loaders
+export {
+  createCollectionLoader,
+  createUserCollectionsLoader,
+  createCollectionSessionCountLoader,
+  createSessionCollectionsLoader,
+  createCollectionSessionsLoader,
+  createSessionInCollectionLoader,
+} from './collectionLoader.js';
+
+export type {
+  CollectionWithCount,
+  SessionCollectionInfo,
+} from './collectionLoader.js';
+
+// Event loaders
+export {
+  createEventSummaryLoader,
+  createEventCountLoader,
+  createLatestEventsLoader,
+  createEventsByTypeLoader,
+  createToolUseEventsLoader,
+  createErrorEventsLoader,
+  createAssistantEventsLoader,
+} from './eventLoader.js';
+
+export type {
+  EventSummary,
+  EventTypeCount,
+} from './eventLoader.js';
+
 // Re-export core DataLoader utilities for convenience
 export {
   DataLoader,
