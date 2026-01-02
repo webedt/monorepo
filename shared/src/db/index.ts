@@ -548,10 +548,15 @@ export type {
   NewAdminAuditLog,
   AuditAction,
   AuditEntityType,
+  // User role types
+  UserRole,
 } from './schema.js';
 
 // Re-export table definitions from schema
 export {
+  // User role utilities
+  ROLE_HIERARCHY,
+  hasRolePermission,
   // Organization role utilities
   isOrganizationRole,
   ORGANIZATION_ROLES,
