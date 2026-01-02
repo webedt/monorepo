@@ -129,11 +129,10 @@ export abstract class ATokenRefreshProvider<T extends OAuthAuth> {
    */
   async ensureValidToken(auth: T): Promise<T> {
     if (this.shouldRefresh(auth)) {
-      logger.info('Token expires soon, refreshing', { component: this.componentName });
       return await this.refresh(auth);
     }
 
-    logger.info('Token still valid, no refresh needed', { component: this.componentName });
+    logger.debug('Token still valid, no refresh needed', { component: this.componentName });
     return auth;
   }
 

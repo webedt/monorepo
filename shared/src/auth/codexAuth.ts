@@ -26,7 +26,7 @@ export interface CodexAuth {
  * - OAuth tokens with expiration checking
  * - Graceful handling when refresh is not available
  */
-class CodexTokenRefreshProvider extends ATokenRefreshProvider<CodexAuth> {
+export class CodexTokenRefreshProvider extends ATokenRefreshProvider<CodexAuth> {
   constructor() {
     super({ componentName: 'CodexAuth' });
   }

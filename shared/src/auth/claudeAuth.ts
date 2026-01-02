@@ -67,7 +67,7 @@ interface ClaudeTokenResponse extends OAuthTokenResponse {
  * - JSON POST to Anthropic's OAuth token endpoint
  * - Rotates refresh tokens (new refresh token with each refresh)
  */
-class ClaudeTokenRefreshProvider extends ATokenRefreshProvider<ClaudeAuth> {
+export class ClaudeTokenRefreshProvider extends ATokenRefreshProvider<ClaudeAuth> {
   constructor() {
     super({ componentName: 'ClaudeAuth' });
   }

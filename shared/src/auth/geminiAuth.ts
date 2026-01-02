@@ -28,12 +28,16 @@ interface GoogleTokenResponse extends OAuthTokenResponse {
  * - Does NOT rotate refresh tokens (keeps original)
  * - Preserves tokenType and scope fields
  */
-class GeminiTokenRefreshProvider extends ATokenRefreshProvider<GeminiAuth> {
+export class GeminiTokenRefreshProvider extends ATokenRefreshProvider<GeminiAuth> {
   constructor() {
     super({ componentName: 'GeminiAuth' });
   }
 
   async refresh(auth: GeminiAuth): Promise<GeminiAuth> {
+    if (!auth.refreshToken) {
+      throw new Error('Cannot refresh token: no refresh token available');
+    }
+
     // Build form-urlencoded body (Google OAuth uses this format)
     const params = new URLSearchParams({
       grant_type: 'refresh_token',
