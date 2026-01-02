@@ -32,6 +32,9 @@ export class MidiPlayer extends Component {
   private timeCurrentEl: HTMLElement | null = null;
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
+  // Track document event listeners for cleanup
+  private documentMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+  private documentMouseUpHandler: (() => void) | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
@@ -341,23 +344,36 @@ export class MidiPlayer extends Component {
   private handleProgressMouseDown(e: MouseEvent): void {
     if (!this.progressBar) return;
 
+    // Clean up any existing handlers first
+    this.cleanupDocumentListeners();
+
     this.isDragging = true;
     this.updateProgressFromMouse(e);
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    this.documentMouseMoveHandler = (moveEvent: MouseEvent) => {
       if (this.isDragging) {
         this.updateProgressFromMouse(moveEvent);
       }
     };
 
-    const handleMouseUp = () => {
+    this.documentMouseUpHandler = () => {
       this.isDragging = false;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      this.cleanupDocumentListeners();
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', this.documentMouseMoveHandler);
+    document.addEventListener('mouseup', this.documentMouseUpHandler);
+  }
+
+  private cleanupDocumentListeners(): void {
+    if (this.documentMouseMoveHandler) {
+      document.removeEventListener('mousemove', this.documentMouseMoveHandler);
+      this.documentMouseMoveHandler = null;
+    }
+    if (this.documentMouseUpHandler) {
+      document.removeEventListener('mouseup', this.documentMouseUpHandler);
+      this.documentMouseUpHandler = null;
+    }
   }
 
   private updateProgressFromMouse(e: MouseEvent): void {
@@ -464,6 +480,9 @@ export class MidiPlayer extends Component {
   }
 
   protected onUnmount(): void {
+    // Clean up document event listeners to prevent memory leaks
+    this.cleanupDocumentListeners();
+
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;

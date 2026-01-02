@@ -23,7 +23,21 @@ interface ActiveOscillator {
   oscillator: OscillatorNode;
   gainNode: GainNode;
   endTime: number;
+  noteKey: string; // Unique identifier for the note (channel-note-startTime)
 }
+
+/**
+ * Scheduled note tracking for progressive scheduling
+ */
+interface ScheduledNoteInfo {
+  noteKey: string;
+  scheduledUntil: number; // Audio context time when note was scheduled to start
+}
+
+// Look-ahead window in seconds for progressive scheduling
+const SCHEDULE_LOOK_AHEAD = 5.0;
+// How often to check and schedule new notes (in seconds)
+const SCHEDULE_INTERVAL = 0.5;
 
 /**
  * MIDI Player class for playing parsed MIDI files
@@ -37,9 +51,12 @@ export class MidiPlayer {
   private options: Required<MidiPlayerOptions>;
   private listeners: Set<MidiPlayerListener> = new Set();
   private activeOscillators: ActiveOscillator[] = [];
+  private scheduledNotes: Set<string> = new Set(); // Track which notes have been scheduled
   private playbackStartTime: number = 0;
   private pauseTime: number = 0;
   private animationFrameId: number | null = null;
+  private scheduleIntervalId: number | null = null; // Timer for progressive scheduling
+  private lastScheduledTime: number = 0; // Last playback time we scheduled up to
 
   constructor(options: MidiPlayerOptions = {}) {
     this.options = {
@@ -178,8 +195,14 @@ export class MidiPlayer {
 
     const startOffset = this.state.isPaused ? this.pauseTime : this.state.currentTime;
     this.playbackStartTime = this.audioContext.currentTime - startOffset / this.options.speed;
+    this.lastScheduledTime = startOffset;
 
-    this.scheduleNotes(startOffset);
+    // Schedule initial batch of notes with look-ahead
+    this.scheduleNotesInWindow(startOffset, startOffset + SCHEDULE_LOOK_AHEAD);
+
+    // Start progressive scheduling
+    this.startProgressiveScheduling();
+
     this.updateState({ isPlaying: true, isPaused: false });
     this.startTimeUpdate();
     this.emit({ type: 'play' });
@@ -193,6 +216,7 @@ export class MidiPlayer {
 
     this.pauseTime = this.state.currentTime;
     this.stopAllNotes();
+    this.stopProgressiveScheduling();
     this.stopTimeUpdate();
     this.updateState({ isPaused: true });
     this.emit({ type: 'pause' });
@@ -203,7 +227,9 @@ export class MidiPlayer {
    */
   stop(): void {
     this.stopAllNotes();
+    this.stopProgressiveScheduling();
     this.stopTimeUpdate();
+    this.scheduledNotes.clear();
     this.pauseTime = 0;
     this.updateState({
       isPlaying: false,
@@ -222,10 +248,13 @@ export class MidiPlayer {
 
     if (this.state.isPlaying && !this.state.isPaused) {
       this.stopAllNotes();
+      this.scheduledNotes.clear();
       this.playbackStartTime = this.audioContext!.currentTime - clampedTime / this.options.speed;
-      this.scheduleNotes(clampedTime);
+      this.lastScheduledTime = clampedTime;
+      this.scheduleNotesInWindow(clampedTime, clampedTime + SCHEDULE_LOOK_AHEAD);
     } else {
       this.pauseTime = clampedTime;
+      this.scheduledNotes.clear();
     }
 
     this.updateState({
@@ -255,8 +284,10 @@ export class MidiPlayer {
       const currentTime = this.state.currentTime;
       this.options.speed = clampedSpeed;
       this.stopAllNotes();
+      this.scheduledNotes.clear();
       this.playbackStartTime = this.audioContext!.currentTime - currentTime / this.options.speed;
-      this.scheduleNotes(currentTime);
+      this.lastScheduledTime = currentTime;
+      this.scheduleNotesInWindow(currentTime, currentTime + SCHEDULE_LOOK_AHEAD);
     } else {
       this.options.speed = clampedSpeed;
     }
@@ -434,12 +465,13 @@ export class MidiPlayer {
   }
 
   /**
-   * Schedule notes for playback from a given start time
+   * Schedule notes within a specific time window (for progressive scheduling)
    */
-  private scheduleNotes(startTime: number): void {
+  private scheduleNotesInWindow(startTime: number, endTime: number): void {
     if (!this.midiFile || !this.audioContext || !this.masterGain) return;
 
     const now = this.audioContext.currentTime;
+    const playbackOffset = startTime;
 
     for (let trackIndex = 0; trackIndex < this.midiFile.tracks.length; trackIndex++) {
       if (this.options.mutedTracks.has(trackIndex)) continue;
@@ -447,14 +479,54 @@ export class MidiPlayer {
       const track = this.midiFile.tracks[trackIndex];
       for (const note of track.notes) {
         if (this.options.mutedChannels.has(note.channel)) continue;
-        if (note.startTimeSeconds < startTime) continue;
+        // Skip notes before our window or after our window
+        if (note.startTimeSeconds < startTime || note.startTimeSeconds >= endTime) continue;
 
-        const noteStartTime = (note.startTimeSeconds - startTime) / this.options.speed;
+        // Create unique key for this note instance
+        const noteKey = `${trackIndex}-${note.channel}-${note.note}-${note.startTime}`;
+
+        // Skip if already scheduled
+        if (this.scheduledNotes.has(noteKey)) continue;
+        this.scheduledNotes.add(noteKey);
+
+        const noteStartTime = (note.startTimeSeconds - playbackOffset) / this.options.speed;
         const noteDuration = note.durationSeconds / this.options.speed;
 
-        // Schedule all notes - Web Audio API handles far-future scheduling
-        this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
+        this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration, noteKey);
       }
+    }
+  }
+
+  /**
+   * Start the progressive scheduling timer
+   */
+  private startProgressiveScheduling(): void {
+    this.stopProgressiveScheduling();
+
+    const scheduleMore = () => {
+      if (!this.state.isPlaying || this.state.isPaused) return;
+
+      const currentTime = this.state.currentTime;
+      const scheduleEnd = currentTime + SCHEDULE_LOOK_AHEAD;
+
+      // Only schedule notes we haven't scheduled yet
+      if (scheduleEnd > this.lastScheduledTime) {
+        this.scheduleNotesInWindow(this.lastScheduledTime, scheduleEnd);
+        this.lastScheduledTime = scheduleEnd;
+      }
+    };
+
+    // Use setInterval for progressive scheduling
+    this.scheduleIntervalId = window.setInterval(scheduleMore, SCHEDULE_INTERVAL * 1000);
+  }
+
+  /**
+   * Stop the progressive scheduling timer
+   */
+  private stopProgressiveScheduling(): void {
+    if (this.scheduleIntervalId !== null) {
+      clearInterval(this.scheduleIntervalId);
+      this.scheduleIntervalId = null;
     }
   }
 
@@ -465,7 +537,8 @@ export class MidiPlayer {
     note: MidiNoteEvent,
     _trackIndex: number,
     startTime: number,
-    duration: number
+    duration: number,
+    noteKey: string
   ): void {
     if (!this.audioContext || !this.masterGain) return;
 
@@ -487,9 +560,9 @@ export class MidiPlayer {
     oscillator.start(startTime);
     oscillator.stop(startTime + duration + 0.01);
 
-    // Track active oscillator for cleanup
+    // Track active oscillator for cleanup with unique note key
     const endTime = startTime + duration + 0.01;
-    this.activeOscillators.push({ oscillator, gainNode, endTime });
+    this.activeOscillators.push({ oscillator, gainNode, endTime, noteKey });
 
     // Auto-cleanup when oscillator ends
     oscillator.onended = () => {
@@ -547,8 +620,8 @@ export class MidiPlayer {
       // Check for end of playback
       if (currentTime >= this.state.duration) {
         if (this.options.loop) {
-          this.seek(0);
-          this.play();
+          // Seamless loop: reset playback timing without stopping audio abruptly
+          this.handleSeamlessLoop();
         } else {
           this.stop();
           this.emit({ type: 'end' });
@@ -560,6 +633,39 @@ export class MidiPlayer {
     };
 
     this.animationFrameId = requestAnimationFrame(update);
+  }
+
+  /**
+   * Handle seamless looping without audio gap
+   */
+  private handleSeamlessLoop(): void {
+    if (!this.audioContext || !this.midiFile) return;
+
+    // Reset playback timing from the beginning
+    this.playbackStartTime = this.audioContext.currentTime;
+
+    // Clear scheduled notes for fresh scheduling
+    this.scheduledNotes.clear();
+    this.lastScheduledTime = 0;
+
+    // Update state to beginning
+    this.updateState({
+      currentTime: 0,
+      progress: 0,
+    });
+
+    // Schedule the first batch of notes for the new loop iteration
+    this.scheduleNotesInWindow(0, SCHEDULE_LOOK_AHEAD);
+
+    // Emit events
+    this.emit({ type: 'seek', time: 0 });
+
+    // Continue the animation loop
+    this.animationFrameId = requestAnimationFrame(() => {
+      if (this.state.isPlaying && !this.state.isPaused) {
+        this.startTimeUpdate();
+      }
+    });
   }
 
   /**
