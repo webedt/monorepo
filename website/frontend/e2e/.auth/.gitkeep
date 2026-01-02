@@ -1,0 +1,2 @@
+# Keep this directory for Playwright auth storage state
+# Actual auth files (*.json) are gitignored
