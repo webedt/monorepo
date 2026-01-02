@@ -1,3 +1,8 @@
+// Initialize OpenTelemetry BEFORE any other imports
+// This ensures auto-instrumentation captures all module loads
+import { initializeTelemetry, telemetryMiddleware } from './telemetry/index.js';
+initializeTelemetry();
+
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -295,6 +300,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Correlation ID middleware - must be applied early for request tracing
 // Extracts X-Request-ID header or generates a new UUID
 app.use(correlationIdMiddleware);
+
+// Telemetry middleware - links correlation IDs with OpenTelemetry trace spans
+// Must be applied after correlationIdMiddleware
+app.use(telemetryMiddleware);
 
 // Wrap all subsequent middleware in correlation context for async propagation
 // This enables automatic correlation ID inclusion in logs and database operations

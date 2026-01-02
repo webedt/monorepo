@@ -34,6 +34,8 @@ import {
   requestDeduplicatorRegistry,
 } from '@webedt/shared';
 
+import { shutdownTelemetry } from './telemetry/index.js';
+
 import { connectionTracker } from './api/middleware/connectionTracker.js';
 import { cleanupRateLimitStores } from './api/middleware/rateLimit.js';
 
@@ -190,6 +192,15 @@ export function registerBackgroundServices(): void {
     createShutdownHandler(
       'requestDeduplicator',
       async () => requestDeduplicatorRegistry.dispose(),
+      ShutdownPriority.CLEANUP
+    )
+  );
+
+  // Telemetry shutdown - flush pending spans before exiting
+  shutdownManager.register(
+    createShutdownHandler(
+      'telemetry',
+      async () => shutdownTelemetry(),
       ShutdownPriority.CLEANUP
     )
   );
