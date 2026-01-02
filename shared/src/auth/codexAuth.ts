@@ -4,6 +4,7 @@
  */
 
 import { logger } from '../utils/logging/logger.js';
+import { ATokenRefreshProvider } from './ATokenRefreshProvider.js';
 
 // Define CodexAuth type locally (was previously in @webedt/shared)
 export interface CodexAuth {
@@ -46,11 +47,122 @@ export class CodexTokenExpiredError extends Error {
   }
 }
 
-// Refresh 10 minutes before expiration to provide buffer for:
-// - Network latency and retries
-// - Long-running operations that need valid tokens throughout
-// - Edge cases where refresh might fail and need retry
-const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
+/**
+ * Token refresh provider for Codex/OpenAI OAuth
+ *
+ * Note: OpenAI's OAuth2 token refresh endpoint is not publicly documented.
+ * The Codex SDK may handle token refresh internally. If the token is expired,
+ * the user will need to re-authenticate through the OAuth flow.
+ *
+ * This provider handles:
+ * - API key authentication (never expires)
+ * - OAuth tokens with expiration checking
+ * - Graceful handling when refresh is not available
+ */
+export class CodexTokenRefreshProvider extends ATokenRefreshProvider<CodexAuth> {
+  constructor() {
+    super({ componentName: 'CodexAuth' });
+  }
+
+  /**
+   * Override shouldRefresh to handle API key authentication
+   * API keys never expire, so we return false for them
+   */
+  override shouldRefresh(auth: CodexAuth): boolean {
+    // API key authentication never expires
+    if (auth.apiKey) {
+      return false;
+    }
+
+    // OAuth token - use base class logic
+    if (auth.accessToken && auth.expiresAt !== undefined) {
+      return super.shouldRefresh(auth);
+    }
+
+    // No valid auth found
+    return false;
+  }
+
+  /**
+   * Refresh is not supported for Codex OAuth (no public endpoint)
+   * Throws CodexTokenExpiredError when tokens are expired.
+   *
+   * @throws {CodexTokenExpiredError} When the OAuth token has expired and cannot be refreshed
+   */
+  async refresh(auth: CodexAuth): Promise<CodexAuth> {
+    // API key doesn't need refresh
+    if (auth.apiKey) {
+      logger.debug('Using API key authentication, no refresh needed', { component: 'CodexAuth' });
+      return auth;
+    }
+
+    // Check if we have a refresh token
+    if (!auth.refreshToken) {
+      logger.warn('No refresh token available for Codex OAuth', { component: 'CodexAuth' });
+      // Without a refresh token, we cannot refresh - but we don't throw since
+      // the token might still be valid
+      return auth;
+    }
+
+    // Check if token is actually expired (not just expiring soon)
+    const now = Date.now();
+    const isExpired = auth.expiresAt ? auth.expiresAt < now : false;
+
+    if (isExpired) {
+      const expiredAt = new Date(auth.expiresAt || now);
+
+      logger.error('Codex OAuth token has expired and cannot be refreshed', {
+        component: 'CodexAuth',
+        expiredAt: expiredAt.toISOString(),
+        message: 'OpenAI does not provide a public OAuth token refresh endpoint'
+      });
+
+      // Throw explicit error instead of silently returning stale auth
+      throw new CodexTokenExpiredError(expiredAt, false);
+    }
+
+    // Token is expiring soon but not yet expired
+    // Log a warning about the limitation
+    logger.warn('Codex OAuth token expiring soon - refresh not possible', {
+      component: 'CodexAuth',
+      expiresAt: auth.expiresAt ? new Date(auth.expiresAt).toISOString() : 'unknown',
+      limitation: 'OpenAI does not provide a public OAuth token refresh endpoint. User will need to re-authenticate when token expires.'
+    });
+
+    // Return current auth since token is still valid
+    // Note: OpenAI SDK may handle refresh internally if they support it
+    return auth;
+  }
+
+  /**
+   * Override ensureValidToken to handle API key authentication
+   * @throws {CodexTokenExpiredError} When the OAuth token has expired
+   */
+  override async ensureValidToken(auth: CodexAuth): Promise<CodexAuth> {
+    // API key authentication never expires
+    if (auth.apiKey) {
+      logger.debug('Using API key authentication', { component: 'CodexAuth' });
+      return auth;
+    }
+
+    // Check if OAuth token is already expired
+    if (isCodexAuthExpired(auth)) {
+      const expiredAt = new Date(auth.expiresAt || Date.now());
+      logger.error('Codex OAuth token has expired', {
+        component: 'CodexAuth',
+        expiredAt: expiredAt.toISOString(),
+        limitation: 'OpenAI does not provide a public OAuth token refresh endpoint'
+      });
+      throw new CodexTokenExpiredError(expiredAt, false);
+    }
+
+    // Use base class logic for OAuth tokens
+    return super.ensureValidToken(auth);
+  }
+}
+
+// Singleton provider instance
+const codexRefreshProvider = new CodexTokenRefreshProvider();
 
 /**
  * Check if a Codex access token needs to be refreshed
@@ -59,34 +171,7 @@ const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
  * Note: API key authentication doesn't expire, only OAuth tokens do
  */
 export function shouldRefreshCodexToken(codexAuth: CodexAuth): boolean {
-  // API key authentication never expires
-  if (codexAuth.apiKey) {
-    return false;
-  }
-
-  // OAuth token - check expiration
-  if (codexAuth.accessToken && codexAuth.expiresAt) {
-    const now = Date.now();
-    const timeUntilExpiry = codexAuth.expiresAt - now;
-    const needsRefresh = timeUntilExpiry <= TOKEN_BUFFER_TIME;
-
-    if (needsRefresh) {
-      const isExpired = timeUntilExpiry <= 0;
-      logger.info('Codex token refresh check', {
-        component: 'CodexAuth',
-        needsRefresh: true,
-        isExpired,
-        timeUntilExpiryMs: timeUntilExpiry,
-        timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60000),
-        expiresAt: new Date(codexAuth.expiresAt).toISOString()
-      });
-    }
-
-    return needsRefresh;
-  }
-
-  // No valid auth found
-  return false;
+  return codexRefreshProvider.shouldRefresh(codexAuth);
 }
 
 /**
@@ -99,50 +184,7 @@ export function shouldRefreshCodexToken(codexAuth: CodexAuth): boolean {
  * @throws {CodexTokenExpiredError} When the OAuth token has expired and cannot be refreshed
  */
 export async function refreshCodexToken(codexAuth: CodexAuth): Promise<CodexAuth> {
-  // API key doesn't need refresh
-  if (codexAuth.apiKey) {
-    logger.debug('Using API key authentication, no refresh needed', { component: 'CodexAuth' });
-    return codexAuth;
-  }
-
-  // Check if we have a refresh token
-  if (!codexAuth.refreshToken) {
-    logger.warn('No refresh token available for Codex OAuth', { component: 'CodexAuth' });
-    // Without a refresh token, we cannot refresh - but we don't throw since
-    // the token might still be valid
-    return codexAuth;
-  }
-
-  // Check if token is actually expired (not just expiring soon)
-  const now = Date.now();
-  const isExpired = codexAuth.expiresAt ? codexAuth.expiresAt < now : false;
-
-  if (isExpired) {
-    const expiredAt = new Date(codexAuth.expiresAt || now);
-    // Note: hasApiKeyFallback is always false here because we return early
-    // on line 103 if codexAuth.apiKey exists. We pass false explicitly.
-
-    logger.error('Codex OAuth token has expired and cannot be refreshed', {
-      component: 'CodexAuth',
-      expiredAt: expiredAt.toISOString(),
-      message: 'OpenAI does not provide a public OAuth token refresh endpoint'
-    });
-
-    // Throw explicit error instead of silently returning stale auth
-    throw new CodexTokenExpiredError(expiredAt, false);
-  }
-
-  // Token is expiring soon but not yet expired
-  // Log a warning about the limitation
-  logger.warn('Codex OAuth token expiring soon - refresh not possible', {
-    component: 'CodexAuth',
-    expiresAt: codexAuth.expiresAt ? new Date(codexAuth.expiresAt).toISOString() : 'unknown',
-    limitation: 'OpenAI does not provide a public OAuth token refresh endpoint. User will need to re-authenticate when token expires.'
-  });
-
-  // Return current auth since token is still valid
-  // Note: OpenAI SDK may handle refresh internally if they support it
-  return codexAuth;
+  return codexRefreshProvider.refresh(codexAuth);
 }
 
 /**
@@ -159,36 +201,7 @@ export async function refreshCodexToken(codexAuth: CodexAuth): Promise<CodexAuth
  * @throws {CodexTokenExpiredError} When the OAuth token has expired
  */
 export async function ensureValidCodexToken(codexAuth: CodexAuth): Promise<CodexAuth> {
-  // API key authentication never expires
-  if (codexAuth.apiKey) {
-    logger.debug('Using API key authentication', { component: 'CodexAuth' });
-    return codexAuth;
-  }
-
-  // Check if OAuth token is already expired
-  if (isCodexAuthExpired(codexAuth)) {
-    const expiredAt = new Date(codexAuth.expiresAt || Date.now());
-    logger.error('Codex OAuth token has expired', {
-      component: 'CodexAuth',
-      expiredAt: expiredAt.toISOString(),
-      limitation: 'OpenAI does not provide a public OAuth token refresh endpoint'
-    });
-    throw new CodexTokenExpiredError(expiredAt, false);
-  }
-
-  // Check if OAuth token needs refresh (expiring soon but not expired)
-  if (shouldRefreshCodexToken(codexAuth)) {
-    logger.warn('Codex OAuth token expiring soon', {
-      component: 'CodexAuth',
-      expiresAt: codexAuth.expiresAt ? new Date(codexAuth.expiresAt).toISOString() : 'unknown',
-      limitation: 'Token refresh not possible - OpenAI does not provide a public OAuth refresh endpoint'
-    });
-    // Call refreshCodexToken which will return current auth since it's not yet expired
-    return await refreshCodexToken(codexAuth);
-  }
-
-  logger.debug('Codex OAuth token is valid', { component: 'CodexAuth' });
-  return codexAuth;
+  return codexRefreshProvider.ensureValidToken(codexAuth);
 }
 
 /**
