@@ -11,7 +11,7 @@
  * without requiring actual database connections.
  */
 
-import { describe, it, mock, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
 
 import { EventStorageService } from '../../src/sessions/EventStorageService.js';

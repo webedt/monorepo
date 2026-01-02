@@ -13,7 +13,7 @@
  * to test business logic without requiring actual external dependencies.
  */
 
-import { describe, it, mock, beforeEach, afterEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import { mapRemoteStatus } from '../../src/sessions/SessionService.js';

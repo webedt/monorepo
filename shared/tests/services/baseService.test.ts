@@ -13,7 +13,7 @@
  * and utility functions without requiring database connections.
  */
 
-import { describe, it, mock, beforeEach, afterEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import type { OperationResult, BulkOperationResult, ScheduledTaskConfig } from '../../src/services/BaseService.js';
@@ -326,7 +326,7 @@ describe('BaseService - Component Logger Pattern', () => {
       assert.strictEqual(Object.keys(context).length, 1);
     });
 
-    it('should not override component with extra', () => {
+    it('should allow extra to override component when spread after', () => {
       const componentName = 'OriginalService';
 
       const addContext = (extra?: Record<string, unknown>) => ({
@@ -334,13 +334,11 @@ describe('BaseService - Component Logger Pattern', () => {
         ...extra,
       });
 
-      // Component is set first, so extra can override it
-      // The pattern actually puts component first, then spreads extra
-      const context = addContext({ component: 'AttackerService' });
+      // Extra spreads AFTER component, so extra's component key will override
+      const context = addContext({ component: 'OverriddenService' });
 
-      // Based on the implementation, extra spreads AFTER component
-      // so it would override - let's verify the actual pattern
-      assert.strictEqual(context.component, 'AttackerService');
+      // Verify that the spread order causes override
+      assert.strictEqual(context.component, 'OverriddenService');
     });
   });
 

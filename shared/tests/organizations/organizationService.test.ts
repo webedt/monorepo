@@ -9,12 +9,20 @@
  * - Invitation system (create, accept, revoke, expiry)
  * - Slug availability checks
  *
- * IMPORTANT: These tests verify business logic without requiring
- * actual database connections by testing the expected behavior patterns.
+ * NOTE: The OrganizationService class requires database connections and cannot
+ * be easily unit tested without a full database mock. These tests verify the
+ * expected behavior patterns and business logic that the service implements.
+ * For integration tests with actual database, see the integration test suite.
  */
 
-import { describe, it, mock, beforeEach, afterEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
+
+import type { OrganizationWithMembers } from '../../src/organizations/AOrganizationService.js';
+import type { OrganizationMemberWithUser } from '../../src/organizations/AOrganizationService.js';
+import type { UserOrganization } from '../../src/organizations/AOrganizationService.js';
+import type { CreateOrganizationParams } from '../../src/organizations/AOrganizationService.js';
+import type { InviteMemberParams } from '../../src/organizations/AOrganizationService.js';
 
 describe('OrganizationService - Role Hierarchy', () => {
   /**
@@ -331,15 +339,23 @@ describe('OrganizationService - Member Operations', () => {
 describe('OrganizationService - User Organization Queries', () => {
   /**
    * Tests for querying user's organization memberships.
+   * Uses UserOrganization type to verify expected structure.
    */
 
   describe('Membership List', () => {
     it('should include organization details with membership', () => {
-      const membership = {
+      const membership: UserOrganization = {
         organization: {
           id: 'org-123',
           name: 'WebEDT',
           slug: 'webedt',
+          displayName: 'WebEDT Platform',
+          description: 'AI-powered code editing',
+          avatarUrl: null,
+          websiteUrl: null,
+          githubOrg: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         role: 'member',
         joinedAt: new Date(),
@@ -351,17 +367,41 @@ describe('OrganizationService - User Organization Queries', () => {
     });
 
     it('should handle user with multiple organizations', () => {
-      const memberships = [
-        { organization: { id: 'org-1' }, role: 'owner' },
-        { organization: { id: 'org-2' }, role: 'admin' },
-        { organization: { id: 'org-3' }, role: 'member' },
+      const memberships: UserOrganization[] = [
+        {
+          organization: {
+            id: 'org-1', name: 'Org 1', slug: 'org-1',
+            displayName: null, description: null, avatarUrl: null,
+            websiteUrl: null, githubOrg: null,
+            createdAt: new Date(), updatedAt: new Date(),
+          },
+          role: 'owner', joinedAt: new Date(),
+        },
+        {
+          organization: {
+            id: 'org-2', name: 'Org 2', slug: 'org-2',
+            displayName: null, description: null, avatarUrl: null,
+            websiteUrl: null, githubOrg: null,
+            createdAt: new Date(), updatedAt: new Date(),
+          },
+          role: 'admin', joinedAt: new Date(),
+        },
+        {
+          organization: {
+            id: 'org-3', name: 'Org 3', slug: 'org-3',
+            displayName: null, description: null, avatarUrl: null,
+            websiteUrl: null, githubOrg: null,
+            createdAt: new Date(), updatedAt: new Date(),
+          },
+          role: 'member', joinedAt: new Date(),
+        },
       ];
 
       assert.strictEqual(memberships.length, 3);
     });
 
     it('should handle user with no organizations', () => {
-      const memberships: Array<{ organization: unknown; role: string }> = [];
+      const memberships: UserOrganization[] = [];
 
       assert.strictEqual(memberships.length, 0);
     });
@@ -453,11 +493,12 @@ describe('OrganizationService - Organization Data Structure', () => {
 describe('OrganizationService - Member With User Data', () => {
   /**
    * Tests for joined member-user data structure.
+   * Uses OrganizationMemberWithUser type to verify expected structure.
    */
 
   describe('User Data Inclusion', () => {
     it('should include user id, email, and displayName', () => {
-      const memberWithUser = {
+      const memberWithUser: OrganizationMemberWithUser = {
         id: 'member-123',
         organizationId: 'org-123',
         userId: 'user-123',
@@ -477,9 +518,15 @@ describe('OrganizationService - Member With User Data', () => {
     });
 
     it('should handle null displayName', () => {
-      const memberWithUser = {
+      const memberWithUser: OrganizationMemberWithUser = {
+        id: 'member-456',
+        organizationId: 'org-123',
+        userId: 'user-456',
+        role: 'admin',
+        joinedAt: new Date(),
+        invitedBy: 'user-123',
         user: {
-          id: 'user-123',
+          id: 'user-456',
           email: 'test@example.com',
           displayName: null,
         },
