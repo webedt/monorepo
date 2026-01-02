@@ -773,6 +773,12 @@ export {
   orderByDesc,
   // Count helpers
   countExpression,
+  // Soft-delete helpers
+  excludeDeleted,
+  onlyDeleted,
+  // Filter helpers
+  buildTimeRangeConditions,
+  buildStatusCondition,
   // Types - Note: PaginatedResult is not re-exported here as it conflicts with sessions/ASessionQueryService
   // Import from ./queryHelpers.js or use the one from sessions if needed
   type PaginationOptions,
