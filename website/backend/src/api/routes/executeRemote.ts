@@ -16,7 +16,7 @@ import type { ClaudeAuth } from '@webedt/shared';
 import type { GeminiAuth } from '@webedt/shared';
 import type { ProviderType } from '@webedt/shared';
 import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath, parseGitUrl, validateBranchName, sanitizeBranchName } from '@webedt/shared';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, SSE_HEARTBEAT_INTERVAL_MS } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { cleanupRedundantSessions } from '@webedt/shared';
@@ -577,7 +577,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionEventBroadcaster.broadcast(chatSessionId, event.type, event);
     };
 
-    // Set up heartbeat - use 15 second interval to prevent proxy timeouts
+    // Set up heartbeat - use configured interval (default 15s) to prevent proxy timeouts
     // Traefik and other proxies often have 30-60 second idle timeouts
     const heartbeatInterval = setInterval(() => {
       if (!clientDisconnected) {
@@ -592,7 +592,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       } else {
         clearInterval(heartbeatInterval);
       }
-    }, 15000);
+    }, SSE_HEARTBEAT_INTERVAL_MS);
 
     // Send input preview event immediately so user sees their request was received
     if (userRequest) {

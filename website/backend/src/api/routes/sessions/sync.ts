@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, users, events, eq, and, isNull, sql, logger, syncUserSessions, ServiceProvider, ASession, CLAUDE_ENVIRONMENT_ID, requestDeduplicatorRegistry, generateRequestKey } from '@webedt/shared';
+import { db, chatSessions, users, events, eq, and, isNull, sql, logger, syncUserSessions, ServiceProvider, ASession, CLAUDE_ENVIRONMENT_ID, requestDeduplicatorRegistry, generateRequestKey, DEDUPLICATION } from '@webedt/shared';
 import { requireAuth } from '../../middleware/auth.js';
 import type { AuthRequest } from '../../middleware/auth.js';
 import { sendUnauthorized } from '../../middleware/sessionMiddleware.js';
@@ -53,7 +53,7 @@ router.post('/sync', requireAuth, syncOperationRateLimiter, async (req: Request,
   // Use request deduplicator to prevent duplicate concurrent sync requests
   // This handles the case where users rapidly click the "Sync" button
   const deduplicator = requestDeduplicatorRegistry.get('sessions-sync', {
-    defaultTtlMs: 30000, // 30 second TTL for sync operations
+    defaultTtlMs: DEDUPLICATION.SYNC_TTL_MS,
   });
 
   const requestKey = generateRequestKey(userId, 'sessions-sync');
@@ -167,7 +167,7 @@ router.post('/:id/sync-events', requireAuth, syncOperationRateLimiter, async (re
 
   // Use request deduplicator to prevent duplicate concurrent event sync requests
   const deduplicator = requestDeduplicatorRegistry.get('session-sync-events', {
-    defaultTtlMs: 30000, // 30 second TTL for sync operations
+    defaultTtlMs: DEDUPLICATION.SYNC_TTL_MS,
   });
 
   const requestKey = generateRequestKey(userId, sessionId, 'sync-events');

@@ -616,6 +616,20 @@ export const DB_HEALTH_CHECK_INTERVAL_MS = parseInt(process.env.DB_HEALTH_CHECK_
 export const CRDT_SYNC_INTERVAL_MS = parseInt(process.env.CRDT_SYNC_INTERVAL_MS || '1000', 10);
 
 // =============================================================================
+// REQUEST DEDUPLICATION - TTL values for request deduplication
+// =============================================================================
+
+/**
+ * Request deduplication TTL configuration
+ * - REQUEST_DEDUP_DEFAULT_TTL_MS: Default TTL for deduplicated requests (60s)
+ * - REQUEST_DEDUP_SYNC_TTL_MS: TTL for sync operation deduplication (30s)
+ * - REQUEST_DEDUP_MESSAGE_TTL_MS: TTL for message posting deduplication (5s)
+ */
+export const REQUEST_DEDUP_DEFAULT_TTL_MS = parseInt(process.env.REQUEST_DEDUP_DEFAULT_TTL_MS || '60000', 10);
+export const REQUEST_DEDUP_SYNC_TTL_MS = parseInt(process.env.REQUEST_DEDUP_SYNC_TTL_MS || '30000', 10);
+export const REQUEST_DEDUP_MESSAGE_TTL_MS = parseInt(process.env.REQUEST_DEDUP_MESSAGE_TTL_MS || '5000', 10);
+
+// =============================================================================
 // LIMITS - Capacity and resource limits
 // =============================================================================
 
