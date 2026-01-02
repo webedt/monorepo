@@ -311,36 +311,25 @@ describe('CSRF Protection Middleware', () => {
   });
 
   describe('Exempt Path Handling', () => {
-    const exemptPaths = [
-      // SSE streaming endpoints
+    // NOTE: These tests focus on POST/PUT/DELETE/PATCH methods which actually test
+    // the exempt path logic. GET/HEAD/OPTIONS methods skip CSRF validation entirely
+    // regardless of path, so they don't test exemption logic.
+    const exemptStateChangingPaths = [
+      // SSE streaming endpoints (POST methods that are exempt)
       { path: '/api/execute-remote', method: 'POST', reason: 'SSE streaming endpoint' },
-      { path: '/api/resume/session-123', method: 'GET', reason: 'SSE streaming endpoint' },
-      { path: '/api/sessions/123/events/stream', method: 'GET', reason: 'SSE streaming endpoint' },
-      { path: '/api/orchestrator/job-123/stream', method: 'GET', reason: 'SSE streaming endpoint' },
-      { path: '/api/live-chat/owner/repo/branch/execute', method: 'POST', reason: 'SSE streaming endpoint' },
-      { path: '/api/workspace/events/owner/repo/stream', method: 'GET', reason: 'SSE streaming endpoint' },
-      { path: '/api/workspace/presence/owner/repo/stream', method: 'GET', reason: 'SSE streaming endpoint' },
+      { path: '/api/live-chat/owner/repo/main/execute', method: 'POST', reason: 'SSE streaming endpoint' },
       // Auth endpoints (no session to protect)
       { path: '/api/auth/login', method: 'POST', reason: 'No session exists yet' },
       { path: '/api/auth/register', method: 'POST', reason: 'No session exists yet' },
-      // Webhook callbacks (external services)
+      // Webhook callbacks (external services - signature verified separately)
       { path: '/api/github/callback', method: 'POST', reason: 'OAuth callback from GitHub' },
-      { path: '/api/payments/webhooks/stripe', method: 'POST', reason: 'Stripe webhook callback' },
-      { path: '/api/payments/webhooks/paypal', method: 'POST', reason: 'PayPal webhook callback' },
-      // Health check endpoints
-      { path: '/health', method: 'GET', reason: 'Health check endpoint' },
-      { path: '/health/status', method: 'GET', reason: 'Health check endpoint' },
-      { path: '/ready', method: 'GET', reason: 'Kubernetes readiness probe' },
-      { path: '/live', method: 'GET', reason: 'Kubernetes liveness probe' },
-      { path: '/metrics', method: 'GET', reason: 'Metrics endpoint' },
-      // API documentation
-      { path: '/api/docs', method: 'GET', reason: 'API documentation' },
-      { path: '/api/openapi.json', method: 'GET', reason: 'OpenAPI specification' },
+      { path: '/api/payments/webhooks/stripe', method: 'POST', reason: 'Stripe webhook (signature verified)' },
+      { path: '/api/payments/webhooks/paypal', method: 'POST', reason: 'PayPal webhook (signature verified)' },
     ];
 
-    for (const { path, method, reason } of exemptPaths) {
+    for (const { path, method, reason } of exemptStateChangingPaths) {
       it(`should exempt ${method} ${path} (${reason})`, () => {
-        // For POST exempt paths, we should NOT require CSRF
+        // These POST endpoints should NOT require CSRF tokens
         const req = createMockRequest({
           method,
           path,
@@ -357,6 +346,46 @@ describe('CSRF Protection Middleware', () => {
         );
 
         assert.strictEqual(nextCalled, true, `${method} ${path} should be exempt from CSRF`);
+        assert.strictEqual(res.statusCode, 200);
+      });
+    }
+
+    // GET endpoints - these pass because GET skips CSRF validation entirely,
+    // but we include them to document the expected behavior of these paths
+    const exemptGetPaths = [
+      { path: '/api/resume/session-123', reason: 'SSE streaming endpoint' },
+      { path: '/api/sessions/abc-123/events/stream', reason: 'SSE streaming endpoint' },
+      { path: '/api/orchestrator/job-456/stream', reason: 'SSE streaming endpoint' },
+      { path: '/api/workspace/events/owner/repo/main/stream', reason: 'SSE streaming endpoint' },
+      { path: '/api/workspace/presence/owner/repo/main/stream', reason: 'SSE streaming endpoint' },
+      { path: '/health', reason: 'Health check endpoint' },
+      { path: '/health/detailed', reason: 'Health check endpoint' },
+      { path: '/ready', reason: 'Kubernetes readiness probe' },
+      { path: '/live', reason: 'Kubernetes liveness probe' },
+      { path: '/metrics', reason: 'Metrics endpoint' },
+      { path: '/api/docs', reason: 'API documentation' },
+      { path: '/api/openapi.json', reason: 'OpenAPI specification' },
+    ];
+
+    for (const { path, reason } of exemptGetPaths) {
+      it(`should allow GET ${path} (${reason})`, () => {
+        // GET requests skip CSRF validation entirely (safe method)
+        const req = createMockRequest({
+          method: 'GET',
+          path,
+          headers: {},
+        });
+        const res = createMockResponse();
+        let nextCalled = false;
+        const next = () => { nextCalled = true; };
+
+        csrfValidationMiddleware(
+          req as unknown as Request,
+          res as unknown as Response,
+          next as NextFunction
+        );
+
+        assert.strictEqual(nextCalled, true);
         assert.strictEqual(res.statusCode, 200);
       });
     }

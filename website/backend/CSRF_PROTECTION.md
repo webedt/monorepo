@@ -68,13 +68,28 @@ No session exists to protect; these are rate-limited instead:
 | `/api/auth/register` | POST | No authenticated session exists yet |
 
 #### External Webhook Callbacks
-External services cannot include CSRF tokens; validated via signatures instead:
+External services cannot include CSRF tokens; these endpoints use signature verification instead:
 
 | Route | Method | Justification |
 |-------|--------|---------------|
 | `/api/github/callback` | GET/POST | OAuth callback from GitHub |
 | `/api/payments/webhooks/stripe` | POST | Stripe webhook (signature verified) |
 | `/api/payments/webhooks/paypal` | POST | PayPal webhook (signature verified) |
+
+**Webhook Signature Verification Details:**
+
+These endpoints are protected by cryptographic signature verification instead of CSRF tokens:
+
+- **Stripe**: Uses the `stripe-signature` header. The raw request body and signature are passed to the Stripe SDK's `constructEvent()` method which verifies the HMAC-SHA256 signature using the webhook secret.
+
+- **PayPal**: Uses multiple headers for verification:
+  - `paypal-transmission-id` - Unique transmission ID
+  - `paypal-transmission-time` - Timestamp
+  - `paypal-transmission-sig` - The signature
+  - `paypal-auth-algo` - Algorithm used (e.g., SHA256withRSA)
+  - `paypal-cert-url` - Certificate URL for verification
+
+See `website/backend/src/api/routes/payments.ts` for implementation details.
 
 #### Infrastructure Endpoints
 Health checks and metrics for monitoring:
