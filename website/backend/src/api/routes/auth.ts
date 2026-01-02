@@ -6,12 +6,10 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { generateIdFromEntropySize } from 'lucia';
-import { db, users, eq } from '@webedt/shared';
-import { lucia } from '@webedt/shared';
+import { db, users, eq, lucia, ensureValidToken, ensureValidCodexToken, isValidCodexAuth, logger } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
-import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '@webedt/shared';
-import { logger } from '@webedt/shared';
+import type { ClaudeAuth } from '@webedt/shared';
+import type { CodexAuth } from '@webedt/shared';
 
 const router = Router();
 

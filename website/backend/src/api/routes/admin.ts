@@ -159,9 +159,16 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       updateData.isAdmin = role === 'admin';
     } else if (isAdmin !== undefined) {
       updateData.isAdmin = isAdmin;
-      // Sync role with isAdmin - only change role if going to/from admin
+      // Sync role with isAdmin - change role when going to/from admin
       if (isAdmin) {
         updateData.role = 'admin';
+      } else {
+        // When removing admin status, need to get current role to determine new role
+        const [currentUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+        // Reset to 'user' if currently admin, otherwise preserve existing role
+        if (currentUser && currentUser.role === 'admin') {
+          updateData.role = 'user';
+        }
       }
     }
 
