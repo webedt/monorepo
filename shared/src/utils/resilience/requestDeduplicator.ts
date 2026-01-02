@@ -4,6 +4,7 @@ import type { RequestDeduplicatorStats } from './ARequestDeduplicator.js';
 import type { DeduplicateOptions } from './ARequestDeduplicator.js';
 import type { DeduplicateResult } from './ARequestDeduplicator.js';
 import { logger } from '../logging/logger.js';
+import { REQUEST_DEDUP_DEFAULT_TTL_MS } from '../../config/env.js';
 
 export type {
   RequestDeduplicatorConfig,
@@ -19,7 +20,7 @@ interface PendingEntry<T> {
 }
 
 const DEFAULT_CONFIG: RequestDeduplicatorConfig = {
-  defaultTtlMs: 60000,
+  defaultTtlMs: REQUEST_DEDUP_DEFAULT_TTL_MS,
   cleanupIntervalMs: 30000,
   maxPendingRequests: 10000,
   name: 'default',
