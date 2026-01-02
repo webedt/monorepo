@@ -218,6 +218,73 @@ try {
 | File parsing | Wrap and Throw | Add file path context |
 | Optional features | Recover with Fallback | Feature flag checks |
 
+## Database Transactions
+
+### When to Use Transactions
+
+Use database transactions (`withTransactionOrThrow` from `@webedt/shared`) when performing **multi-step write operations** that must succeed or fail atomically. This prevents partial updates that could leave the database in an inconsistent state.
+
+#### Patterns Requiring Transactions
+
+| Pattern | Example | Why Transaction Needed |
+|---------|---------|----------------------|
+| Create + Link | Create snippet + add to collections | Orphaned snippet if linking fails |
+| Update + Cascade | Set default flag + clear other defaults | Inconsistent default state if one fails |
+| Multi-table Insert | Create purchase + add to library + update count | Partial purchase state if any step fails |
+| Delete + Cleanup | Delete record + remove references | Orphaned references if delete succeeds but cleanup fails |
+
+#### Transaction Usage Examples
+
+**Simple transaction:**
+```typescript
+import { db, withTransactionOrThrow } from '@webedt/shared';
+
+const result = await withTransactionOrThrow(
+  db,
+  async (tx) => {
+    const [record] = await tx.insert(table).values({ ... }).returning();
+    await tx.insert(relatedTable).values({ parentId: record.id });
+    return record;
+  },
+  { context: { operation: 'createWithRelation', userId } }
+);
+```
+
+**Transaction with retry for transient failures:**
+```typescript
+const result = await withTransactionOrThrow(
+  db,
+  async (tx) => {
+    await tx.delete(items).where(eq(items.parentId, id));
+    await tx.delete(parent).where(eq(parent.id, id));
+  },
+  {
+    maxRetries: 2,
+    retryDelayMs: 100,
+    context: { operation: 'cascadeDelete', entityId: id }
+  }
+);
+```
+
+#### When NOT to Use Transactions
+
+- **Single write operations**: One insert/update/delete doesn't need transaction overhead
+- **Read-only operations**: Queries don't modify data
+- **External service calls**: Lucia auth operations, API calls - these can't be rolled back
+- **Cross-service operations**: Operations spanning different databases or services
+
+#### Guidelines
+
+1. **Keep transactions short**: Include only the database operations that must be atomic
+2. **Avoid external calls inside transactions**: HTTP requests, auth operations should be outside
+3. **Use context for debugging**: Always provide `context` with `operation` name for error logs
+4. **Let errors propagate**: `withTransactionOrThrow` handles rollback; catch at route level
+5. **Prefer `withTransactionOrThrow`**: Use the throwing variant for cleaner error handling
+
+#### Reference Implementation
+
+See `website/backend/src/api/routes/collections.ts` for canonical transaction usage patterns.
+
 ## Reference Examples
 
 See `shared/src/claudeWeb/` for canonical examples:
