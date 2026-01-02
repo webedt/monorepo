@@ -576,7 +576,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionEventBroadcaster.broadcast(chatSessionId, event.type, event);
     };
 
-    // Set up heartbeat using shared utility - 15 second interval prevents proxy timeouts
+    // Set up heartbeat using shared utility - interval from centralized config prevents proxy timeouts
     const heartbeat = createHeartbeat(res, {
       isDisconnected: disconnect.isDisconnected,
       onError: (error) => {

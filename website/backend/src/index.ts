@@ -24,6 +24,7 @@ import {
   CLAUDE_SYNC_INTERVAL_MS,
   SHUTDOWN_TIMEOUT_MS,
   LB_DRAIN_DELAY_MS,
+  HEALTH_CHECK_INTERVAL_MS,
   validateEnv,
   logEnvConfig,
   bootstrapServices,
@@ -358,8 +359,8 @@ healthMonitor.registerCheck('database', createDatabaseHealthCheck(async () => {
 // Set cleanup interval for status display
 healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
 
-// Start periodic health checks (every 30 seconds)
-healthMonitor.startPeriodicChecks(30000);
+// Start periodic health checks (configurable, default 30 seconds)
+healthMonitor.startPeriodicChecks(HEALTH_CHECK_INTERVAL_MS);
 
 // Basic health check endpoint (fast, for load balancers)
 // Note: Health endpoints (/health, /ready, /live, /metrics) are infrastructure endpoints

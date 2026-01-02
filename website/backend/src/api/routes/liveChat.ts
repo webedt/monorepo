@@ -23,6 +23,7 @@ import {
   generateRequestKey,
   simpleHash,
   LIMITS,
+  DEDUPLICATION,
 } from '@webedt/shared';
 import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 import { createSSEWriter } from '../utils/sseHandler.js';
@@ -317,7 +318,7 @@ router.post(
 
       // Use request deduplicator to prevent duplicate message posting from rapid clicks
       const deduplicator = requestDeduplicatorRegistry.get('live-chat-messages', {
-        defaultTtlMs: 5000, // 5 second TTL for message posting (short window)
+        defaultTtlMs: DEDUPLICATION.MESSAGE_TTL_MS,
       });
 
       // Key includes content hash to detect identical messages

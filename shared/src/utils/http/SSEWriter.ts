@@ -1,12 +1,7 @@
 import { ASseHelper } from './ASseHelper.js';
+import { SSE_HEARTBEAT_INTERVAL_MS } from '../../config/env.js';
 
 import type { SseWritable } from './ASseHelper.js';
-
-/**
- * Default heartbeat interval in milliseconds.
- * 15 seconds is chosen to prevent proxy timeouts (Traefik default is 30-60s).
- */
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
 
 /**
  * Configuration options for SSEWriter.
@@ -14,7 +9,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
 export interface SSEWriterOptions {
   /**
    * Heartbeat interval in milliseconds. Set to 0 to disable heartbeats.
-   * Default: 15000 (15 seconds)
+   * Default: SSE_HEARTBEAT_INTERVAL_MS from config (typically 15 seconds)
    */
   heartbeatIntervalMs?: number;
 
@@ -29,7 +24,7 @@ export interface SSEWriterOptions {
  * SSEWriter provides a stateful wrapper around SSE responses.
  *
  * Features:
- * - Automatic heartbeat management (15-second interval by default)
+ * - Automatic heartbeat management (configurable via SSE_HEARTBEAT_INTERVAL_MS)
  * - Connection state tracking
  * - Automatic JSON serialization
  * - Clean resource cleanup
@@ -56,7 +51,7 @@ export class SSEWriter {
   constructor(res: SseWritable, helper: ASseHelper, options: SSEWriterOptions = {}) {
     this.res = res;
     this.helper = helper;
-    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? SSE_HEARTBEAT_INTERVAL_MS;
 
     const autoStartHeartbeat = options.autoStartHeartbeat ?? true;
     if (autoStartHeartbeat && this.heartbeatIntervalMs > 0) {

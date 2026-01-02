@@ -13,6 +13,7 @@ import {
   CIRCUIT_BREAKER,
   RECOVERY_DELAYS,
   CONTEXT_RETRY,
+  DEDUPLICATION,
 } from '../../src/config/constants.js';
 
 describe('Constants Module', () => {
@@ -237,6 +238,54 @@ describe('Constants Module', () => {
       assert.ok(
         CONTEXT_RETRY.DB_CONNECTION.MAX_RETRIES >= RETRY.DEFAULT.MAX_ATTEMPTS,
         'DB connection retries should be at least as many as default'
+      );
+    });
+  });
+
+  describe('DEDUPLICATION', () => {
+    it('should export TTL values with positive values', () => {
+      assert.ok(DEDUPLICATION.DEFAULT_TTL_MS > 0, 'DEFAULT_TTL_MS should be positive');
+      assert.ok(DEDUPLICATION.SYNC_TTL_MS > 0, 'SYNC_TTL_MS should be positive');
+      assert.ok(DEDUPLICATION.MESSAGE_TTL_MS > 0, 'MESSAGE_TTL_MS should be positive');
+    });
+
+    it('should have TTL values in logical order', () => {
+      // Message TTL should be shortest (quick re-posting allowed)
+      assert.ok(
+        DEDUPLICATION.MESSAGE_TTL_MS < DEDUPLICATION.SYNC_TTL_MS,
+        'MESSAGE_TTL_MS should be less than SYNC_TTL_MS'
+      );
+      // Sync TTL should be less than or equal to default
+      assert.ok(
+        DEDUPLICATION.SYNC_TTL_MS <= DEDUPLICATION.DEFAULT_TTL_MS,
+        'SYNC_TTL_MS should be less than or equal to DEFAULT_TTL_MS'
+      );
+    });
+
+    it('should have reasonable default TTL values', () => {
+      // Default TTL should be 60 seconds
+      assert.strictEqual(DEDUPLICATION.DEFAULT_TTL_MS, 60000);
+      // Sync TTL should be 30 seconds
+      assert.strictEqual(DEDUPLICATION.SYNC_TTL_MS, 30000);
+      // Message TTL should be 5 seconds
+      assert.strictEqual(DEDUPLICATION.MESSAGE_TTL_MS, 5000);
+    });
+
+    it('should have TTL values within safe operational ranges', () => {
+      // Default TTL: 30s-2min range
+      assert.ok(
+        DEDUPLICATION.DEFAULT_TTL_MS >= 30000 && DEDUPLICATION.DEFAULT_TTL_MS <= 120000,
+        'DEFAULT_TTL_MS should be between 30s and 2min'
+      );
+      // Sync TTL: 15s-60s range
+      assert.ok(
+        DEDUPLICATION.SYNC_TTL_MS >= 15000 && DEDUPLICATION.SYNC_TTL_MS <= 60000,
+        'SYNC_TTL_MS should be between 15s and 60s'
+      );
+      // Message TTL: 2s-10s range
+      assert.ok(
+        DEDUPLICATION.MESSAGE_TTL_MS >= 2000 && DEDUPLICATION.MESSAGE_TTL_MS <= 10000,
+        'MESSAGE_TTL_MS should be between 2s and 10s'
       );
     });
   });

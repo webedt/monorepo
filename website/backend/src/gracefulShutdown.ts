@@ -32,6 +32,8 @@ import {
   createShutdownHandler,
   trashCleanupService,
   requestDeduplicatorRegistry,
+  SHUTDOWN_TIMEOUT_MS,
+  LB_DRAIN_DELAY_MS,
 } from '@webedt/shared';
 
 import { shutdownTelemetry } from './telemetry/index.js';
@@ -42,14 +44,14 @@ import { cleanupRateLimitStores } from './api/middleware/rateLimit.js';
 export interface GracefulShutdownConfig {
   /**
    * Maximum time to wait for connections to drain (in milliseconds)
-   * Default: 30000 (30 seconds)
+   * Default: SHUTDOWN_TIMEOUT_MS from config (typically 30 seconds)
    */
   shutdownTimeoutMs?: number;
 
   /**
    * Time to wait after stopping health checks before starting drain
    * Allows load balancer to detect unhealthy status
-   * Default: 2000 (2 seconds)
+   * Default: LB_DRAIN_DELAY_MS from config (typically 2 seconds)
    */
   loadBalancerDrainDelayMs?: number;
 
@@ -67,8 +69,8 @@ export interface GracefulShutdownConfig {
 }
 
 const DEFAULT_CONFIG: Required<GracefulShutdownConfig> = {
-  shutdownTimeoutMs: 30000,
-  loadBalancerDrainDelayMs: 2000,
+  shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+  loadBalancerDrainDelayMs: LB_DRAIN_DELAY_MS,
   exitProcess: true,
   exitCode: 0,
 };
