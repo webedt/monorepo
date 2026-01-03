@@ -385,3 +385,254 @@ dbCommand
       console.log('    ENCRYPTION_SALT=<new-salt>');
     }
   });
+
+// ============================================================================
+// ANALYZE-QUERIES COMMAND
+// ============================================================================
+
+dbCommand
+  .command('analyze-queries')
+  .description('Analyze slow queries and detect potential N+1 patterns')
+  .option('--threshold <ms>', 'Slow query threshold in milliseconds', '100')
+  .option('--sample-queries', 'Run sample queries to demonstrate analysis')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { QueryAnalyzer, getPool } = await import('@webedt/shared');
+
+    const threshold = parseInt(options.threshold, 10);
+
+    console.log('\nQuery Analysis Tool');
+    console.log('===================');
+    console.log(`Slow query threshold: ${threshold}ms`);
+    console.log('');
+
+    // Create analyzer with custom threshold
+    const analyzer = new QueryAnalyzer({
+      enabled: true,
+      slowQueryThresholdMs: threshold,
+      explainEnabled: true,
+      logAllQueries: true,
+    });
+
+    if (options.sampleQueries) {
+      console.log('Running sample queries for analysis...\n');
+
+      try {
+        const pool = getPool();
+
+        // Run some sample queries to analyze
+        const sampleQueries = [
+          'SELECT COUNT(*) FROM users',
+          'SELECT id, email FROM users LIMIT 10',
+          'SELECT * FROM chat_sessions ORDER BY created_at DESC LIMIT 5',
+          'SELECT * FROM events WHERE session_id IS NOT NULL LIMIT 10',
+        ];
+
+        for (const query of sampleQueries) {
+          const start = Date.now();
+          try {
+            await pool.query(query);
+            const duration = Date.now() - start;
+            await analyzer.analyzeQuery(pool, query, [], duration);
+            console.log(`  [${duration}ms] ${query.slice(0, 60)}...`);
+          } catch (error) {
+            console.log(`  [ERROR] ${query.slice(0, 60)}... - ${(error as Error).message}`);
+          }
+        }
+
+        console.log('');
+      } catch (error) {
+        console.error('Failed to run sample queries:', (error as Error).message);
+        console.log('');
+      }
+    }
+
+    // Get and display summary
+    const summary = analyzer.getSummary();
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        threshold,
+        totalQueries: summary.totalQueries,
+        slowQueries: summary.slowQueries,
+        sequentialScanQueries: summary.sequentialScanQueries,
+        potentialN1Patterns: summary.potentialN1Patterns,
+        topSlowQueries: summary.topSlowQueries.map(q => ({
+          query: q.normalizedQuery,
+          durationMs: q.durationMs,
+          issues: q.issues.map(i => i.message),
+        })),
+        timeRange: {
+          start: summary.timeRange.start.toISOString(),
+          end: summary.timeRange.end.toISOString(),
+        },
+      }, null, 2));
+      return;
+    }
+
+    // Display formatted summary
+    console.log('Analysis Summary');
+    console.log('----------------');
+    console.log(`Total Queries Analyzed: ${summary.totalQueries}`);
+    console.log(`Slow Queries: ${summary.slowQueries}`);
+    console.log(`Sequential Scan Queries: ${summary.sequentialScanQueries}`);
+
+    if (summary.potentialN1Patterns.length > 0) {
+      console.log('\nPotential N+1 Patterns:');
+      for (const pattern of summary.potentialN1Patterns) {
+        console.log(`  - ${pattern}`);
+      }
+    }
+
+    if (summary.topSlowQueries.length > 0) {
+      console.log('\nTop Slow Queries:');
+      for (const entry of summary.topSlowQueries) {
+        console.log(`  [${entry.durationMs}ms] ${entry.normalizedQuery.slice(0, 70)}...`);
+        for (const issue of entry.issues) {
+          console.log(`    -> [${issue.severity.toUpperCase()}] ${issue.message}`);
+          if (issue.suggestion) {
+            console.log(`       Suggestion: ${issue.suggestion}`);
+          }
+        }
+      }
+    }
+
+    if (summary.totalQueries === 0) {
+      console.log('\nNo queries analyzed yet.');
+      console.log('Use --sample-queries to run sample queries for demonstration.');
+      console.log('');
+      console.log('In your application, use the QueryAnalyzer to wrap queries:');
+      console.log('');
+      console.log('  import { QueryAnalyzer, getPool } from "@webedt/shared";');
+      console.log('  const analyzer = new QueryAnalyzer({ slowQueryThresholdMs: 100 });');
+      console.log('  const pool = getPool();');
+      console.log('');
+      console.log('  // Analyze a query');
+      console.log('  const start = Date.now();');
+      console.log('  const result = await pool.query("SELECT * FROM users");');
+      console.log('  await analyzer.analyzeQuery(pool, "SELECT * FROM users", [], Date.now() - start);');
+      console.log('');
+      console.log('  // Get summary');
+      console.log('  analyzer.printSummary();');
+    }
+
+    console.log('');
+  });
+
+// ============================================================================
+// EXPLAIN COMMAND
+// ============================================================================
+
+dbCommand
+  .command('explain <query>')
+  .description('Run EXPLAIN ANALYZE on a query and detect performance issues')
+  .option('--json', 'Output as JSON')
+  .action(async (query, options) => {
+    const { QueryAnalyzer, getPool } = await import('@webedt/shared');
+
+    console.log('\nQuery EXPLAIN Analysis');
+    console.log('======================\n');
+
+    const analyzer = new QueryAnalyzer({
+      enabled: true,
+      explainEnabled: true,
+    });
+
+    try {
+      const pool = getPool();
+
+      // Run the query first to get timing
+      const start = Date.now();
+      await pool.query(query);
+      const duration = Date.now() - start;
+
+      console.log(`Query: ${query}`);
+      console.log(`Execution Time: ${duration}ms\n`);
+
+      // Now run EXPLAIN ANALYZE
+      const result = await analyzer.runExplainAnalyze(pool, query);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          query,
+          executionTimeMs: duration,
+          planningTimeMs: result.planningTime,
+          explainExecutionTimeMs: result.executionTime,
+          issues: result.issues,
+          plan: result.plan,
+        }, null, 2));
+        return;
+      }
+
+      console.log('EXPLAIN ANALYZE Results:');
+      console.log(`  Planning Time: ${result.planningTime.toFixed(2)}ms`);
+      console.log(`  Execution Time: ${result.executionTime.toFixed(2)}ms`);
+
+      // Display plan tree
+      console.log('\nExecution Plan:');
+      printPlanNode(result.plan, 0);
+
+      if (result.issues.length > 0) {
+        console.log('\nDetected Issues:');
+        for (const issue of result.issues) {
+          console.log(`  [${issue.severity.toUpperCase()}] ${issue.message}`);
+          if (issue.table) {
+            console.log(`    Table: ${issue.table}`);
+          }
+          if (issue.suggestion) {
+            console.log(`    Suggestion: ${issue.suggestion}`);
+          }
+        }
+      } else {
+        console.log('\nNo performance issues detected.');
+      }
+
+      console.log('');
+    } catch (error) {
+      console.error('Failed to analyze query:', (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Helper function to print EXPLAIN plan node
+ */
+function printPlanNode(node: {
+  nodeType: string;
+  relationName?: string;
+  totalCost: number;
+  planRows: number;
+  actualRows?: number;
+  actualTime?: number;
+  indexName?: string;
+  plans?: unknown[];
+}, indent: number): void {
+  const prefix = '  '.repeat(indent);
+  let line = `${prefix}-> ${node.nodeType}`;
+
+  if (node.relationName) {
+    line += ` on "${node.relationName}"`;
+  }
+  if (node.indexName) {
+    line += ` using "${node.indexName}"`;
+  }
+
+  console.log(line);
+
+  const details: string[] = [];
+  details.push(`cost=${node.totalCost.toFixed(2)}`);
+  details.push(`rows=${node.planRows}`);
+  if (node.actualRows !== undefined) {
+    details.push(`actual_rows=${node.actualRows}`);
+  }
+  if (node.actualTime !== undefined) {
+    details.push(`time=${node.actualTime.toFixed(2)}ms`);
+  }
+  console.log(`${prefix}   (${details.join(', ')})`);
+
+  if (node.plans && Array.isArray(node.plans)) {
+    for (const child of node.plans) {
+      printPlanNode(child as typeof node, indent + 1);
+    }
+  }
+}
