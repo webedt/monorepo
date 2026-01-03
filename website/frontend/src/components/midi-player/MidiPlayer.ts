@@ -11,7 +11,7 @@ import './midi-player.css';
 
 import type { MidiStoreState } from '../../lib/midi';
 
-export interface MidiPlayerOptions {
+export interface MidiPlayerComponentOptions {
   /** Whether to show track list */
   showTracks?: boolean;
   /** Whether to show channel list */
@@ -22,8 +22,8 @@ export interface MidiPlayerOptions {
   compact?: boolean;
 }
 
-export class MidiPlayer extends Component {
-  private options: Required<MidiPlayerOptions>;
+export class MidiPlayerComponent extends Component {
+  private options: Required<MidiPlayerComponentOptions>;
   private unsubscribe: (() => void) | null = null;
   private importDialog: MidiImportDialog | null = null;
   private progressBar: HTMLElement | null = null;
@@ -33,7 +33,7 @@ export class MidiPlayer extends Component {
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
 
-  constructor(options: MidiPlayerOptions = {}) {
+  constructor(options: MidiPlayerComponentOptions = {}) {
     super('div', { className: 'midi-player' });
     this.options = {
       showTracks: options.showTracks ?? true,

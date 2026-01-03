@@ -198,9 +198,9 @@ export type { SceneTabsOptions } from './scene-tabs';
 export { MidiImportDialog } from './midi-import-dialog';
 export type { MidiImportDialogOptions } from './midi-import-dialog';
 
-// MidiPlayer
-export { MidiPlayer } from './midi-player';
-export type { MidiPlayerOptions } from './midi-player';
+// MidiPlayerComponent
+export { MidiPlayerComponent } from './midi-player';
+export type { MidiPlayerComponentOptions } from './midi-player';
 
 // MidiPianoRoll
 export { MidiPianoRoll } from './midi-piano-roll';
