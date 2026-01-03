@@ -5,6 +5,7 @@ import { bootstrapServices } from '@webedt/shared';
 import { auditCommand } from './commands/audit.js';
 import { authCommand } from './commands/auth.js';
 import { claudeCommand } from './commands/claude.js';
+import { completionCommand } from './commands/completion.js';
 import { dbCommand } from './commands/db.js';
 import { githubCommand } from './commands/github.js';
 import { llmCommand } from './commands/llm.js';
@@ -27,6 +28,7 @@ async function main() {
   program.addCommand(auditCommand);
   program.addCommand(authCommand);
   program.addCommand(claudeCommand);
+  program.addCommand(completionCommand);
   program.addCommand(dbCommand);
   program.addCommand(githubCommand);
   program.addCommand(llmCommand);

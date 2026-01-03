@@ -406,6 +406,34 @@ Global options: `--token`
 | `github pr list <owner> <repo>` | List pull requests |
 | `github pr create <owner> <repo> <head> <base>` | Create PR |
 
+### Shell Completion (`completion`)
+
+The CLI supports shell completion for bash, zsh, and fish. This enables tab-completion for all commands, subcommands, and options.
+
+| Command | Description |
+|---------|-------------|
+| `completion bash` | Generate bash completion script |
+| `completion zsh` | Generate zsh completion script |
+| `completion fish` | Generate fish completion script |
+| `completion install <shell>` | Display installation instructions |
+
+**Quick Installation:**
+
+```bash
+# Bash
+webedt completion bash > ~/.local/share/bash-completion/completions/webedt
+
+# Zsh
+mkdir -p ~/.zsh/completions
+webedt completion zsh > ~/.zsh/completions/_webedt
+# Add to ~/.zshrc: fpath=(~/.zsh/completions $fpath)
+
+# Fish
+webedt completion fish > ~/.config/fish/completions/webedt.fish
+```
+
+Run `webedt completion install <shell>` for detailed instructions.
+
 ## Pre-Commit Checklist
 
 Before committing, run in modified package folders:
