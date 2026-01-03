@@ -34,3 +34,6 @@ export { AdminPage } from './admin';
 
 // Snippets
 export { SnippetsPage } from './snippets/SnippetsPage';
+
+// Health Dashboard
+export { HealthDashboardPage } from './health-dashboard/HealthDashboardPage';
