@@ -153,7 +153,7 @@ export class MidiImportDialog extends Component {
 
   private selectFile(file: File): void {
     // Validate file type - require valid extension for MIDI files
-    const validTypes = ['audio/midi', 'audio/x-midi', 'audio/mid'];
+    const validTypes = ['audio/midi', 'audio/x-midi'];
     const validExtensions = ['.mid', '.midi'];
     const hasValidExtension = validExtensions.some((ext) =>
       file.name.toLowerCase().endsWith(ext)

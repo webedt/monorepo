@@ -136,7 +136,10 @@ export class MidiPlayer {
           resolve(false);
         }
       };
-      reader.onerror = () => resolve(false);
+      reader.onerror = () => {
+        console.error('MidiPlayer: Failed to read file', reader.error);
+        resolve(false);
+      };
       reader.readAsArrayBuffer(file);
     });
   }
@@ -338,7 +341,8 @@ export class MidiPlayer {
         channel,
         noteCount,
         isMuted: this.options.mutedChannels.has(channel),
-        program: 0, // Would need to track program changes
+        // TODO(midi): Track program change events from MIDI parser to display actual instrument
+        program: 0,
       }));
 
     const totalNotes = tracks.reduce((sum, t) => sum + t.noteCount, 0);
@@ -514,8 +518,11 @@ export class MidiPlayer {
         active.gainNode.gain.cancelScheduledValues(now);
         active.gainNode.gain.setValueAtTime(0, now);
         active.oscillator.stop(now + 0.01);
-      } catch {
-        // Oscillator may already be stopped
+      } catch (error) {
+        // Oscillator may already be stopped - log only unexpected errors
+        if (error instanceof DOMException && error.name !== 'InvalidStateError') {
+          console.warn('MidiPlayer: Unexpected error stopping oscillator', error);
+        }
       }
     }
     this.activeOscillators = [];

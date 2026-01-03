@@ -79,6 +79,10 @@ export class MidiPianoRoll extends Component {
 
     if (this.canvas) {
       this.ctx = this.canvas.getContext('2d');
+      if (!this.ctx) {
+        console.error('MidiPianoRoll: Failed to get 2D rendering context');
+        return this;
+      }
     }
 
     // Render piano keys
@@ -246,14 +250,14 @@ export class MidiPianoRoll extends Component {
   private setupEventListeners(): void {
     // Click to seek
     if (this.options.clickToSeek && this.scrollContainer) {
-      this.scrollContainer.addEventListener('click', (e) => {
-        const rect = this.scrollContainer!.getBoundingClientRect();
-        const x = e.clientX - rect.left + this.scrollContainer!.scrollLeft;
+      const container = this.scrollContainer;
+      container.addEventListener('click', (e) => {
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left + container.scrollLeft;
         const time = x / this.options.pixelsPerSecond;
         midiStore.seek(time);
       });
     }
-
   }
 
   private updatePlayhead(): void {

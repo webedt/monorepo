@@ -273,7 +273,9 @@ export class MidiPlayer extends Component {
     this.element.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const action = (e.currentTarget as HTMLElement).dataset.action;
-        this.handleAction(action!);
+        if (action) {
+          this.handleAction(action);
+        }
       });
     });
 
@@ -335,6 +337,16 @@ export class MidiPlayer extends Component {
       case 'loop':
         midiStore.toggleLoop();
         break;
+      case 'volume-toggle':
+        this.toggleVolumeSlider();
+        break;
+    }
+  }
+
+  private toggleVolumeSlider(): void {
+    const volumeContainer = this.element.querySelector('.midi-player-volume');
+    if (volumeContainer) {
+      volumeContainer.classList.toggle('midi-player-volume--expanded');
     }
   }
 
@@ -441,8 +453,9 @@ export class MidiPlayer extends Component {
    * Check if a full re-render is needed
    */
   private needsFullRender(state: MidiStoreState): boolean {
+    const tracksKey = state.fileInfo?.tracks.map((t) => t.isMuted ? '1' : '0').join('') ?? '';
     const fileKey = state.fileInfo
-      ? `${state.fileInfo.fileName}-${state.isLoaded}-${state.isPlaying}-${state.isPaused}-${state.settings.loop}-${JSON.stringify(state.fileInfo.tracks.map((t) => t.isMuted))}`
+      ? `${state.fileInfo.fileName}-${state.isLoaded}-${state.isPlaying}-${state.isPaused}-${state.settings.loop}-${tracksKey}`
       : 'empty';
 
     if (fileKey !== this.lastRenderedFileInfo) {
