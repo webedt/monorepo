@@ -267,3 +267,207 @@ WebEDT's architecture is **designed for horizontal scalability**:
 - ✅ Container-ready Docker build
 
 The platform can scale from single-instance development to multi-instance production by simply increasing replica count and ensuring shared database access.
+
+## Service Layer Architecture
+
+WebEDT uses a dependency injection pattern with abstract classes as tokens, providing type-safe service lookup and lifecycle management.
+
+### Core Concepts
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ServiceProvider                                    │
+│                    (Global Service Registry)                                 │
+│                                                                              │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
+│  │    ALogger      │  │   ADatabase     │  │ AClaudeWebClient│              │
+│  │   (order: -100) │  │   (order: -50)  │  │   (order: 50)   │              │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘              │
+│           │                    │                    │                        │
+│           ▼                    ▼                    ▼                        │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
+│  │  ConsoleLogger  │  │ PostgresDatabase│  │ ClaudeWebClient │              │
+│  │ (implementation)│  │ (implementation)│  │ (implementation)│              │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ createScope()
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ServiceScope                                       │
+│                    (Request-Level Overrides)                                 │
+│                                                                              │
+│  ┌─────────────────┐                                                        │
+│  │  AUserContext   │  ← Scoped service                                      │
+│  │ (request-only)  │                                                        │
+│  └────────┬────────┘                                                        │
+│           │                                                                  │
+│           ▼                                                                  │
+│  Falls back to ServiceProvider for ALogger, ADatabase, etc.                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Abstract Class Token Pattern
+
+Unlike interfaces which are erased at runtime, abstract classes exist as values:
+
+```typescript
+// Abstract class defines contract AND serves as lookup key
+abstract class ALogger extends AService {
+  readonly order = -100;  // Initialize first
+  abstract info(message: string): void;
+}
+
+// Registration uses abstract class as token
+ServiceProvider.register(ALogger, new ConsoleLogger());
+
+// Lookup returns correctly typed instance
+const logger = ServiceProvider.get(ALogger);
+logger.info('Type-safe!');
+```
+
+### Service Lifecycle
+
+1. **Registration**: Services registered with abstract class tokens
+2. **Initialization**: `initialize()` called in order (by `order` property)
+3. **Operation**: Services accessed via `ServiceProvider.get()`
+4. **Disposal**: `dispose()` called in reverse order during `reset()`
+
+```typescript
+// Bootstrap sequence
+ServiceProvider.register(ALogger, new Logger());       // order: -100
+ServiceProvider.register(ADatabase, new Database());   // order: -50
+ServiceProvider.register(AApiClient, new ApiClient()); // order: 50
+
+await ServiceProvider.initialize();
+// Init order: Logger → Database → ApiClient
+
+await ServiceProvider.reset();
+// Dispose order: ApiClient → Database → Logger
+```
+
+### BaseService Mixin
+
+The `BaseService` mixin adds common infrastructure to services:
+
+```typescript
+class SessionService extends BaseService(ASessionService) {
+  async deleteSession(id: string): Promise<OperationResult> {
+    try {
+      // Transaction with retry logic
+      await this.withTransaction(async (tx) => {
+        await tx.delete(sessions).where(eq(sessions.id, id));
+      });
+
+      // Component-scoped logging (auto-includes class name)
+      this.log.info('Session deleted', { id });
+
+      return this.successResult('Session deleted');
+    } catch (error) {
+      // Consistent error handling
+      return this.handleError(error, 'deleteSession', { id });
+    }
+  }
+}
+```
+
+Features provided:
+- **`this.log`**: Logger with automatic component context
+- **`this.withTransaction()`**: Database transactions with retry
+- **`this.handleError()`**: Consistent error logging and response
+- **`this.onShutdown()`**: Register cleanup handlers
+
+### Service Container
+
+For explicit dependency injection in route handlers:
+
+```typescript
+// Route factory receives explicit dependencies
+function createSessionRoutes(container: SessionCrudServices) {
+  const router = Router();
+
+  router.get('/', async (req, res) => {
+    const sessions = await container.sessionQueryService.listActive(userId);
+    res.json({ sessions });
+  });
+
+  return router;
+}
+
+// App setup
+const container = createServiceContainer();
+app.use('/api/sessions', createSessionRoutes(container));
+
+// Testing with mocks
+const mockContainer = createMockServiceContainer({
+  sessionQueryService: mockSessionQueryService,
+  logger: mockLogger,
+});
+const router = createSessionRoutes(mockContainer);
+```
+
+### Documentation Pattern
+
+Each service follows a documentation pattern:
+
+| File | Purpose |
+|------|---------|
+| `AServiceName.ts` | Abstract class with method signatures |
+| `serviceName.doc.ts` | Full JSDoc documentation interface |
+| `ServiceName.ts` | Implementation class |
+
+```
+shared/src/services/
+├── abstracts/
+│   ├── AService.ts          # Base abstract class
+│   └── index.ts             # Re-exports all abstract classes
+├── ServiceContainer.ts       # Explicit DI container
+├── serviceContainer.doc.ts   # Container documentation
+├── ServiceScope.ts           # Request-scoped services
+├── serviceScope.doc.ts       # Scope documentation
+├── BaseService.ts            # Service mixin with utilities
+├── baseService.doc.ts        # Mixin documentation
+├── registry.ts               # ServiceProvider implementation
+└── serviceProvider.doc.ts    # Provider documentation
+```
+
+### Creating a New Service
+
+1. Define abstract class:
+   ```typescript
+   // shared/src/myFeature/AMyService.ts
+   export abstract class AMyService extends AService {
+     readonly order = 10;
+     abstract doSomething(): Promise<void>;
+   }
+   ```
+
+2. Create documentation (optional):
+   ```typescript
+   // shared/src/myFeature/myService.doc.ts
+   export interface IMyServiceDocumentation {
+     /** Does something important */
+     doSomething(): Promise<void>;
+   }
+   ```
+
+3. Implement service:
+   ```typescript
+   // shared/src/myFeature/MyService.ts
+   export class MyService extends BaseService(AMyService) {
+     async doSomething(): Promise<void> {
+       this.log.info('Doing something');
+     }
+   }
+   ```
+
+4. Register in bootstrap:
+   ```typescript
+   ServiceProvider.register(AMyService, new MyService());
+   ```
+
+5. Use anywhere:
+   ```typescript
+   const service = ServiceProvider.get(AMyService);
+   await service.doSomething();
+   ```
