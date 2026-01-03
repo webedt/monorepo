@@ -947,13 +947,19 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
       // Create a scoped TimerManager for this sleep operation
       const sleepTimerManager = new TimerManager();
-      const timeoutId = sleepTimerManager.setTimeout(() => {
+      let abortHandler: (() => void) | null = null;
+
+      sleepTimerManager.setTimeout(() => {
+        // Clean up abort listener to prevent memory leak
+        if (abortSignal && abortHandler) {
+          abortSignal.removeEventListener('abort', abortHandler);
+        }
         sleepTimerManager.dispose();
         resolve();
       }, ms);
 
       if (abortSignal) {
-        const abortHandler = () => {
+        abortHandler = () => {
           sleepTimerManager.dispose();
           reject(new ClaudeRemoteError('Sleep aborted by signal'));
         };
