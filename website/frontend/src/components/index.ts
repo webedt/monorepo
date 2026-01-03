@@ -225,3 +225,7 @@ export type { WaveformEditorOptions, AudioSelection } from './waveform-editor';
 // SynthesizerPanel
 export { SynthesizerPanel } from './synthesizer-panel';
 export type { SynthesizerPanelOptions } from './synthesizer-panel';
+
+// HealthDashboard
+export { HealthDashboard } from './health-dashboard';
+export type { HealthDashboardOptions } from './health-dashboard';

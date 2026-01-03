@@ -2171,3 +2171,108 @@ export const importApi = {
       body: { url, sessionPath, targetPath },
     }),
 };
+
+// ============================================================================
+// Health Dashboard API (External service health monitoring)
+// ============================================================================
+export type ServiceStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+
+export interface CircuitBreakerStats {
+  state: string;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  totalSuccesses: number;
+  totalFailures: number;
+  lastFailureTime: string | null;
+  lastSuccessTime: string | null;
+  lastError: string | null;
+  halfOpenAttempts: number;
+}
+
+export interface ServiceHealthHistory {
+  serviceName: string;
+  averageLatencyMs: number;
+  failureRate: number;
+  lastCheck: string | null;
+  windowMs: number;
+}
+
+export interface AlertInfo {
+  severity: AlertSeverity;
+  message: string;
+  triggeredAt: string;
+  threshold: string;
+}
+
+export interface ServiceHealthStatus {
+  name: string;
+  displayName: string;
+  status: ServiceStatus;
+  latencyMs: number | null;
+  lastCheck: string | null;
+  circuitBreaker: {
+    state: string;
+    available: boolean;
+    stats: CircuitBreakerStats | null;
+  } | null;
+  history: ServiceHealthHistory | null;
+  alert: AlertInfo | null;
+}
+
+export interface AggregatedHealthStatus {
+  overallStatus: ServiceStatus;
+  services: ServiceHealthStatus[];
+  alerts: AlertInfo[];
+  summary: {
+    healthy: number;
+    degraded: number;
+    unhealthy: number;
+    unknown: number;
+    total: number;
+  };
+  metrics: {
+    uptime: number;
+    totalRequests: number;
+    errorRate: number;
+    avgResponseTime: number;
+  };
+  timestamp: string;
+}
+
+export interface HealthThreshold {
+  warningLatencyMs: number;
+  criticalLatencyMs: number;
+  warningFailureRate: number;
+  criticalFailureRate: number;
+}
+
+export const healthDashboardApi = {
+  getHealth: () =>
+    fetchApi<ApiResponse<AggregatedHealthStatus>>('/api/health-dashboard')
+      .then(r => r.data!),
+
+  getThresholds: () =>
+    fetchApi<ApiResponse<Record<string, HealthThreshold>>>('/api/health-dashboard/thresholds')
+      .then(r => r.data!),
+
+  updateThreshold: (serviceName: string, threshold: Partial<HealthThreshold>) =>
+    fetchApi<ApiResponse<{ serviceName: string; threshold: HealthThreshold }>>(
+      `/api/health-dashboard/thresholds/${serviceName}`,
+      {
+        method: 'PUT',
+        body: threshold,
+      }
+    ).then(r => r.data!),
+
+  recordMetric: (serviceName: string, latencyMs: number, success: boolean, error?: string) =>
+    fetchApi<ApiResponse<{ recorded: boolean }>>('/api/health-dashboard/record', {
+      method: 'POST',
+      body: { serviceName, latencyMs, success, error },
+    }),
+
+  clearHistory: () =>
+    fetchApi<ApiResponse<{ message: string }>>('/api/health-dashboard/history', {
+      method: 'DELETE',
+    }),
+};

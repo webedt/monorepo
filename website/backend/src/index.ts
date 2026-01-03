@@ -67,6 +67,7 @@ import importRoutes from './api/routes/import.js';
 import autocompleteRoutes from './api/routes/autocomplete.js';
 import snippetsRoutes from './api/routes/snippets.js';
 import diffsRoutes from './api/routes/diffs.js';
+import healthDashboardRoutes from './api/routes/healthDashboard.js';
 
 // Import Swagger/OpenAPI
 import { swaggerSpec, swaggerUi, swaggerUiOptions } from './api/swagger/index.js';
@@ -516,6 +517,7 @@ app.use('/api/import', importRoutes);  // Import files from external URLs
 app.use('/api/autocomplete', autocompleteRoutes);  // AI-powered code completion
 app.use('/api/snippets', snippetsRoutes);  // User code snippets and templates
 app.use('/api/diffs', diffsRoutes);  // Diff visualization comparing branches
+app.use('/api/health-dashboard', healthDashboardRoutes);  // External service health aggregation
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');

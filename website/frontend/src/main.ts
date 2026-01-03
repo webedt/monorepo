@@ -35,6 +35,7 @@ import {
   BoneAnimationPage,
   SnippetsPage,
   ScenePage,
+  HealthDashboardPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -1036,6 +1037,19 @@ async function init(): Promise<void> {
         },
         title: 'Snippets | WebEDT',
         guard: () => authStore.isAuthenticated(),
+      },
+      // Health Dashboard route (admin only)
+      {
+        path: '/health-dashboard',
+        component: () => {
+          mountPage(HealthDashboardPage);
+          return document.createElement('div');
+        },
+        title: 'Health Dashboard | WebEDT',
+        guard: () => {
+          const user = authStore.getUser();
+          return authStore.isAuthenticated() && !!user?.isAdmin;
+        },
       },
     ])
     .start();

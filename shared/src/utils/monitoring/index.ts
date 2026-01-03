@@ -23,3 +23,16 @@ export type { MetricLabels } from './metrics.js';
 // Implementations
 export { healthMonitor, createDatabaseHealthCheck } from './healthMonitor.js';
 export { metrics } from './metrics.js';
+
+// Health aggregator for unified external service monitoring
+export {
+  healthAggregator,
+  type ServiceStatus,
+  type AlertSeverity,
+  type HealthThreshold,
+  type ServiceHealthMetric,
+  type ServiceHealthHistory,
+  type ServiceHealthStatus,
+  type AlertInfo,
+  type AggregatedHealthStatus,
+} from './healthAggregator.js';
