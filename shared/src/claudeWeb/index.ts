@@ -88,7 +88,25 @@ export { AClaudeWebClient } from './AClaudeWebClient.js';
 
 // Implementation
 export { ClaudeWebClient, fetchEnvironmentIdFromSessions } from './claudeWebClient.js';
+export type { ClaudeWebClientOptions } from './claudeWebClient.js';
 export { generateTitle, generateTitleSync } from './titleGenerator.js';
+
+// WebSocket Health Monitoring
+export {
+  WebSocketHealthMonitor,
+  createWebSocketHealthMonitor,
+} from './websocketHealthMonitor.js';
+export type {
+  WebSocketConnectionQuality,
+  WebSocketConnectionState,
+  WebSocketHealthConfig,
+  WebSocketHealthMetrics,
+  WebSocketHealthEventType,
+  WebSocketHealthEvent,
+  WebSocketHealthEventCallback,
+  WebSocketFactory,
+  WebSocketSessionContext,
+} from './websocketHealthMonitor.js';
 
 // Types
 export type {

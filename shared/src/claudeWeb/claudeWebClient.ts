@@ -3,7 +3,7 @@ import WebSocket from 'ws';
 import { AClaudeWebClient } from './AClaudeWebClient.js';
 import { parseGitUrl } from '../utils/helpers/gitUrlHelper.js';
 import { safeJsonParse } from '../utils/api/safeJson.js';
-
+import { WebSocketHealthMonitor, createWebSocketHealthMonitor } from './websocketHealthMonitor.js';
 import type { ClaudeRemoteClientConfig } from './types.js';
 import type { ClaudeWebClientConfig } from './types.js';
 import type { CreateSessionParams } from './types.js';
@@ -16,6 +16,9 @@ import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
 import type { RawMessageCallback } from './types.js';
+import type { WebSocketHealthConfig } from './websocketHealthMonitor.js';
+import type { WebSocketHealthMetrics } from './websocketHealthMonitor.js';
+import type { WebSocketHealthEventCallback } from './websocketHealthMonitor.js';
 import { ClaudeRemoteError } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
@@ -77,20 +80,34 @@ export async function fetchEnvironmentIdFromSessions(
   }
 }
 
+/** Extended configuration for ClaudeWebClient with health monitoring options */
+export interface ClaudeWebClientOptions extends ClaudeRemoteClientConfig {
+  /** Configuration for WebSocket health monitoring */
+  healthMonitorConfig?: WebSocketHealthConfig;
+  /** Enable WebSocket health monitoring (default: true) */
+  enableHealthMonitoring?: boolean;
+}
+
 export class ClaudeWebClient extends AClaudeWebClient {
   private accessToken: string;
   private environmentId: string;
   private orgUuid?: string;
   private baseUrl: string;
   private model: string;
+  private healthMonitorConfig: WebSocketHealthConfig;
+  private enableHealthMonitoring: boolean;
+  private activeHealthMonitor: WebSocketHealthMonitor | null = null;
+  private healthEventListeners: WebSocketHealthEventCallback[] = [];
 
-  constructor(config: ClaudeRemoteClientConfig) {
+  constructor(config: ClaudeWebClientOptions) {
     super();
     this.accessToken = config.accessToken;
     this.environmentId = config.environmentId;
     this.orgUuid = config.orgUuid;
     this.baseUrl = config.baseUrl || DEFAULT_BASE_URL;
     this.model = config.model || DEFAULT_MODEL;
+    this.healthMonitorConfig = config.healthMonitorConfig || {};
+    this.enableHealthMonitoring = config.enableHealthMonitoring !== false;
   }
 
   configure(
@@ -110,6 +127,75 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
   setAccessToken(accessToken: string): void {
     this.accessToken = accessToken;
+  }
+
+  /**
+   * Get current WebSocket health metrics.
+   * Returns null if no active WebSocket connection or health monitoring is disabled.
+   */
+  getHealthMetrics(): WebSocketHealthMetrics | null {
+    return this.activeHealthMonitor?.getMetrics() ?? null;
+  }
+
+  /**
+   * Subscribe to WebSocket health events.
+   * Events include: connecting, connected, disconnected, reconnecting, reconnected,
+   * quality_changed, ping_sent, pong_received, pong_timeout, etc.
+   * @returns Unsubscribe function
+   */
+  onHealthEvent(callback: WebSocketHealthEventCallback): () => void {
+    this.healthEventListeners.push(callback);
+
+    // If there's an active monitor, subscribe to it
+    let unsubFromMonitor: (() => void) | null = null;
+    if (this.activeHealthMonitor) {
+      unsubFromMonitor = this.activeHealthMonitor.onEvent(callback);
+    }
+
+    return () => {
+      const index = this.healthEventListeners.indexOf(callback);
+      if (index !== -1) {
+        this.healthEventListeners.splice(index, 1);
+      }
+      unsubFromMonitor?.();
+    };
+  }
+
+  /**
+   * Check if the active WebSocket connection is healthy.
+   */
+  isConnectionHealthy(): boolean {
+    return this.activeHealthMonitor?.isHealthy() ?? false;
+  }
+
+  /**
+   * Get the current WebSocket connection quality.
+   */
+  getConnectionQuality(): 'excellent' | 'good' | 'poor' | 'disconnected' {
+    return this.activeHealthMonitor?.getQuality() ?? 'disconnected';
+  }
+
+  /**
+   * Create a health monitor for a WebSocket connection.
+   */
+  private createHealthMonitor(sessionId: string): WebSocketHealthMonitor {
+    const monitor = createWebSocketHealthMonitor({
+      name: `claude-session-${sessionId}`,
+      ...this.healthMonitorConfig,
+    });
+
+    // Subscribe all registered listeners to the new monitor
+    for (const listener of this.healthEventListeners) {
+      monitor.onEvent(listener);
+    }
+
+    // Set up session context for resumption
+    monitor.updateSessionContext({
+      sessionId,
+      processedEventIds: new Set(),
+    });
+
+    return monitor;
   }
 
   private buildHeaders(): Record<string, string> {
@@ -641,9 +727,11 @@ export class ClaudeWebClient extends AClaudeWebClient {
       abortSignal?: AbortSignal;
       skipExistingEvents?: boolean;
       onRawMessage?: RawMessageCallback;
+      /** Callback for health metrics updates */
+      onHealthUpdate?: (metrics: WebSocketHealthMetrics) => void;
     } = {}
   ): Promise<SessionResult> {
-    const { timeoutMs = 10000, abortSignal, skipExistingEvents = false, onRawMessage } = options;
+    const { timeoutMs = 10000, abortSignal, skipExistingEvents = false, onRawMessage, onHealthUpdate } = options;
 
     const seenEventIds = new Set<string>();
     if (skipExistingEvents) {
@@ -667,6 +755,29 @@ export class ClaudeWebClient extends AClaudeWebClient {
     let cleanedUp = false;
     let settled = false; // Prevents multiple resolve/reject calls
 
+    // Create health monitor if enabled
+    let healthMonitor: WebSocketHealthMonitor | null = null;
+    if (this.enableHealthMonitoring) {
+      healthMonitor = this.createHealthMonitor(sessionId);
+
+      // Subscribe to health events for metrics updates
+      if (onHealthUpdate) {
+        healthMonitor.onEvent((event) => {
+          onHealthUpdate(event.metrics);
+        });
+      }
+
+      // Attach to the WebSocket
+      const wsUrl = this.buildWebSocketUrl(sessionId);
+      const headers = this.buildHeaders();
+      healthMonitor.attach(ws, wsUrl, headers, {
+        sessionId,
+        processedEventIds: seenEventIds,
+      });
+
+      this.activeHealthMonitor = healthMonitor;
+    }
+
     return new Promise((resolve, reject) => {
       // Use mutable reference to break circular dependency between cleanup and abortHandler
       let abortHandler: (() => void) | null = null;
@@ -685,6 +796,14 @@ export class ClaudeWebClient extends AClaudeWebClient {
         // Remove abort signal listener
         if (abortSignal && abortHandler) {
           abortSignal.removeEventListener('abort', abortHandler);
+        }
+
+        // Detach health monitor
+        if (healthMonitor) {
+          healthMonitor.detach();
+          if (this.activeHealthMonitor === healthMonitor) {
+            this.activeHealthMonitor = null;
+          }
         }
 
         // Remove all WebSocket listeners to prevent memory leaks
@@ -728,6 +847,9 @@ export class ClaudeWebClient extends AClaudeWebClient {
       }
 
       const messageHandler = async (data: Buffer | string) => {
+        // Record message received for health tracking
+        healthMonitor?.recordMessageReceived();
+
         const rawData = data.toString();
 
         // Call raw message callback before any processing
@@ -751,6 +873,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
           const event = message.data as SessionEvent;
           if (!seenEventIds.has(event.uuid)) {
             seenEventIds.add(event.uuid);
+            // Track event ID for session resumption
+            healthMonitor?.recordEventId(event.uuid);
             await onEvent(event);
 
             if (!branch) {
@@ -776,6 +900,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
           const event = message as unknown as SessionEvent;
           if (!seenEventIds.has(event.uuid)) {
             seenEventIds.add(event.uuid);
+            // Track event ID for session resumption
+            healthMonitor?.recordEventId(event.uuid);
             await onEvent(event);
 
             if (!branch) {
