@@ -234,23 +234,26 @@ export class LayersPanel extends Component {
           isActive: layer.id === state.activeLayerId,
           onSelect: (id) => {
             imageLayersStore.setActiveLayer(id);
-            const selectedLayer = state.layers.find(l => l.id === id);
+            const currentState = imageLayersStore.getState();
+            const selectedLayer = currentState.layers.find(l => l.id === id);
             if (selectedLayer) {
               statusAnnouncer.announce(`${selectedLayer.name} layer selected`);
             }
           },
           onToggleVisibility: (id) => {
             imageLayersStore.toggleLayerVisibility(id);
-            const targetLayer = state.layers.find(l => l.id === id);
+            const currentState = imageLayersStore.getState();
+            const targetLayer = currentState.layers.find(l => l.id === id);
             if (targetLayer) {
-              statusAnnouncer.announce(`${targetLayer.name} ${targetLayer.visible ? 'hidden' : 'visible'}`);
+              statusAnnouncer.announce(`${targetLayer.name} ${targetLayer.visible ? 'visible' : 'hidden'}`);
             }
           },
           onToggleLock: (id) => {
             imageLayersStore.toggleLayerLock(id);
-            const targetLayer = state.layers.find(l => l.id === id);
+            const currentState = imageLayersStore.getState();
+            const targetLayer = currentState.layers.find(l => l.id === id);
             if (targetLayer) {
-              statusAnnouncer.announce(`${targetLayer.name} ${targetLayer.locked ? 'unlocked' : 'locked'}`);
+              statusAnnouncer.announce(`${targetLayer.name} ${targetLayer.locked ? 'locked' : 'unlocked'}`);
             }
           },
           onRename: (id, name) => {
@@ -259,14 +262,16 @@ export class LayersPanel extends Component {
           },
           onOpacityChange: (id, opacity) => imageLayersStore.setLayerOpacity(id, opacity),
           onDelete: (id) => {
-            const targetLayer = state.layers.find(l => l.id === id);
+            const currentState = imageLayersStore.getState();
+            const targetLayer = currentState.layers.find(l => l.id === id);
             imageLayersStore.deleteLayer(id);
             if (targetLayer) {
               statusAnnouncer.announce(`${targetLayer.name} layer deleted`, 'assertive');
             }
           },
           onDuplicate: (id) => {
-            const targetLayer = state.layers.find(l => l.id === id);
+            const currentState = imageLayersStore.getState();
+            const targetLayer = currentState.layers.find(l => l.id === id);
             imageLayersStore.duplicateLayer(id);
             if (targetLayer) {
               statusAnnouncer.announce(`${targetLayer.name} layer duplicated`);

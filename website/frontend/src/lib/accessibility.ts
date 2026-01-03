@@ -344,9 +344,11 @@ export class RovingTabindex {
     items.forEach((item, i) => {
       item.setAttribute('tabindex', i === index ? '0' : '-1');
     });
-    items[index].focus();
+    items[index]?.focus();
     this.currentIndex = index;
-    this.onFocusChange?.(items[index], index);
+    if (items[index]) {
+      this.onFocusChange?.(items[index], index);
+    }
   }
 
   /**

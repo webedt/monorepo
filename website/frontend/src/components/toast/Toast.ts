@@ -1,5 +1,4 @@
 import { Component } from '../base';
-import { statusAnnouncer } from '../../lib/accessibility';
 import './toast.css';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -72,12 +71,6 @@ class Toast extends Component<HTMLDivElement> {
 
     this.addClass(`toast--${this.options.type}`);
     this.buildContent();
-
-    // Announce to screen readers
-    const announcement = this.options.title
-      ? `${this.options.title}: ${this.options.message}`
-      : this.options.message;
-    statusAnnouncer.announce(announcement, role === 'alert' ? 'assertive' : 'polite');
 
     if (this.options.duration > 0) {
       this.startTimer();
