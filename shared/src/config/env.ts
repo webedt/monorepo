@@ -114,6 +114,15 @@ const envSchema = z.object({
   BACKUP_DIR: optionalString('/tmp/db-backups'),
 
   // -------------------------------------------------------------------------
+  // Query Analysis Configuration (Development Mode)
+  // -------------------------------------------------------------------------
+  QUERY_ANALYSIS_ENABLED: booleanSchema,
+  QUERY_ANALYSIS_SLOW_THRESHOLD_MS: integerWithDefault(100),
+  QUERY_ANALYSIS_EXPLAIN_ENABLED: booleanSchema,
+  QUERY_ANALYSIS_LOG_ALL: booleanSchema,
+  QUERY_ANALYSIS_MAX_LOG_ENTRIES: integerWithDefault(1000),
+
+  // -------------------------------------------------------------------------
   // Orphan Session Cleanup
   // -------------------------------------------------------------------------
   ORPHAN_SESSION_TIMEOUT_MINUTES: integerWithDefault(30),
@@ -374,6 +383,13 @@ export const QUIET_DB = parsedEnv.QUIET_DB ?? false;
 export const DEBUG_SQL = parsedEnv.DEBUG_SQL ?? false;
 export const SKIP_MIGRATIONS = parsedEnv.SKIP_MIGRATIONS ?? false;
 export const BACKUP_DIR = parsedEnv.BACKUP_DIR ?? '/tmp/db-backups';
+
+// Query Analysis Configuration (Development Mode)
+export const QUERY_ANALYSIS_ENABLED = parsedEnv.QUERY_ANALYSIS_ENABLED ?? false;
+export const QUERY_ANALYSIS_SLOW_THRESHOLD_MS = parsedEnv.QUERY_ANALYSIS_SLOW_THRESHOLD_MS ?? 100;
+export const QUERY_ANALYSIS_EXPLAIN_ENABLED = parsedEnv.QUERY_ANALYSIS_EXPLAIN_ENABLED ?? true;
+export const QUERY_ANALYSIS_LOG_ALL = parsedEnv.QUERY_ANALYSIS_LOG_ALL ?? false;
+export const QUERY_ANALYSIS_MAX_LOG_ENTRIES = parsedEnv.QUERY_ANALYSIS_MAX_LOG_ENTRIES ?? 1000;
 
 // Orphan Session Cleanup
 export const ORPHAN_SESSION_TIMEOUT_MINUTES = parsedEnv.ORPHAN_SESSION_TIMEOUT_MINUTES ?? 30;
@@ -1107,6 +1123,13 @@ export const config = {
   DEBUG_SQL,
   SKIP_MIGRATIONS,
   BACKUP_DIR,
+
+  // Query Analysis
+  QUERY_ANALYSIS_ENABLED,
+  QUERY_ANALYSIS_SLOW_THRESHOLD_MS,
+  QUERY_ANALYSIS_EXPLAIN_ENABLED,
+  QUERY_ANALYSIS_LOG_ALL,
+  QUERY_ANALYSIS_MAX_LOG_ENTRIES,
 
   // Cleanup
   ORPHAN_SESSION_TIMEOUT_MINUTES,
