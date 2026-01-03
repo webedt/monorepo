@@ -81,14 +81,18 @@ export class MidiPianoRoll extends Component {
       this.ctx = this.canvas.getContext('2d');
     }
 
-    // Render piano keys
+    // Process notes first to determine the actual note range
+    if (state.isLoaded && state.fileInfo) {
+      this.processNotes(state);
+    }
+
+    // Render piano keys after note range is determined
     if (this.options.showPiano) {
       this.renderPianoKeys();
     }
 
-    // Process notes
+    // Render canvas elements
     if (state.isLoaded && state.fileInfo) {
-      this.processNotes(state);
       this.updateCanvasSize(state);
       this.renderNotes();
     }
@@ -110,6 +114,27 @@ export class MidiPianoRoll extends Component {
     const midiFile = player.getMidiFile();
     if (!midiFile) return;
 
+    // First pass: determine actual note range from all non-muted notes
+    let minNote = 127;
+    let maxNote = 0;
+    for (let trackIndex = 0; trackIndex < midiFile.tracks.length; trackIndex++) {
+      if (state.settings.mutedTracks.includes(trackIndex)) continue;
+
+      const track = midiFile.tracks[trackIndex];
+      for (const note of track.notes) {
+        if (state.settings.mutedChannels.includes(note.channel)) continue;
+        if (note.note < minNote) minNote = note.note;
+        if (note.note > maxNote) maxNote = note.note;
+      }
+    }
+
+    // Update range with padding if we have notes
+    if (minNote <= maxNote) {
+      this.options.minNote = Math.max(0, minNote - 2);
+      this.options.maxNote = Math.min(127, maxNote + 2);
+    }
+
+    // Second pass: collect notes within the adjusted range
     for (let trackIndex = 0; trackIndex < midiFile.tracks.length; trackIndex++) {
       if (state.settings.mutedTracks.includes(trackIndex)) continue;
 
@@ -118,23 +143,9 @@ export class MidiPianoRoll extends Component {
 
       for (const note of track.notes) {
         if (state.settings.mutedChannels.includes(note.channel)) continue;
-        if (note.note < this.options.minNote || note.note > this.options.maxNote) continue;
 
         this.notes.push({ note, trackIndex, color });
       }
-    }
-
-    // Auto-adjust note range based on actual notes
-    if (this.notes.length > 0) {
-      let minNote = 127;
-      let maxNote = 0;
-      for (const { note } of this.notes) {
-        if (note.note < minNote) minNote = note.note;
-        if (note.note > maxNote) maxNote = note.note;
-      }
-      // Add some padding
-      this.options.minNote = Math.max(0, minNote - 2);
-      this.options.maxNote = Math.min(127, maxNote + 2);
     }
   }
 
