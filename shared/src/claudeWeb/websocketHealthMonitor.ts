@@ -32,6 +32,8 @@ export interface WebSocketHealthConfig {
   reconnectMaxDelayMs?: number;
   /** Backoff multiplier for reconnection (default: 2) */
   reconnectBackoffMultiplier?: number;
+  /** Timeout for reconnection connection attempt in milliseconds (default: 10000) */
+  reconnectConnectionTimeoutMs?: number;
   /** Enable circuit breaker integration (default: true) */
   useCircuitBreaker?: boolean;
   /** Custom circuit breaker configuration */
@@ -138,6 +140,7 @@ const DEFAULT_CONFIG: Required<Omit<WebSocketHealthConfig, 'circuitBreakerConfig
   reconnectBaseDelayMs: 1000,
   reconnectMaxDelayMs: 30000,
   reconnectBackoffMultiplier: 2,
+  reconnectConnectionTimeoutMs: 10000,
   useCircuitBreaker: true,
   circuitBreakerConfig: undefined,
   latencySampleSize: 10,
@@ -166,7 +169,7 @@ export class WebSocketHealthMonitor {
 
   // Ping-pong tracking
   private pingInterval: ReturnType<typeof setInterval> | null = null;
-  private pendingPing: { id: string; sentAt: number } | null = null;
+  private pendingPing: { id: string; sentAt: number; protocolPongReceived: boolean } | null = null;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Latency tracking
@@ -371,10 +374,10 @@ export class WebSocketHealthMonitor {
 
   private setupWebSocketHandlers(ws: WebSocket): void {
     ws.on('open', () => this.onConnected());
-    ws.on('close', (code, reason) => this.onDisconnected(code, reason.toString()));
+    ws.on('close', (code, reason) => this.onDisconnected(code, reason.toString('utf-8')));
     ws.on('error', (error) => this.onError(error));
     ws.on('message', (data) => this.onMessage(data));
-    ws.on('pong', () => this.onPong());
+    ws.on('pong', () => this.onProtocolPong());
   }
 
   private onConnected(): void {
@@ -447,7 +450,12 @@ export class WebSocketHealthMonitor {
         this.config.circuitBreakerConfig
       );
 
-      // Check if circuit is now open
+      // Record the failure - execute with a rejected promise to register the error
+      breaker.execute(() => Promise.reject(error)).catch(() => {
+        // Expected rejection - we're just recording the failure
+      });
+
+      // Check if circuit is now open after recording the failure
       const stats = breaker.getStats();
       if (stats.state === 'open') {
         this.emitEvent('circuit_opened');
@@ -458,20 +466,33 @@ export class WebSocketHealthMonitor {
   private onMessage(data: WebSocket.Data): void {
     this.recordMessageReceived();
 
-    // Check for pong response in message
+    // Check for application-level pong response in message
     try {
       const message = JSON.parse(data.toString());
       if (message.type === 'pong' && message.id === this.pendingPing?.id) {
-        this.handlePongResponse();
+        this.handleApplicationPong();
       }
     } catch {
       // Not a JSON message or not a pong - ignore
     }
   }
 
-  private onPong(): void {
+  private onProtocolPong(): void {
     // Handle WebSocket protocol-level pong
-    this.handlePongResponse();
+    // Mark that we received a protocol pong to avoid double-counting
+    if (this.pendingPing && !this.pendingPing.protocolPongReceived) {
+      this.pendingPing.protocolPongReceived = true;
+      this.handlePongResponse();
+    }
+  }
+
+  private handleApplicationPong(): void {
+    // Handle application-level pong (JSON message with type: 'pong')
+    // Only count if we haven't already received a protocol pong
+    if (this.pendingPing && !this.pendingPing.protocolPongReceived) {
+      this.handlePongResponse();
+    }
+    // If protocol pong was already received, this is a duplicate - ignore
   }
 
   private handlePongResponse(): void {
@@ -530,6 +551,7 @@ export class WebSocketHealthMonitor {
     this.pendingPing = {
       id: pingId,
       sentAt: Date.now(),
+      protocolPongReceived: false,
     };
     this.pingsSent++;
 
@@ -666,26 +688,42 @@ export class WebSocketHealthMonitor {
       // Create new WebSocket
       const newWs = this.wsFactory(this.wsUrl, this.wsHeaders);
 
-      // Wait for connection
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Connection timeout'));
-        }, 10000);
-
-        newWs.once('open', () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-
-        newWs.once('error', (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        });
-      });
-
+      // Set up handlers BEFORE waiting for open to avoid race conditions
+      // This ensures close/error handlers are registered even if connection
+      // fails between creation and open event
       this.ws = newWs;
       this.setupWebSocketHandlers(newWs);
-      this.onConnected();
+
+      // Wait for connection with configurable timeout
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          newWs.close();
+          reject(new Error('Connection timeout'));
+        }, this.config.reconnectConnectionTimeoutMs);
+
+        // Use once handlers that remove themselves after firing
+        const onOpen = () => {
+          clearTimeout(timeout);
+          newWs.off('error', onError);
+          resolve();
+        };
+
+        const onError = (error: Error) => {
+          clearTimeout(timeout);
+          newWs.off('open', onOpen);
+          reject(error);
+        };
+
+        newWs.once('open', onOpen);
+        newWs.once('error', onError);
+      });
+
+      // Connection successful - onConnected will be called by the 'open' handler
+      // we set up in setupWebSocketHandlers, but we need to ensure it's called
+      // in case the socket was already open when we attached handlers
+      if (newWs.readyState === WebSocket.OPEN && this.state !== 'connected') {
+        this.onConnected();
+      }
 
       return true;
     } catch (error) {
