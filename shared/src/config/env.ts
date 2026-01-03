@@ -51,6 +51,39 @@ const integerWithDefault = (defaultValue: number) =>
     .refine((val) => !isNaN(val), { message: 'Must be a valid integer' });
 
 /**
+ * Helper to parse positive integer env vars with default (for timeouts, intervals, limits)
+ */
+const positiveIntegerWithDefault = (defaultValue: number) =>
+  z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseInt(val, 10) : defaultValue))
+    .refine((val) => !isNaN(val) && val > 0, { message: 'Must be a positive integer' });
+
+/**
+ * Helper to parse float env vars with default
+ */
+const floatWithDefault = (defaultValue: number) =>
+  z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseFloat(val) : defaultValue))
+    .refine((val) => !isNaN(val), { message: 'Must be a valid number' });
+
+/**
+ * Helper to parse float env vars with default and range validation
+ */
+const floatWithRange = (defaultValue: number, min: number, max: number) =>
+  z
+    .string()
+    .optional()
+    .transform((val) => {
+      const parsed = val ? parseFloat(val) : defaultValue;
+      return Math.max(min, Math.min(max, parsed));
+    })
+    .refine((val) => !isNaN(val), { message: 'Must be a valid number' });
+
+/**
  * Helper for optional string with default
  */
 const optionalString = (defaultValue: string) =>
@@ -300,6 +333,140 @@ const envSchema = z.object({
   // Frontend URL Configuration
   // -------------------------------------------------------------------------
   FRONTEND_URL: z.string().optional(),
+
+  // -------------------------------------------------------------------------
+  // HTTP Timeouts
+  // -------------------------------------------------------------------------
+  HTTP_REQUEST_TIMEOUT_MS: positiveIntegerWithDefault(30000),
+  HTTP_HEAD_TIMEOUT_MS: positiveIntegerWithDefault(10000),
+  HTTP_HEALTH_CHECK_TIMEOUT_MS: positiveIntegerWithDefault(5000),
+
+  // -------------------------------------------------------------------------
+  // SSE/WebSocket Configuration
+  // -------------------------------------------------------------------------
+  SSE_STALE_TIMEOUT_MS: positiveIntegerWithDefault(30000),
+  SSE_HEARTBEAT_INTERVAL_MS: positiveIntegerWithDefault(15000),
+  SSE_CLEANUP_INTERVAL_MS: positiveIntegerWithDefault(10000),
+  SSE_MAX_LISTENERS: positiveIntegerWithDefault(1000),
+  SSE_MAX_SUBSCRIBERS_PER_SESSION: positiveIntegerWithDefault(50),
+  SSE_MAX_SUBSCRIBERS_PER_USER: positiveIntegerWithDefault(10),
+  SSE_WARN_SUBSCRIBER_COUNT: positiveIntegerWithDefault(500),
+  SSE_ERROR_SUBSCRIBER_COUNT: positiveIntegerWithDefault(900),
+
+  // -------------------------------------------------------------------------
+  // Database Timeouts and Pool Configuration
+  // -------------------------------------------------------------------------
+  DB_CONNECTION_TIMEOUT_MS: positiveIntegerWithDefault(5000),
+  DB_IDLE_TIMEOUT_MS: positiveIntegerWithDefault(30000),
+  DB_STATEMENT_TIMEOUT_MS: positiveIntegerWithDefault(30000),
+  DB_MAX_CONNECTIONS: positiveIntegerWithDefault(20),
+  DB_MIN_CONNECTIONS: integerWithDefault(2),
+
+  // -------------------------------------------------------------------------
+  // Health Check Configuration
+  // -------------------------------------------------------------------------
+  HEALTH_CHECK_INTERVAL_MS: positiveIntegerWithDefault(30000),
+  DB_HEALTH_CHECK_INTERVAL_MS: positiveIntegerWithDefault(30000),
+
+  // -------------------------------------------------------------------------
+  // Circuit Breaker Configuration
+  // -------------------------------------------------------------------------
+  CIRCUIT_BREAKER_RESET_TIMEOUT_MS: positiveIntegerWithDefault(30000),
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: positiveIntegerWithDefault(5),
+  CIRCUIT_BREAKER_SUCCESS_THRESHOLD: positiveIntegerWithDefault(3),
+  CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS: positiveIntegerWithDefault(3),
+
+  // -------------------------------------------------------------------------
+  // Worker Configuration
+  // -------------------------------------------------------------------------
+  WORKER_EXECUTION_TIMEOUT_MS: positiveIntegerWithDefault(1800000),
+  WORKER_HEALTH_CHECK_TIMEOUT_MS: positiveIntegerWithDefault(5000),
+
+  // -------------------------------------------------------------------------
+  // CRDT Sync Configuration
+  // -------------------------------------------------------------------------
+  CRDT_SYNC_INTERVAL_MS: positiveIntegerWithDefault(1000),
+  CRDT_MAX_BATCH_SIZE: positiveIntegerWithDefault(50),
+  CRDT_RETRY_MAX_DELAY_MS: positiveIntegerWithDefault(10000),
+
+  // -------------------------------------------------------------------------
+  // Request Deduplication Configuration
+  // -------------------------------------------------------------------------
+  REQUEST_DEDUP_DEFAULT_TTL_MS: positiveIntegerWithDefault(60000),
+  REQUEST_DEDUP_SYNC_TTL_MS: positiveIntegerWithDefault(30000),
+  REQUEST_DEDUP_MESSAGE_TTL_MS: positiveIntegerWithDefault(5000),
+
+  // -------------------------------------------------------------------------
+  // Import/Fetch Limits
+  // -------------------------------------------------------------------------
+  IMPORT_MAX_FILE_SIZE_BYTES: positiveIntegerWithDefault(10485760),
+  MAX_CONCURRENT_API_CALLS: positiveIntegerWithDefault(5),
+
+  // -------------------------------------------------------------------------
+  // Session Operation Limits
+  // -------------------------------------------------------------------------
+  SESSION_CONCURRENCY_LIMIT: positiveIntegerWithDefault(3),
+  SESSION_MAX_BATCH_SIZE: positiveIntegerWithDefault(100),
+  SESSION_MAX_ARCHIVE_BATCH_SIZE: positiveIntegerWithDefault(50),
+
+  // -------------------------------------------------------------------------
+  // DataLoader Configuration
+  // -------------------------------------------------------------------------
+  DATALOADER_MAX_BATCH_SIZE: positiveIntegerWithDefault(100),
+
+  // -------------------------------------------------------------------------
+  // Search Limits
+  // -------------------------------------------------------------------------
+  SEARCH_GAMES_LIMIT: positiveIntegerWithDefault(50),
+  SEARCH_USERS_LIMIT: positiveIntegerWithDefault(20),
+  SEARCH_SESSIONS_LIMIT: positiveIntegerWithDefault(30),
+  SEARCH_POSTS_LIMIT: positiveIntegerWithDefault(30),
+  SEARCH_DEFAULT_LIMIT: positiveIntegerWithDefault(10),
+  SEARCH_MAX_LIMIT: positiveIntegerWithDefault(50),
+  SEARCH_SUGGESTIONS_DEFAULT_LIMIT: positiveIntegerWithDefault(5),
+  SEARCH_SUGGESTIONS_MAX_LIMIT: positiveIntegerWithDefault(10),
+
+  // -------------------------------------------------------------------------
+  // Live Chat Limits
+  // -------------------------------------------------------------------------
+  LIVE_CHAT_MESSAGES_DEFAULT_LIMIT: positiveIntegerWithDefault(100),
+  LIVE_CHAT_HISTORY_LIMIT: positiveIntegerWithDefault(50),
+  LIVE_CHAT_CONTEXT_MESSAGES: positiveIntegerWithDefault(10),
+
+  // -------------------------------------------------------------------------
+  // Batch Operation Defaults
+  // -------------------------------------------------------------------------
+  BATCH_DEFAULT_CONCURRENCY: positiveIntegerWithDefault(5),
+  BATCH_MAX_BATCH_SIZE: positiveIntegerWithDefault(100),
+
+  // -------------------------------------------------------------------------
+  // LRU Cache Configuration
+  // -------------------------------------------------------------------------
+  LRU_EVICTION_RATE: floatWithRange(0.2, 0.1, 0.5),
+
+  // -------------------------------------------------------------------------
+  // Retry Configuration
+  // -------------------------------------------------------------------------
+  RETRY_MAX_ATTEMPTS: positiveIntegerWithDefault(3),
+  RETRY_BASE_DELAY_MS: positiveIntegerWithDefault(1000),
+  RETRY_MAX_DELAY_MS: positiveIntegerWithDefault(30000),
+  RETRY_BACKOFF_MULTIPLIER: floatWithDefault(2),
+  RETRY_JITTER_FACTOR: floatWithDefault(0.3),
+
+  // -------------------------------------------------------------------------
+  // Database Health Check and Connection Retry
+  // -------------------------------------------------------------------------
+  DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS: positiveIntegerWithDefault(10000),
+  DB_CONNECTION_MAX_RETRIES: positiveIntegerWithDefault(5),
+
+  // -------------------------------------------------------------------------
+  // Recovery Delay Configuration
+  // -------------------------------------------------------------------------
+  RECOVERY_DELAY_RATE_LIMIT_MS: positiveIntegerWithDefault(60000),
+  RECOVERY_DELAY_NETWORK_MS: positiveIntegerWithDefault(2000),
+  RECOVERY_DELAY_SERVER_MS: positiveIntegerWithDefault(5000),
+  RECOVERY_DELAY_CONFLICT_MS: positiveIntegerWithDefault(10000),
+  RECOVERY_DELAY_UNKNOWN_MS: positiveIntegerWithDefault(1000),
 });
 
 // =============================================================================
@@ -558,259 +725,149 @@ export function isTest(): boolean {
 }
 
 // =============================================================================
+// TIMEOUTS - All timeout values in milliseconds (validated via Zod schema)
+// =============================================================================
+
+// HTTP request timeouts
+export const HTTP_REQUEST_TIMEOUT_MS = parsedEnv.HTTP_REQUEST_TIMEOUT_MS ?? 30000;
+export const HTTP_HEAD_TIMEOUT_MS = parsedEnv.HTTP_HEAD_TIMEOUT_MS ?? 10000;
+export const HTTP_HEALTH_CHECK_TIMEOUT_MS = parsedEnv.HTTP_HEALTH_CHECK_TIMEOUT_MS ?? 5000;
+
+// SSE/WebSocket timeouts
+export const SSE_STALE_TIMEOUT_MS = parsedEnv.SSE_STALE_TIMEOUT_MS ?? 30000;
+
+// Database timeouts
+export const DB_CONNECTION_TIMEOUT_MS = parsedEnv.DB_CONNECTION_TIMEOUT_MS ?? 5000;
+export const DB_IDLE_TIMEOUT_MS = parsedEnv.DB_IDLE_TIMEOUT_MS ?? 30000;
+export const DB_STATEMENT_TIMEOUT_MS = parsedEnv.DB_STATEMENT_TIMEOUT_MS ?? 30000;
+
+// Circuit breaker timeouts
+export const CIRCUIT_BREAKER_RESET_TIMEOUT_MS = parsedEnv.CIRCUIT_BREAKER_RESET_TIMEOUT_MS ?? 30000;
+
+// Execution timeouts
+export const WORKER_EXECUTION_TIMEOUT_MS = parsedEnv.WORKER_EXECUTION_TIMEOUT_MS ?? 1800000;
+export const WORKER_HEALTH_CHECK_TIMEOUT_MS = parsedEnv.WORKER_HEALTH_CHECK_TIMEOUT_MS ?? 5000;
+
+// =============================================================================
+// INTERVALS - All interval values in milliseconds (validated via Zod schema)
+// =============================================================================
+
+// SSE intervals
+export const SSE_HEARTBEAT_INTERVAL_MS = parsedEnv.SSE_HEARTBEAT_INTERVAL_MS ?? 15000;
+export const SSE_CLEANUP_INTERVAL_MS = parsedEnv.SSE_CLEANUP_INTERVAL_MS ?? 10000;
+
+// Health check intervals
+export const HEALTH_CHECK_INTERVAL_MS = parsedEnv.HEALTH_CHECK_INTERVAL_MS ?? 30000;
+export const DB_HEALTH_CHECK_INTERVAL_MS = parsedEnv.DB_HEALTH_CHECK_INTERVAL_MS ?? 30000;
+
+// Sync intervals
+export const CRDT_SYNC_INTERVAL_MS = parsedEnv.CRDT_SYNC_INTERVAL_MS ?? 1000;
+
+// =============================================================================
+// REQUEST DEDUPLICATION - TTL values (validated via Zod schema)
+// =============================================================================
+
+export const REQUEST_DEDUP_DEFAULT_TTL_MS = parsedEnv.REQUEST_DEDUP_DEFAULT_TTL_MS ?? 60000;
+export const REQUEST_DEDUP_SYNC_TTL_MS = parsedEnv.REQUEST_DEDUP_SYNC_TTL_MS ?? 30000;
+export const REQUEST_DEDUP_MESSAGE_TTL_MS = parsedEnv.REQUEST_DEDUP_MESSAGE_TTL_MS ?? 5000;
+
+// =============================================================================
+// LIMITS - Capacity and resource limits (validated via Zod schema)
+// =============================================================================
+
+// SSE subscriber limits
+export const SSE_MAX_LISTENERS = parsedEnv.SSE_MAX_LISTENERS ?? 1000;
+export const SSE_MAX_SUBSCRIBERS_PER_SESSION = parsedEnv.SSE_MAX_SUBSCRIBERS_PER_SESSION ?? 50;
+export const SSE_MAX_SUBSCRIBERS_PER_USER = parsedEnv.SSE_MAX_SUBSCRIBERS_PER_USER ?? 10;
+export const SSE_WARN_SUBSCRIBER_COUNT = parsedEnv.SSE_WARN_SUBSCRIBER_COUNT ?? 500;
+export const SSE_ERROR_SUBSCRIBER_COUNT = parsedEnv.SSE_ERROR_SUBSCRIBER_COUNT ?? 900;
+
+// Database pool limits
+export const DB_MAX_CONNECTIONS = parsedEnv.DB_MAX_CONNECTIONS ?? 20;
+export const DB_MIN_CONNECTIONS = parsedEnv.DB_MIN_CONNECTIONS ?? 2;
+
+// Import/fetch limits
+export const IMPORT_MAX_FILE_SIZE_BYTES = parsedEnv.IMPORT_MAX_FILE_SIZE_BYTES ?? 10485760;
+
+// Batch processing limits
+export const CRDT_MAX_BATCH_SIZE = parsedEnv.CRDT_MAX_BATCH_SIZE ?? 50;
+export const MAX_CONCURRENT_API_CALLS = parsedEnv.MAX_CONCURRENT_API_CALLS ?? 5;
+
+// =============================================================================
+// OPERATIONAL LIMITS (validated via Zod schema)
+// =============================================================================
+
+// Session operation limits
+export const SESSION_CONCURRENCY_LIMIT = parsedEnv.SESSION_CONCURRENCY_LIMIT ?? 3;
+export const SESSION_MAX_BATCH_SIZE = parsedEnv.SESSION_MAX_BATCH_SIZE ?? 100;
+export const SESSION_MAX_ARCHIVE_BATCH_SIZE = parsedEnv.SESSION_MAX_ARCHIVE_BATCH_SIZE ?? 50;
+
+// DataLoader batch limits
+export const DATALOADER_MAX_BATCH_SIZE = parsedEnv.DATALOADER_MAX_BATCH_SIZE ?? 100;
+
+// Search and query limits
+export const SEARCH_GAMES_LIMIT = parsedEnv.SEARCH_GAMES_LIMIT ?? 50;
+export const SEARCH_USERS_LIMIT = parsedEnv.SEARCH_USERS_LIMIT ?? 20;
+export const SEARCH_SESSIONS_LIMIT = parsedEnv.SEARCH_SESSIONS_LIMIT ?? 30;
+export const SEARCH_POSTS_LIMIT = parsedEnv.SEARCH_POSTS_LIMIT ?? 30;
+export const SEARCH_DEFAULT_LIMIT = parsedEnv.SEARCH_DEFAULT_LIMIT ?? 10;
+export const SEARCH_MAX_LIMIT = parsedEnv.SEARCH_MAX_LIMIT ?? 50;
+export const SEARCH_SUGGESTIONS_DEFAULT_LIMIT = parsedEnv.SEARCH_SUGGESTIONS_DEFAULT_LIMIT ?? 5;
+export const SEARCH_SUGGESTIONS_MAX_LIMIT = parsedEnv.SEARCH_SUGGESTIONS_MAX_LIMIT ?? 10;
+
+// Live chat limits
+export const LIVE_CHAT_MESSAGES_DEFAULT_LIMIT = parsedEnv.LIVE_CHAT_MESSAGES_DEFAULT_LIMIT ?? 100;
+export const LIVE_CHAT_HISTORY_LIMIT = parsedEnv.LIVE_CHAT_HISTORY_LIMIT ?? 50;
+export const LIVE_CHAT_CONTEXT_MESSAGES = parsedEnv.LIVE_CHAT_CONTEXT_MESSAGES ?? 10;
+
+// Batch operation defaults
+export const BATCH_DEFAULT_CONCURRENCY = parsedEnv.BATCH_DEFAULT_CONCURRENCY ?? 5;
+export const BATCH_MAX_BATCH_SIZE = parsedEnv.BATCH_MAX_BATCH_SIZE ?? 100;
+
+// LRU eviction rate (range validated via Zod schema: 0.1-0.5)
+export const LRU_EVICTION_RATE = parsedEnv.LRU_EVICTION_RATE ?? 0.2;
+
+// =============================================================================
+// RETRY CONFIGURATION (validated via Zod schema)
+// =============================================================================
+
+// Default retry configuration
+export const RETRY_MAX_ATTEMPTS = parsedEnv.RETRY_MAX_ATTEMPTS ?? 3;
+export const RETRY_BASE_DELAY_MS = parsedEnv.RETRY_BASE_DELAY_MS ?? 1000;
+export const RETRY_MAX_DELAY_MS = parsedEnv.RETRY_MAX_DELAY_MS ?? 30000;
+export const RETRY_BACKOFF_MULTIPLIER = parsedEnv.RETRY_BACKOFF_MULTIPLIER ?? 2;
+export const RETRY_JITTER_FACTOR = parsedEnv.RETRY_JITTER_FACTOR ?? 0.3;
+
+// Circuit breaker configuration
+export const CIRCUIT_BREAKER_FAILURE_THRESHOLD = parsedEnv.CIRCUIT_BREAKER_FAILURE_THRESHOLD ?? 5;
+export const CIRCUIT_BREAKER_SUCCESS_THRESHOLD = parsedEnv.CIRCUIT_BREAKER_SUCCESS_THRESHOLD ?? 3;
+export const CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = parsedEnv.CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS ?? 3;
+
+// Context-specific retry configuration
+export const CRDT_RETRY_MAX_DELAY_MS = parsedEnv.CRDT_RETRY_MAX_DELAY_MS ?? 10000;
+export const DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS = parsedEnv.DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS ?? 10000;
+export const DB_CONNECTION_MAX_RETRIES = parsedEnv.DB_CONNECTION_MAX_RETRIES ?? 5;
+
+// =============================================================================
+// RECOVERY DELAYS (validated via Zod schema)
+// =============================================================================
+
+export const RECOVERY_DELAY_RATE_LIMIT_MS = parsedEnv.RECOVERY_DELAY_RATE_LIMIT_MS ?? 60000;
+export const RECOVERY_DELAY_NETWORK_MS = parsedEnv.RECOVERY_DELAY_NETWORK_MS ?? 2000;
+export const RECOVERY_DELAY_SERVER_MS = parsedEnv.RECOVERY_DELAY_SERVER_MS ?? 5000;
+export const RECOVERY_DELAY_CONFLICT_MS = parsedEnv.RECOVERY_DELAY_CONFLICT_MS ?? 10000;
+export const RECOVERY_DELAY_UNKNOWN_MS = parsedEnv.RECOVERY_DELAY_UNKNOWN_MS ?? 1000;
+
+// =============================================================================
 // VALIDATION FUNCTIONS
 // =============================================================================
-
-// =============================================================================
-// TIMEOUTS - All timeout values in milliseconds
-// =============================================================================
-
-/**
- * HTTP request timeouts
- * - HTTP_REQUEST_TIMEOUT_MS: Default timeout for HTTP requests (30s)
- * - HTTP_HEAD_TIMEOUT_MS: Timeout for HEAD validation requests (10s)
- * - HTTP_HEALTH_CHECK_TIMEOUT_MS: Timeout for health check endpoints (5s)
- */
-export const HTTP_REQUEST_TIMEOUT_MS = parseInt(process.env.HTTP_REQUEST_TIMEOUT_MS || '30000', 10);
-export const HTTP_HEAD_TIMEOUT_MS = parseInt(process.env.HTTP_HEAD_TIMEOUT_MS || '10000', 10);
-export const HTTP_HEALTH_CHECK_TIMEOUT_MS = parseInt(process.env.HTTP_HEALTH_CHECK_TIMEOUT_MS || '5000', 10);
-
-/**
- * SSE/WebSocket timeouts
- * - SSE_STALE_TIMEOUT_MS: Time before subscriber is considered stale (30s)
- */
-export const SSE_STALE_TIMEOUT_MS = parseInt(process.env.SSE_STALE_TIMEOUT_MS || '30000', 10);
-
-/**
- * Database timeouts
- * - DB_CONNECTION_TIMEOUT_MS: Timeout for new connections (5s)
- * - DB_IDLE_TIMEOUT_MS: Time before idle connections are closed (30s)
- * - DB_STATEMENT_TIMEOUT_MS: Maximum query execution time (30s)
- */
-export const DB_CONNECTION_TIMEOUT_MS = parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '5000', 10);
-export const DB_IDLE_TIMEOUT_MS = parseInt(process.env.DB_IDLE_TIMEOUT_MS || '30000', 10);
-export const DB_STATEMENT_TIMEOUT_MS = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || '30000', 10);
-
-/**
- * Circuit breaker timeouts
- * - CIRCUIT_BREAKER_RESET_TIMEOUT_MS: Time before circuit breaker resets (30s)
- */
-export const CIRCUIT_BREAKER_RESET_TIMEOUT_MS = parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT_MS || '30000', 10);
-
-/**
- * Execution timeouts
- * - WORKER_EXECUTION_TIMEOUT_MS: Maximum time for worker execution (30 min)
- * - WORKER_HEALTH_CHECK_TIMEOUT_MS: Timeout for worker health checks (5s)
- */
-export const WORKER_EXECUTION_TIMEOUT_MS = parseInt(process.env.WORKER_EXECUTION_TIMEOUT_MS || '1800000', 10);
-export const WORKER_HEALTH_CHECK_TIMEOUT_MS = parseInt(process.env.WORKER_HEALTH_CHECK_TIMEOUT_MS || '5000', 10);
-
-// =============================================================================
-// INTERVALS - All interval values in milliseconds
-// =============================================================================
-
-/**
- * SSE intervals
- * - SSE_HEARTBEAT_INTERVAL_MS: Frequency of SSE heartbeats (15s)
- * - SSE_CLEANUP_INTERVAL_MS: Frequency of stale subscriber cleanup (10s)
- */
-export const SSE_HEARTBEAT_INTERVAL_MS = parseInt(process.env.SSE_HEARTBEAT_INTERVAL_MS || '15000', 10);
-export const SSE_CLEANUP_INTERVAL_MS = parseInt(process.env.SSE_CLEANUP_INTERVAL_MS || '10000', 10);
-
-/**
- * Health check intervals
- * - HEALTH_CHECK_INTERVAL_MS: Frequency of periodic health checks (30s)
- * - DB_HEALTH_CHECK_INTERVAL_MS: Frequency of database health checks (30s)
- */
-export const HEALTH_CHECK_INTERVAL_MS = parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || '30000', 10);
-export const DB_HEALTH_CHECK_INTERVAL_MS = parseInt(process.env.DB_HEALTH_CHECK_INTERVAL_MS || '30000', 10);
-
-/**
- * Sync intervals
- * - CRDT_SYNC_INTERVAL_MS: Frequency of CRDT sync operations (1s)
- */
-export const CRDT_SYNC_INTERVAL_MS = parseInt(process.env.CRDT_SYNC_INTERVAL_MS || '1000', 10);
-
-// =============================================================================
-// REQUEST DEDUPLICATION - TTL values for request deduplication
-// =============================================================================
-
-/**
- * Request deduplication TTL configuration
- * - REQUEST_DEDUP_DEFAULT_TTL_MS: Default TTL for deduplicated requests (60s)
- * - REQUEST_DEDUP_SYNC_TTL_MS: TTL for sync operation deduplication (30s)
- * - REQUEST_DEDUP_MESSAGE_TTL_MS: TTL for message posting deduplication (5s)
- */
-export const REQUEST_DEDUP_DEFAULT_TTL_MS = parseInt(process.env.REQUEST_DEDUP_DEFAULT_TTL_MS || '60000', 10);
-export const REQUEST_DEDUP_SYNC_TTL_MS = parseInt(process.env.REQUEST_DEDUP_SYNC_TTL_MS || '30000', 10);
-export const REQUEST_DEDUP_MESSAGE_TTL_MS = parseInt(process.env.REQUEST_DEDUP_MESSAGE_TTL_MS || '5000', 10);
-
-// =============================================================================
-// LIMITS - Capacity and resource limits
-// =============================================================================
-
-/**
- * SSE subscriber limits
- * - SSE_MAX_LISTENERS: Maximum total SSE listeners across all sessions (1000)
- * - SSE_MAX_SUBSCRIBERS_PER_SESSION: Maximum subscribers per session (50)
- * - SSE_MAX_SUBSCRIBERS_PER_USER: Maximum subscribers per user (10)
- * - SSE_WARN_SUBSCRIBER_COUNT: Subscriber count that triggers warning (500)
- * - SSE_ERROR_SUBSCRIBER_COUNT: Subscriber count that triggers error/eviction (900)
- */
-export const SSE_MAX_LISTENERS = parseInt(process.env.SSE_MAX_LISTENERS || '1000', 10);
-export const SSE_MAX_SUBSCRIBERS_PER_SESSION = parseInt(process.env.SSE_MAX_SUBSCRIBERS_PER_SESSION || '50', 10);
-export const SSE_MAX_SUBSCRIBERS_PER_USER = parseInt(process.env.SSE_MAX_SUBSCRIBERS_PER_USER || '10', 10);
-export const SSE_WARN_SUBSCRIBER_COUNT = parseInt(process.env.SSE_WARN_SUBSCRIBER_COUNT || '500', 10);
-export const SSE_ERROR_SUBSCRIBER_COUNT = parseInt(process.env.SSE_ERROR_SUBSCRIBER_COUNT || '900', 10);
-
-/**
- * Database pool limits
- * - DB_MAX_CONNECTIONS: Maximum connections in pool (20)
- * - DB_MIN_CONNECTIONS: Minimum connections to maintain (2)
- */
-export const DB_MAX_CONNECTIONS = parseInt(process.env.DB_MAX_CONNECTIONS || '20', 10);
-export const DB_MIN_CONNECTIONS = parseInt(process.env.DB_MIN_CONNECTIONS || '2', 10);
-
-/**
- * Import/fetch limits
- * - IMPORT_MAX_FILE_SIZE_BYTES: Maximum file size for URL imports (10MB)
- */
-export const IMPORT_MAX_FILE_SIZE_BYTES = parseInt(process.env.IMPORT_MAX_FILE_SIZE_BYTES || '10485760', 10);
-
-/**
- * Batch processing limits
- * - CRDT_MAX_BATCH_SIZE: Maximum operations per CRDT sync batch (50)
- * - MAX_CONCURRENT_API_CALLS: Maximum parallel API calls for sync (5)
- */
-export const CRDT_MAX_BATCH_SIZE = parseInt(process.env.CRDT_MAX_BATCH_SIZE || '50', 10);
-export const MAX_CONCURRENT_API_CALLS = parseInt(process.env.MAX_CONCURRENT_API_CALLS || '5', 10);
-
-// =============================================================================
-// OPERATIONAL LIMITS - Session, batch, query, and pagination limits
-// =============================================================================
-
-/**
- * Session operation limits
- * - SESSION_CONCURRENCY_LIMIT: Default concurrency for session operations (3)
- * - SESSION_MAX_BATCH_SIZE: Maximum sessions per bulk operation (100)
- * - SESSION_MAX_ARCHIVE_BATCH_SIZE: Maximum sessions per archive batch (50)
- */
-export const SESSION_CONCURRENCY_LIMIT = parseInt(process.env.SESSION_CONCURRENCY_LIMIT || '3', 10);
-export const SESSION_MAX_BATCH_SIZE = parseInt(process.env.SESSION_MAX_BATCH_SIZE || '100', 10);
-export const SESSION_MAX_ARCHIVE_BATCH_SIZE = parseInt(process.env.SESSION_MAX_ARCHIVE_BATCH_SIZE || '50', 10);
-
-/**
- * DataLoader batch limits
- * - DATALOADER_MAX_BATCH_SIZE: Maximum items per DataLoader batch (100)
- */
-export const DATALOADER_MAX_BATCH_SIZE = parseInt(process.env.DATALOADER_MAX_BATCH_SIZE || '100', 10);
-
-/**
- * Search and query limits
- * - SEARCH_GAMES_LIMIT: Maximum games returned from search (50)
- * - SEARCH_USERS_LIMIT: Maximum users returned from search (20)
- * - SEARCH_SESSIONS_LIMIT: Maximum sessions returned from search (30)
- * - SEARCH_POSTS_LIMIT: Maximum posts returned from search (30)
- * - SEARCH_DEFAULT_LIMIT: Default search results limit (10)
- * - SEARCH_MAX_LIMIT: Maximum allowed search results limit (50)
- * - SEARCH_SUGGESTIONS_DEFAULT_LIMIT: Default suggestions limit (5)
- * - SEARCH_SUGGESTIONS_MAX_LIMIT: Maximum suggestions limit (10)
- */
-export const SEARCH_GAMES_LIMIT = parseInt(process.env.SEARCH_GAMES_LIMIT || '50', 10);
-export const SEARCH_USERS_LIMIT = parseInt(process.env.SEARCH_USERS_LIMIT || '20', 10);
-export const SEARCH_SESSIONS_LIMIT = parseInt(process.env.SEARCH_SESSIONS_LIMIT || '30', 10);
-export const SEARCH_POSTS_LIMIT = parseInt(process.env.SEARCH_POSTS_LIMIT || '30', 10);
-export const SEARCH_DEFAULT_LIMIT = parseInt(process.env.SEARCH_DEFAULT_LIMIT || '10', 10);
-export const SEARCH_MAX_LIMIT = parseInt(process.env.SEARCH_MAX_LIMIT || '50', 10);
-export const SEARCH_SUGGESTIONS_DEFAULT_LIMIT = parseInt(process.env.SEARCH_SUGGESTIONS_DEFAULT_LIMIT || '5', 10);
-export const SEARCH_SUGGESTIONS_MAX_LIMIT = parseInt(process.env.SEARCH_SUGGESTIONS_MAX_LIMIT || '10', 10);
-
-/**
- * Live chat limits
- * - LIVE_CHAT_MESSAGES_DEFAULT_LIMIT: Default messages to fetch (100)
- * - LIVE_CHAT_HISTORY_LIMIT: Messages for execution context (50)
- * - LIVE_CHAT_CONTEXT_MESSAGES: Messages for conversation context (10)
- */
-export const LIVE_CHAT_MESSAGES_DEFAULT_LIMIT = parseInt(process.env.LIVE_CHAT_MESSAGES_DEFAULT_LIMIT || '100', 10);
-export const LIVE_CHAT_HISTORY_LIMIT = parseInt(process.env.LIVE_CHAT_HISTORY_LIMIT || '50', 10);
-export const LIVE_CHAT_CONTEXT_MESSAGES = parseInt(process.env.LIVE_CHAT_CONTEXT_MESSAGES || '10', 10);
-
-/**
- * Batch operation defaults
- * - BATCH_DEFAULT_CONCURRENCY: Default concurrency for batch operations (5)
- * - BATCH_MAX_BATCH_SIZE: Maximum items per generic batch operation (100)
- */
-export const BATCH_DEFAULT_CONCURRENCY = parseInt(process.env.BATCH_DEFAULT_CONCURRENCY || '5', 10);
-export const BATCH_MAX_BATCH_SIZE = parseInt(process.env.BATCH_MAX_BATCH_SIZE || '100', 10);
-
-/**
- * LRU eviction rate
- * - LRU_EVICTION_RATE: Percentage of LRU entries to evict (0.2 = 20%)
- *   Valid range: 0.1-0.5 (10%-50%)
- */
-const rawLruEvictionRate = parseFloat(process.env.LRU_EVICTION_RATE || '0.2');
-export const LRU_EVICTION_RATE = Math.max(0.1, Math.min(0.5, rawLruEvictionRate));
-
-// =============================================================================
-// RETRY CONFIGURATION - Retry and backoff settings
-// =============================================================================
-
-/**
- * Default retry configuration
- * - RETRY_MAX_ATTEMPTS: Maximum retry attempts (3)
- * - RETRY_BASE_DELAY_MS: Base delay between retries (1000ms)
- * - RETRY_MAX_DELAY_MS: Maximum delay between retries (30000ms)
- * - RETRY_BACKOFF_MULTIPLIER: Exponential backoff multiplier (2)
- * - RETRY_JITTER_FACTOR: Jitter factor for delay randomization (0.3 = 30%)
- */
-export const RETRY_MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS || '3', 10);
-export const RETRY_BASE_DELAY_MS = parseInt(process.env.RETRY_BASE_DELAY_MS || '1000', 10);
-export const RETRY_MAX_DELAY_MS = parseInt(process.env.RETRY_MAX_DELAY_MS || '30000', 10);
-export const RETRY_BACKOFF_MULTIPLIER = parseFloat(process.env.RETRY_BACKOFF_MULTIPLIER || '2');
-export const RETRY_JITTER_FACTOR = parseFloat(process.env.RETRY_JITTER_FACTOR || '0.3');
-
-/**
- * Circuit breaker configuration
- * - CIRCUIT_BREAKER_FAILURE_THRESHOLD: Failures before opening circuit (5)
- * - CIRCUIT_BREAKER_SUCCESS_THRESHOLD: Successes in half-open to close (3)
- * - CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS: Max attempts in half-open state (3)
- */
-export const CIRCUIT_BREAKER_FAILURE_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10);
-export const CIRCUIT_BREAKER_SUCCESS_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_SUCCESS_THRESHOLD || '3', 10);
-export const CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS || '3', 10);
-
-/**
- * Context-specific retry configuration
- * These allow fine-tuning retry behavior for specific subsystems
- * - CRDT_RETRY_MAX_DELAY_MS: Max delay for CRDT sync retries (10s, shorter for real-time sync)
- * - DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS: Max delay for DB health check retries (10s)
- * - DB_CONNECTION_MAX_RETRIES: Max retries for database connections (5, more than standard)
- */
-export const CRDT_RETRY_MAX_DELAY_MS = parseInt(process.env.CRDT_RETRY_MAX_DELAY_MS || '10000', 10);
-export const DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS = parseInt(process.env.DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS || '10000', 10);
-export const DB_CONNECTION_MAX_RETRIES = parseInt(process.env.DB_CONNECTION_MAX_RETRIES || '5', 10);
-
-// =============================================================================
-// RECOVERY DELAYS - Suggested wait times for different error types
-// =============================================================================
-
-/**
- * Recovery delay configuration for error-specific retry strategies
- * - RECOVERY_DELAY_RATE_LIMIT_MS: Delay for rate limit errors (60s)
- * - RECOVERY_DELAY_NETWORK_MS: Delay for network errors (2s)
- * - RECOVERY_DELAY_SERVER_MS: Delay for server errors (5s)
- * - RECOVERY_DELAY_CONFLICT_MS: Delay for conflict errors (10s)
- * - RECOVERY_DELAY_UNKNOWN_MS: Delay for unknown errors (1s)
- */
-export const RECOVERY_DELAY_RATE_LIMIT_MS = parseInt(process.env.RECOVERY_DELAY_RATE_LIMIT_MS || '60000', 10);
-export const RECOVERY_DELAY_NETWORK_MS = parseInt(process.env.RECOVERY_DELAY_NETWORK_MS || '2000', 10);
-export const RECOVERY_DELAY_SERVER_MS = parseInt(process.env.RECOVERY_DELAY_SERVER_MS || '5000', 10);
-export const RECOVERY_DELAY_CONFLICT_MS = parseInt(process.env.RECOVERY_DELAY_CONFLICT_MS || '10000', 10);
-export const RECOVERY_DELAY_UNKNOWN_MS = parseInt(process.env.RECOVERY_DELAY_UNKNOWN_MS || '1000', 10);
 
 /**
  * Validate required environment variables
  * Returns validation result with errors and warnings
+ *
+ * NOTE: Basic type and positivity validation is now handled by Zod schema at parse time.
+ * This function validates cross-field relationships and provides upper bound warnings.
  */
 export function validateEnv(): { valid: boolean; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
@@ -849,144 +906,28 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   if (SSE_ERROR_SUBSCRIBER_COUNT >= SSE_MAX_LISTENERS) {
     warnings.push(`SSE_ERROR_SUBSCRIBER_COUNT (${SSE_ERROR_SUBSCRIBER_COUNT}) should be less than SSE_MAX_LISTENERS (${SSE_MAX_LISTENERS})`);
   }
-  if (SSE_MAX_LISTENERS <= 0) {
-    errors.push('SSE_MAX_LISTENERS must be a positive number');
-  }
-  if (SSE_MAX_SUBSCRIBERS_PER_SESSION <= 0) {
-    errors.push('SSE_MAX_SUBSCRIBERS_PER_SESSION must be a positive number');
-  }
-  if (SSE_MAX_SUBSCRIBERS_PER_USER <= 0) {
-    errors.push('SSE_MAX_SUBSCRIBERS_PER_USER must be a positive number');
-  }
 
-  // Database limits validation
-  if (DB_MAX_CONNECTIONS <= 0) {
-    errors.push('DB_MAX_CONNECTIONS must be a positive number');
-  }
-  if (DB_MIN_CONNECTIONS < 0) {
-    errors.push('DB_MIN_CONNECTIONS must be non-negative');
-  }
+  // Database limits validation - relationship check
   if (DB_MIN_CONNECTIONS > DB_MAX_CONNECTIONS) {
     warnings.push(`DB_MIN_CONNECTIONS (${DB_MIN_CONNECTIONS}) should not exceed DB_MAX_CONNECTIONS (${DB_MAX_CONNECTIONS})`);
   }
 
-  // Timeout values validation - ensure all timeouts are positive
-  if (HTTP_REQUEST_TIMEOUT_MS <= 0) {
-    errors.push('HTTP_REQUEST_TIMEOUT_MS must be a positive number');
-  }
-  if (HTTP_HEAD_TIMEOUT_MS <= 0) {
-    errors.push('HTTP_HEAD_TIMEOUT_MS must be a positive number');
-  }
-  if (HTTP_HEALTH_CHECK_TIMEOUT_MS <= 0) {
-    errors.push('HTTP_HEALTH_CHECK_TIMEOUT_MS must be a positive number');
-  }
-  if (SSE_STALE_TIMEOUT_MS <= 0) {
-    errors.push('SSE_STALE_TIMEOUT_MS must be a positive number');
-  }
-  if (DB_CONNECTION_TIMEOUT_MS <= 0) {
-    errors.push('DB_CONNECTION_TIMEOUT_MS must be a positive number');
-  }
-  if (DB_IDLE_TIMEOUT_MS <= 0) {
-    errors.push('DB_IDLE_TIMEOUT_MS must be a positive number');
-  }
-  if (DB_STATEMENT_TIMEOUT_MS <= 0) {
-    errors.push('DB_STATEMENT_TIMEOUT_MS must be a positive number');
-  }
-  if (CIRCUIT_BREAKER_RESET_TIMEOUT_MS <= 0) {
-    errors.push('CIRCUIT_BREAKER_RESET_TIMEOUT_MS must be a positive number');
-  }
-  if (WORKER_EXECUTION_TIMEOUT_MS <= 0) {
-    errors.push('WORKER_EXECUTION_TIMEOUT_MS must be a positive number');
-  }
-  if (WORKER_HEALTH_CHECK_TIMEOUT_MS <= 0) {
-    errors.push('WORKER_HEALTH_CHECK_TIMEOUT_MS must be a positive number');
-  }
-
-  // Interval values validation - ensure all intervals are positive
-  if (SSE_HEARTBEAT_INTERVAL_MS <= 0) {
-    errors.push('SSE_HEARTBEAT_INTERVAL_MS must be a positive number');
-  }
-  if (SSE_CLEANUP_INTERVAL_MS <= 0) {
-    errors.push('SSE_CLEANUP_INTERVAL_MS must be a positive number');
-  }
-  if (HEALTH_CHECK_INTERVAL_MS <= 0) {
-    errors.push('HEALTH_CHECK_INTERVAL_MS must be a positive number');
-  }
-  if (DB_HEALTH_CHECK_INTERVAL_MS <= 0) {
-    errors.push('DB_HEALTH_CHECK_INTERVAL_MS must be a positive number');
-  }
-  if (CRDT_SYNC_INTERVAL_MS <= 0) {
-    errors.push('CRDT_SYNC_INTERVAL_MS must be a positive number');
-  }
-
-  // Retry configuration validation
-  if (RETRY_MAX_ATTEMPTS <= 0) {
-    errors.push('RETRY_MAX_ATTEMPTS must be a positive number');
-  }
-  if (RETRY_BASE_DELAY_MS <= 0) {
-    errors.push('RETRY_BASE_DELAY_MS must be a positive number');
-  }
-  if (RETRY_MAX_DELAY_MS <= 0) {
-    errors.push('RETRY_MAX_DELAY_MS must be a positive number');
-  }
+  // Retry configuration validation - relationship check
   if (RETRY_BASE_DELAY_MS > RETRY_MAX_DELAY_MS) {
     warnings.push(`RETRY_BASE_DELAY_MS (${RETRY_BASE_DELAY_MS}) should not exceed RETRY_MAX_DELAY_MS (${RETRY_MAX_DELAY_MS})`);
   }
 
-  // Operational limits validation - lower bounds
-  if (SESSION_CONCURRENCY_LIMIT <= 0) {
-    errors.push('SESSION_CONCURRENCY_LIMIT must be a positive number');
-  }
-  if (SESSION_MAX_BATCH_SIZE <= 0) {
-    errors.push('SESSION_MAX_BATCH_SIZE must be a positive number');
-  }
-  if (SESSION_MAX_ARCHIVE_BATCH_SIZE <= 0) {
-    errors.push('SESSION_MAX_ARCHIVE_BATCH_SIZE must be a positive number');
-  }
+  // Session limits validation - relationship check
   if (SESSION_MAX_ARCHIVE_BATCH_SIZE > SESSION_MAX_BATCH_SIZE) {
     warnings.push(`SESSION_MAX_ARCHIVE_BATCH_SIZE (${SESSION_MAX_ARCHIVE_BATCH_SIZE}) should not exceed SESSION_MAX_BATCH_SIZE (${SESSION_MAX_BATCH_SIZE})`);
   }
-  if (DATALOADER_MAX_BATCH_SIZE <= 0) {
-    errors.push('DATALOADER_MAX_BATCH_SIZE must be a positive number');
-  }
-  if (SEARCH_GAMES_LIMIT <= 0) {
-    errors.push('SEARCH_GAMES_LIMIT must be a positive number');
-  }
-  if (SEARCH_USERS_LIMIT <= 0) {
-    errors.push('SEARCH_USERS_LIMIT must be a positive number');
-  }
-  if (SEARCH_SESSIONS_LIMIT <= 0) {
-    errors.push('SEARCH_SESSIONS_LIMIT must be a positive number');
-  }
-  if (SEARCH_POSTS_LIMIT <= 0) {
-    errors.push('SEARCH_POSTS_LIMIT must be a positive number');
-  }
-  if (SEARCH_DEFAULT_LIMIT <= 0) {
-    errors.push('SEARCH_DEFAULT_LIMIT must be a positive number');
-  }
-  if (SEARCH_MAX_LIMIT <= 0) {
-    errors.push('SEARCH_MAX_LIMIT must be a positive number');
-  }
+
+  // Search limits validation - relationship checks
   if (SEARCH_DEFAULT_LIMIT > SEARCH_MAX_LIMIT) {
     warnings.push(`SEARCH_DEFAULT_LIMIT (${SEARCH_DEFAULT_LIMIT}) should not exceed SEARCH_MAX_LIMIT (${SEARCH_MAX_LIMIT})`);
   }
   if (SEARCH_SUGGESTIONS_DEFAULT_LIMIT > SEARCH_SUGGESTIONS_MAX_LIMIT) {
     warnings.push(`SEARCH_SUGGESTIONS_DEFAULT_LIMIT (${SEARCH_SUGGESTIONS_DEFAULT_LIMIT}) should not exceed SEARCH_SUGGESTIONS_MAX_LIMIT (${SEARCH_SUGGESTIONS_MAX_LIMIT})`);
-  }
-  if (LIVE_CHAT_MESSAGES_DEFAULT_LIMIT <= 0) {
-    errors.push('LIVE_CHAT_MESSAGES_DEFAULT_LIMIT must be a positive number');
-  }
-  if (LIVE_CHAT_HISTORY_LIMIT <= 0) {
-    errors.push('LIVE_CHAT_HISTORY_LIMIT must be a positive number');
-  }
-  if (LIVE_CHAT_CONTEXT_MESSAGES <= 0) {
-    errors.push('LIVE_CHAT_CONTEXT_MESSAGES must be a positive number');
-  }
-  if (BATCH_DEFAULT_CONCURRENCY <= 0) {
-    errors.push('BATCH_DEFAULT_CONCURRENCY must be a positive number');
-  }
-  if (BATCH_MAX_BATCH_SIZE <= 0) {
-    errors.push('BATCH_MAX_BATCH_SIZE must be a positive number');
   }
 
   // Operational limits validation - upper bounds (prevent unreasonable values)
@@ -1249,6 +1190,104 @@ export const config = {
 
   // Frontend
   FRONTEND_URL,
+
+  // HTTP Timeouts
+  HTTP_REQUEST_TIMEOUT_MS,
+  HTTP_HEAD_TIMEOUT_MS,
+  HTTP_HEALTH_CHECK_TIMEOUT_MS,
+
+  // SSE/WebSocket Configuration
+  SSE_STALE_TIMEOUT_MS,
+  SSE_HEARTBEAT_INTERVAL_MS,
+  SSE_CLEANUP_INTERVAL_MS,
+  SSE_MAX_LISTENERS,
+  SSE_MAX_SUBSCRIBERS_PER_SESSION,
+  SSE_MAX_SUBSCRIBERS_PER_USER,
+  SSE_WARN_SUBSCRIBER_COUNT,
+  SSE_ERROR_SUBSCRIBER_COUNT,
+
+  // Database Timeouts and Pool
+  DB_CONNECTION_TIMEOUT_MS,
+  DB_IDLE_TIMEOUT_MS,
+  DB_STATEMENT_TIMEOUT_MS,
+  DB_MAX_CONNECTIONS,
+  DB_MIN_CONNECTIONS,
+
+  // Health Check Intervals
+  HEALTH_CHECK_INTERVAL_MS,
+  DB_HEALTH_CHECK_INTERVAL_MS,
+
+  // Circuit Breaker
+  CIRCUIT_BREAKER_RESET_TIMEOUT_MS,
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+  CIRCUIT_BREAKER_SUCCESS_THRESHOLD,
+  CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
+
+  // Worker Execution
+  WORKER_EXECUTION_TIMEOUT_MS,
+  WORKER_HEALTH_CHECK_TIMEOUT_MS,
+
+  // CRDT Sync
+  CRDT_SYNC_INTERVAL_MS,
+  CRDT_MAX_BATCH_SIZE,
+  CRDT_RETRY_MAX_DELAY_MS,
+
+  // Request Deduplication
+  REQUEST_DEDUP_DEFAULT_TTL_MS,
+  REQUEST_DEDUP_SYNC_TTL_MS,
+  REQUEST_DEDUP_MESSAGE_TTL_MS,
+
+  // Import/Fetch Limits
+  IMPORT_MAX_FILE_SIZE_BYTES,
+  MAX_CONCURRENT_API_CALLS,
+
+  // Session Operation Limits
+  SESSION_CONCURRENCY_LIMIT,
+  SESSION_MAX_BATCH_SIZE,
+  SESSION_MAX_ARCHIVE_BATCH_SIZE,
+
+  // DataLoader
+  DATALOADER_MAX_BATCH_SIZE,
+
+  // Search Limits
+  SEARCH_GAMES_LIMIT,
+  SEARCH_USERS_LIMIT,
+  SEARCH_SESSIONS_LIMIT,
+  SEARCH_POSTS_LIMIT,
+  SEARCH_DEFAULT_LIMIT,
+  SEARCH_MAX_LIMIT,
+  SEARCH_SUGGESTIONS_DEFAULT_LIMIT,
+  SEARCH_SUGGESTIONS_MAX_LIMIT,
+
+  // Live Chat Limits
+  LIVE_CHAT_MESSAGES_DEFAULT_LIMIT,
+  LIVE_CHAT_HISTORY_LIMIT,
+  LIVE_CHAT_CONTEXT_MESSAGES,
+
+  // Batch Operations
+  BATCH_DEFAULT_CONCURRENCY,
+  BATCH_MAX_BATCH_SIZE,
+
+  // LRU Cache
+  LRU_EVICTION_RATE,
+
+  // Retry Configuration
+  RETRY_MAX_ATTEMPTS,
+  RETRY_BASE_DELAY_MS,
+  RETRY_MAX_DELAY_MS,
+  RETRY_BACKOFF_MULTIPLIER,
+  RETRY_JITTER_FACTOR,
+
+  // Database Health/Connection Retry
+  DB_HEALTH_CHECK_MAX_RETRY_DELAY_MS,
+  DB_CONNECTION_MAX_RETRIES,
+
+  // Recovery Delays
+  RECOVERY_DELAY_RATE_LIMIT_MS,
+  RECOVERY_DELAY_NETWORK_MS,
+  RECOVERY_DELAY_SERVER_MS,
+  RECOVERY_DELAY_CONFLICT_MS,
+  RECOVERY_DELAY_UNKNOWN_MS,
 } as const;
 
 export type Config = typeof config;
