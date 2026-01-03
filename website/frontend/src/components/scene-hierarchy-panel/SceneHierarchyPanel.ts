@@ -1,10 +1,17 @@
 /**
  * SceneHierarchyPanel Component
  * Displays the hierarchy tree of scene objects with selection and z-order indicators
+ *
+ * Accessibility features:
+ * - WAI-ARIA tree pattern with role="tree" and role="treeitem"
+ * - Keyboard navigation: Arrow keys, Home, End, Enter/Space
+ * - Type-ahead find for quick navigation
+ * - Screen reader announcements for selection changes
  */
 
 import { Component } from '../base/Component';
 import { sceneStore } from '../../stores/sceneStore';
+import { TreeKeyboardNav, statusAnnouncer, generateId } from '../../lib/accessibility';
 
 import './scene-hierarchy-panel.css';
 
@@ -19,10 +26,13 @@ export class SceneHierarchyPanel extends Component {
   private options: SceneHierarchyPanelOptions;
   private selectedObjectId: string | null = null;
   private unsubscribeStore: (() => void) | null = null;
+  private treeNav: TreeKeyboardNav | null = null;
+  private treeId: string;
 
   constructor(options: SceneHierarchyPanelOptions = {}) {
     super('aside', { className: 'hierarchy-panel' });
     this.options = options;
+    this.treeId = generateId('hierarchy-tree');
   }
 
   protected onMount(): void {
@@ -37,16 +47,20 @@ export class SceneHierarchyPanel extends Component {
       this.unsubscribeStore();
       this.unsubscribeStore = null;
     }
+    if (this.treeNav) {
+      this.treeNav.destroy();
+      this.treeNav = null;
+    }
   }
 
   render(): this {
     this.element.innerHTML = `
       <div class="panel-header">
-        <span class="panel-title">Hierarchy</span>
-        <button class="add-object-btn" title="Add Object">+</button>
+        <h2 class="panel-title" id="${this.treeId}-label">Hierarchy</h2>
+        <button class="add-object-btn" aria-label="Add new object to scene" title="Add Object">+</button>
       </div>
-      <div class="hierarchy-tree">
-        <div class="hierarchy-empty">
+      <div class="hierarchy-tree" role="tree" aria-labelledby="${this.treeId}-label" id="${this.treeId}">
+        <div class="hierarchy-empty" role="status">
           <p>No objects in scene</p>
           <p class="hint">Add sprites, shapes, or text</p>
         </div>
@@ -91,9 +105,15 @@ export class SceneHierarchyPanel extends Component {
     const activeScene = sceneStore.getActiveScene();
     const objects = activeScene?.objects || [];
 
+    // Clean up old tree navigation
+    if (this.treeNav) {
+      this.treeNav.destroy();
+      this.treeNav = null;
+    }
+
     if (objects.length === 0) {
       treeContainer.innerHTML = `
-        <div class="hierarchy-empty">
+        <div class="hierarchy-empty" role="status">
           <p>No objects in scene</p>
           <p class="hint">Add sprites, shapes, text, or UI components</p>
         </div>
@@ -104,18 +124,65 @@ export class SceneHierarchyPanel extends Component {
     // Sort by zIndex in descending order (highest z-index at top of list = front of scene)
     const sortedObjects = [...objects].sort((a, b) => b.zIndex - a.zIndex);
 
-    const items = sortedObjects.map(obj => `
-      <div class="hierarchy-item ${obj.id === this.selectedObjectId ? 'selected' : ''}" data-id="${this.escapeHtml(obj.id)}">
-        <span class="hierarchy-visibility">${obj.visible ? '👁' : '👁‍🗨'}</span>
-        <span class="hierarchy-icon">${this.getObjectIcon(obj)}</span>
+    const items = sortedObjects.map((obj, index) => {
+      const isSelected = obj.id === this.selectedObjectId;
+      const objectType = this.getObjectTypeLabel(obj);
+      const visibilityLabel = obj.visible ? 'Visible' : 'Hidden';
+      const lockedLabel = obj.locked ? ', Locked' : '';
+
+      return `
+      <div class="hierarchy-item ${isSelected ? 'selected' : ''}"
+           data-id="${this.escapeHtml(obj.id)}"
+           role="treeitem"
+           aria-selected="${isSelected}"
+           aria-label="${this.escapeHtml(obj.name)}, ${objectType}, Z-index ${obj.zIndex}, ${visibilityLabel}${lockedLabel}"
+           tabindex="${index === 0 ? '0' : '-1'}">
+        <button type="button" class="hierarchy-visibility" aria-label="${obj.visible ? 'Hide' : 'Show'} ${this.escapeHtml(obj.name)}" aria-pressed="${obj.visible}">${obj.visible ? '👁' : '👁‍🗨'}</button>
+        <span class="hierarchy-icon" aria-hidden="true">${this.getObjectIcon(obj)}</span>
         <span class="hierarchy-name">${this.escapeHtml(obj.name)}</span>
-        <span class="hierarchy-z-index" title="Z-Index: ${obj.zIndex}">[${obj.zIndex}]</span>
-        ${obj.locked ? '<span class="hierarchy-locked">🔒</span>' : ''}
+        <span class="hierarchy-z-index" aria-hidden="true" title="Z-Index: ${obj.zIndex}">[${obj.zIndex}]</span>
+        ${obj.locked ? '<span class="hierarchy-locked" aria-hidden="true">🔒</span>' : ''}
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     treeContainer.innerHTML = items;
-    // Click handlers are managed via event delegation in setupEventListeners()
+
+    // Initialize keyboard navigation for tree
+    this.treeNav = new TreeKeyboardNav({
+      container: treeContainer,
+      itemSelector: '.hierarchy-item',
+      onSelect: (element) => {
+        const objectId = element.dataset.id;
+        if (objectId) {
+          this.selectedObjectId = objectId;
+          this.updateHierarchy();
+          this.options.onObjectSelect?.(objectId);
+          // Announce selection to screen readers
+          const name = element.querySelector('.hierarchy-name')?.textContent || 'Object';
+          statusAnnouncer.announce(`${name} selected`);
+        }
+      },
+    });
+    this.treeNav.init();
+  }
+
+  private getObjectTypeLabel(obj: SceneObject): string {
+    switch (obj.type) {
+      case 'sprite': return 'Sprite';
+      case 'shape': return `Shape (${obj.shapeType || 'unknown'})`;
+      case 'text': return 'Text';
+      case 'group': return 'Group';
+      case 'ui-button': return 'UI Button';
+      case 'ui-panel': return 'UI Panel';
+      case 'ui-text': return 'UI Text';
+      case 'ui-image': return 'UI Image';
+      case 'ui-slider': return 'UI Slider';
+      case 'ui-progress-bar': return 'Progress Bar';
+      case 'ui-checkbox': return 'Checkbox';
+      case 'custom': return 'Custom Object';
+      default: return 'Object';
+    }
   }
 
   private getObjectIcon(obj: SceneObject): string {

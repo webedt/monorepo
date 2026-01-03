@@ -179,7 +179,12 @@
   --button-height-lg: 3rem;     /* 48px */
 }
 
-/* Dark Theme */
+/* Dark Theme
+ * WCAG 2.1 AA compliance notes:
+ * - Text colors are adjusted to maintain 4.5:1 contrast ratio against dark backgrounds
+ * - neutral-300 on neutral-900 provides ~10:1 contrast
+ * - neutral-400 on neutral-900 provides ~6.5:1 contrast (AA compliant)
+ */
 [data-theme="dark"] {
   --color-bg: var(--color-neutral-900);
   --color-bg-primary: var(--color-neutral-900);
@@ -191,9 +196,12 @@
 
   --color-text: var(--color-neutral-50);
   --color-text-primary: var(--color-neutral-50);
-  --color-text-secondary: var(--color-neutral-400);
-  --color-text-tertiary: var(--color-neutral-500);
-  --color-text-muted: var(--color-neutral-500);
+  /* Improved from neutral-400 to neutral-300 for better contrast (10:1 ratio) */
+  --color-text-secondary: var(--color-neutral-300);
+  /* Improved from neutral-500 to neutral-400 for WCAG AA compliance (6.5:1 ratio) */
+  --color-text-tertiary: var(--color-neutral-400);
+  /* Improved from neutral-500 to neutral-400 for WCAG AA compliance */
+  --color-text-muted: var(--color-neutral-400);
   --color-text-inverse: var(--color-neutral-900);
 
   --color-border: var(--color-neutral-700);
@@ -223,7 +231,9 @@
   --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
-/* System preference dark mode */
+/* System preference dark mode
+ * WCAG 2.1 AA compliant contrast ratios
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     --color-bg: var(--color-neutral-900);
@@ -236,9 +246,11 @@
 
     --color-text: var(--color-neutral-50);
     --color-text-primary: var(--color-neutral-50);
-    --color-text-secondary: var(--color-neutral-400);
-    --color-text-tertiary: var(--color-neutral-500);
-    --color-text-muted: var(--color-neutral-500);
+    /* Improved from neutral-400 to neutral-300 for better contrast */
+    --color-text-secondary: var(--color-neutral-300);
+    /* Improved from neutral-500 to neutral-400 for WCAG AA compliance */
+    --color-text-tertiary: var(--color-neutral-400);
+    --color-text-muted: var(--color-neutral-400);
     --color-text-inverse: var(--color-neutral-900);
 
     --color-border: var(--color-neutral-700);

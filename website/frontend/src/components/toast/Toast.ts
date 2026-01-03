@@ -62,6 +62,13 @@ class Toast extends Component<HTMLDivElement> {
       ...options,
     };
 
+    // Set appropriate ARIA role based on toast type
+    // 'alert' for urgent messages (error, warning), 'status' for others
+    const role = this.options.type === 'error' || this.options.type === 'warning' ? 'alert' : 'status';
+    this.element.setAttribute('role', role);
+    this.element.setAttribute('aria-live', role === 'alert' ? 'assertive' : 'polite');
+    this.element.setAttribute('aria-atomic', 'true');
+
     this.addClass(`toast--${this.options.type}`);
     this.buildContent();
 
@@ -73,9 +80,10 @@ class Toast extends Component<HTMLDivElement> {
   private buildContent(): void {
     const { title, message, type, closable, showProgress, action } = this.options;
 
-    // Icon
+    // Icon (decorative, hidden from screen readers)
     const icon = document.createElement('span');
     icon.className = 'toast-icon';
+    icon.setAttribute('aria-hidden', 'true');
     icon.innerHTML = TOAST_ICONS[type];
     this.element.appendChild(icon);
 
@@ -231,6 +239,10 @@ class ToastManager {
     if (!this.container || !document.body.contains(this.container)) {
       this.container = document.createElement('div');
       this.container.className = `toast-container toast-container--${this.position}`;
+      // ARIA region for toast notifications
+      this.container.setAttribute('role', 'region');
+      this.container.setAttribute('aria-label', 'Notifications');
+      this.container.setAttribute('aria-live', 'polite');
       document.body.appendChild(this.container);
     }
     return this.container;
