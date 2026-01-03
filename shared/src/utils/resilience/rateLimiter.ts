@@ -24,6 +24,9 @@ import type {
   SlidingWindowEntry,
 } from './ARateLimiter.js';
 import { logger } from '../logging/logger.js';
+import { TimerManager } from '../lifecycle/timerManager.js';
+
+import type { ITimerManager } from '../lifecycle/timerManager.js';
 
 export type {
   RateLimiterConfig,
@@ -54,21 +57,23 @@ export class SlidingWindowRateLimiter extends ARateLimiter {
     activeKeys: 0,
     lastCleanup: null,
   };
-  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private timerManager: ITimerManager;
+  private cleanupIntervalId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: Partial<RateLimiterConfig> = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.timerManager = new TimerManager();
 
-    // Start automatic cleanup every window period
-    this.cleanupInterval = setInterval(() => {
+    // Start automatic cleanup every window period using timerManager for lifecycle tracking
+    this.cleanupIntervalId = this.timerManager.setInterval(() => {
       this.cleanup().catch((err) => {
         logger.error('Rate limiter cleanup failed', err as Error, {
           component: 'RateLimiter',
           name: this.config.name,
         });
       });
-    }, this.config.windowMs);
+    }, this.config.windowMs, true);
   }
 
   getConfig(): RateLimiterConfig {
@@ -289,10 +294,9 @@ export class SlidingWindowRateLimiter extends ARateLimiter {
    * Stop the cleanup interval (for graceful shutdown)
    */
   destroy(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
+    // Dispose all timers via timerManager
+    this.timerManager.dispose();
+    this.cleanupIntervalId = null;
     this.store.clear();
   }
 }
@@ -307,14 +311,16 @@ export class SlidingWindowStore extends ARateLimiterStore {
   private store: Map<string, { hits: number; resetTime: Date; previousHits: number }> = new Map();
   private windowMs: number;
   private stats = { keys: 0, hits: 0, blocked: 0 };
-  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private timerManager: ITimerManager;
+  private cleanupIntervalId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(windowMs: number = 60000) {
     super();
     this.windowMs = windowMs;
+    this.timerManager = new TimerManager();
 
-    // Cleanup expired entries periodically
-    this.cleanupInterval = setInterval(() => {
+    // Cleanup expired entries periodically using timerManager for lifecycle tracking
+    this.cleanupIntervalId = this.timerManager.setInterval(() => {
       const now = Date.now();
       for (const [key, value] of this.store.entries()) {
         if (value.resetTime.getTime() < now - this.windowMs) {
@@ -322,7 +328,7 @@ export class SlidingWindowStore extends ARateLimiterStore {
         }
       }
       this.stats.keys = this.store.size;
-    }, this.windowMs);
+    }, this.windowMs, true);
   }
 
   async get(key: string): Promise<{ totalHits: number; resetTime: Date } | undefined> {
@@ -428,10 +434,9 @@ export class SlidingWindowStore extends ARateLimiterStore {
    * Stop the cleanup interval (for graceful shutdown)
    */
   destroy(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
+    // Dispose all timers via timerManager
+    this.timerManager.dispose();
+    this.cleanupIntervalId = null;
     this.store.clear();
   }
 }

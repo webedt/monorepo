@@ -37,9 +37,11 @@
 import { db, withTransactionOrThrow } from '../db/index.js';
 import { logger } from '../utils/logging/logger.js';
 import { AService } from './abstracts/AService.js';
+import { TimerManager } from '../utils/lifecycle/timerManager.js';
 
 import type { TransactionContext, TransactionOptions } from '../db/index.js';
 import type { LogContext } from '../utils/logging/logger.js';
+import type { ITimerManager } from '../utils/lifecycle/timerManager.js';
 
 /**
  * Result type for operations that can succeed or fail.
@@ -135,6 +137,13 @@ export function BaseService<T extends abstract new (...args: any[]) => AService>
     readonly componentName: string;
 
     /**
+     * Timer manager for lifecycle-aware timer management.
+     * All timers registered through this manager are automatically
+     * cleaned up when the service is disposed.
+     */
+    readonly timerManager: ITimerManager;
+
+    /**
      * Shutdown handlers to be called during dispose.
      * @internal Do not access directly - use onShutdown() instead
      */
@@ -146,6 +155,7 @@ export function BaseService<T extends abstract new (...args: any[]) => AService>
       // Use the concrete class name for logging
       this.componentName = this.constructor.name;
       this.log = createComponentLogger(this.componentName);
+      this.timerManager = new TimerManager();
     }
 
     /**
@@ -317,10 +327,14 @@ export function BaseService<T extends abstract new (...args: any[]) => AService>
     }
 
     /**
-     * Default dispose implementation that calls all registered shutdown handlers.
+     * Default dispose implementation that calls all registered shutdown handlers
+     * and cleans up the timer manager.
      * Subclasses can override but should call super.dispose() to ensure cleanup.
      */
     async dispose(): Promise<void> {
+      // Dispose timer manager first to stop all timers
+      this.timerManager.dispose();
+
       for (const handler of this._shutdownHandlers) {
         try {
           await handler();
@@ -371,14 +385,14 @@ export function ScheduledCleanupService<T extends abstract new (...args: any[]) 
 ) {
   abstract class ScheduledCleanupClass extends BaseService(AbstractClass) {
     /**
-     * @internal Timer ID for cleanup interval
+     * @internal Timer ID for cleanup interval (tracked by timerManager)
      */
-    _cleanupIntervalId: NodeJS.Timeout | null = null;
+    _cleanupIntervalId: ReturnType<typeof setTimeout> | null = null;
 
     /**
-     * @internal Timer ID for initial timeout
+     * @internal Timer ID for initial timeout (tracked by timerManager)
      */
-    _initialTimeoutId: NodeJS.Timeout | null = null;
+    _initialTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
     /**
      * Get the configuration for this scheduled task.
@@ -430,21 +444,18 @@ export function ScheduledCleanupService<T extends abstract new (...args: any[]) 
         ...this.getSchedulerLogConfig(),
       });
 
-      // Initial run after delay
-      this._initialTimeoutId = setTimeout(() => {
+      // Initial run after delay - use timerManager for lifecycle tracking
+      // unref=true allows the process to exit cleanly if only timers are pending
+      this._initialTimeoutId = this.timerManager.setTimeout(() => {
         this._runWithErrorHandling();
-      }, config.initialDelayMs);
+      }, config.initialDelayMs, true);
 
-      // Periodic runs
-      this._cleanupIntervalId = setInterval(() => {
+      // Periodic runs - use timerManager for lifecycle tracking
+      this._cleanupIntervalId = this.timerManager.setInterval(() => {
         this._runWithErrorHandling();
-      }, config.intervalMs);
+      }, config.intervalMs, true);
 
-      // Allow the process to exit cleanly even if timers are pending
-      this._initialTimeoutId.unref();
-      this._cleanupIntervalId.unref();
-
-      // Register shutdown handler
+      // Register shutdown handler (timerManager is also cleaned up in dispose)
       this.onShutdown(() => this.stopScheduledCleanup());
     }
 
@@ -455,12 +466,12 @@ export function ScheduledCleanupService<T extends abstract new (...args: any[]) 
       const taskName = this.getTaskName();
 
       if (this._initialTimeoutId) {
-        clearTimeout(this._initialTimeoutId);
+        this.timerManager.clearTimeout(this._initialTimeoutId);
         this._initialTimeoutId = null;
       }
 
       if (this._cleanupIntervalId) {
-        clearInterval(this._cleanupIntervalId);
+        this.timerManager.clearInterval(this._cleanupIntervalId);
         this._cleanupIntervalId = null;
         this.log.info(`${taskName} scheduler stopped`);
       }

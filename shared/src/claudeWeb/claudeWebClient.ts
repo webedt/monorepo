@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { AClaudeWebClient } from './AClaudeWebClient.js';
 import { parseGitUrl } from '../utils/helpers/gitUrlHelper.js';
+import { TimerManager } from '../utils/lifecycle/timerManager.js';
 import type { ClaudeRemoteClientConfig } from './types.js';
 import type { ClaudeWebClientConfig } from './types.js';
 import type { CreateSessionParams } from './types.js';
@@ -14,6 +15,7 @@ import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
 import type { RawMessageCallback } from './types.js';
+import type { ITimerManager } from '../utils/lifecycle/timerManager.js';
 import { ClaudeRemoteError } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
@@ -486,6 +488,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
   private async createWebSocket(sessionId: string, timeoutMs: number = 10000): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
       const wsUrl = this.buildWebSocketUrl(sessionId);
+      // Create a scoped TimerManager for this connection attempt
+      const connectionTimerManager = new TimerManager();
 
       const ws = new WebSocket(wsUrl, {
         headers: {
@@ -500,12 +504,13 @@ export class ClaudeWebClient extends AClaudeWebClient {
       const cleanup = () => {
         ws.off('open', openHandler);
         ws.off('error', errorHandler);
+        // Dispose all tracked timers
+        connectionTimerManager.dispose();
       };
 
       const openHandler = () => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
         cleanup();
         resolve(ws);
       };
@@ -513,7 +518,6 @@ export class ClaudeWebClient extends AClaudeWebClient {
       const errorHandler = (error: Error) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
         cleanup();
         reject(new ClaudeRemoteError(
           `WebSocket connection error: ${error.message}`,
@@ -521,7 +525,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
         ));
       };
 
-      const timeout = setTimeout(() => {
+      // Use timerManager for lifecycle tracking
+      connectionTimerManager.setTimeout(() => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -546,9 +551,12 @@ export class ClaudeWebClient extends AClaudeWebClient {
     return new Promise((resolve, reject) => {
       const requestId = randomUUID();
       let settled = false;
+      // Create a scoped TimerManager for this control request
+      const requestTimerManager = new TimerManager();
 
       const cleanup = () => {
-        clearTimeout(timeout);
+        // Dispose all tracked timers
+        requestTimerManager.dispose();
         ws.off('message', messageHandler);
       };
 
@@ -581,7 +589,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
         }
       };
 
-      const timeout = setTimeout(() => {
+      // Use timerManager for lifecycle tracking
+      requestTimerManager.setTimeout(() => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -609,6 +618,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
   ): Promise<void> {
     const { timeoutMs = 10000, parentToolUseId = null } = options;
     const ws = await this.createWebSocket(sessionId, timeoutMs);
+    // Create a scoped TimerManager for this send operation
+    const sendTimerManager = new TimerManager();
 
     try {
       const userMessage = JSON.stringify({
@@ -624,8 +635,12 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
       ws.send(userMessage);
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Short delay using timerManager for lifecycle tracking
+      await new Promise<void>(resolve => {
+        sendTimerManager.setTimeout(resolve, 100);
+      });
     } finally {
+      sendTimerManager.dispose();
       ws.close();
     }
   }
@@ -660,7 +675,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
     const ws = await this.createWebSocket(sessionId, timeoutMs);
     let title: string | undefined;
     let branch: string | undefined;
-    let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+    // Create a scoped TimerManager for this streaming session
+    const streamTimerManager = new TimerManager();
     let cleanedUp = false;
     let settled = false; // Prevents multiple resolve/reject calls
 
@@ -673,11 +689,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
         if (cleanedUp) return;
         cleanedUp = true;
 
-        // Clear the keep-alive interval
-        if (keepAliveInterval) {
-          clearInterval(keepAliveInterval);
-          keepAliveInterval = null;
-        }
+        // Dispose all tracked timers via timerManager
+        streamTimerManager.dispose();
 
         // Remove abort signal listener
         if (abortSignal && abortHandler) {
@@ -830,14 +843,12 @@ export class ClaudeWebClient extends AClaudeWebClient {
       ws.on('error', errorHandler);
       ws.on('close', closeHandler);
 
-      // Start keep-alive interval
-      keepAliveInterval = setInterval(() => {
+      // Start keep-alive interval using timerManager for lifecycle tracking
+      streamTimerManager.setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'keep_alive' }));
-        } else if (keepAliveInterval) {
-          clearInterval(keepAliveInterval);
-          keepAliveInterval = null;
         }
+        // Note: timerManager.dispose() in cleanup() will handle clearing this interval
       }, 30000);
     });
   }
@@ -934,11 +945,16 @@ export class ClaudeWebClient extends AClaudeWebClient {
         return;
       }
 
-      const timeout = setTimeout(resolve, ms);
+      // Create a scoped TimerManager for this sleep operation
+      const sleepTimerManager = new TimerManager();
+      const timeoutId = sleepTimerManager.setTimeout(() => {
+        sleepTimerManager.dispose();
+        resolve();
+      }, ms);
 
       if (abortSignal) {
         const abortHandler = () => {
-          clearTimeout(timeout);
+          sleepTimerManager.dispose();
           reject(new ClaudeRemoteError('Sleep aborted by signal'));
         };
         abortSignal.addEventListener('abort', abortHandler, { once: true });

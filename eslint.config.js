@@ -19,6 +19,8 @@ export default [
       '**/dist/**',
       '**/build/**',
       '**/*.d.ts', // Declaration files
+      '**/timerManager.ts', // TimerManager uses raw timers intentionally
+      '**/timerRegistry.ts', // Frontend timer registry uses raw timers intentionally
     ],
   },
   {
@@ -79,6 +81,43 @@ export default [
        * Set to 'warn' to flag issues without breaking builds during migration.
        */
       '@typescript-eslint/no-explicit-any': 'warn',
+
+      /**
+       * Warn on direct setTimeout/setInterval usage
+       *
+       * Direct timer usage can cause memory leaks in long-running services.
+       * Use TimerManager instead for lifecycle-aware timer management:
+       *
+       * For services extending BaseService:
+       *   Bad:  setTimeout(() => ..., 1000)
+       *   Good: this.timerManager.setTimeout(() => ..., 1000)
+       *
+       * For standalone utilities:
+       *   const timerManager = new TimerManager();
+       *   timerManager.setTimeout(() => ..., 1000);
+       *   // ... cleanup:
+       *   timerManager.dispose();
+       *
+       * See shared/src/utils/lifecycle/timerManager.ts for details.
+       */
+      'no-restricted-globals': ['warn',
+        {
+          name: 'setTimeout',
+          message: 'Use TimerManager.setTimeout() for lifecycle-aware timer management. See shared/src/utils/lifecycle/timerManager.ts',
+        },
+        {
+          name: 'setInterval',
+          message: 'Use TimerManager.setInterval() for lifecycle-aware timer management. See shared/src/utils/lifecycle/timerManager.ts',
+        },
+        {
+          name: 'clearTimeout',
+          message: 'Use TimerManager.clearTimeout() for lifecycle-aware timer management. See shared/src/utils/lifecycle/timerManager.ts',
+        },
+        {
+          name: 'clearInterval',
+          message: 'Use TimerManager.clearInterval() for lifecycle-aware timer management. See shared/src/utils/lifecycle/timerManager.ts',
+        },
+      ],
     },
   },
 ];
