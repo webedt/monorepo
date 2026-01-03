@@ -774,7 +774,7 @@ export {
   type ExplainResult,
   type ExplainNode,
   type InstrumentedPoolConfig,
-  type QueryLogEntry as QueryAnalyzerLogEntry,
+  type QueryLogEntry as AnalyzedQueryPatternEntry,
 } from './queryAnalyzer.js';
 
 // Re-export composable query helpers

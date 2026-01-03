@@ -401,6 +401,11 @@ dbCommand
 
     const threshold = parseInt(options.threshold, 10);
 
+    if (isNaN(threshold) || threshold <= 0) {
+      console.error('Error: Invalid threshold value. Must be a positive number.');
+      process.exit(1);
+    }
+
     console.log('\nQuery Analysis Tool');
     console.log('===================');
     console.log(`Slow query threshold: ${threshold}ms`);
@@ -530,6 +535,15 @@ dbCommand
   .action(async (query, options) => {
     const { QueryAnalyzer, getPool } = await import('@webedt/shared');
 
+    // Only allow SELECT queries to prevent unintended data modifications
+    // EXPLAIN ANALYZE actually executes the query, so INSERT/UPDATE/DELETE would cause side effects
+    const trimmedQuery = query.trim().toUpperCase();
+    if (!trimmedQuery.startsWith('SELECT') && !trimmedQuery.startsWith('WITH')) {
+      console.error('Error: Only SELECT queries are supported by the explain command.');
+      console.error('EXPLAIN ANALYZE executes the query, so INSERT/UPDATE/DELETE would cause data modifications.');
+      process.exit(1);
+    }
+
     console.log('\nQuery EXPLAIN Analysis');
     console.log('======================\n');
 
@@ -541,7 +555,7 @@ dbCommand
     try {
       const pool = getPool();
 
-      // Run the query first to get timing
+      // Run the query first to get timing (safe because we only allow SELECT)
       const start = Date.now();
       await pool.query(query);
       const duration = Date.now() - start;

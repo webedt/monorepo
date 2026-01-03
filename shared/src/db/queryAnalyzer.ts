@@ -25,7 +25,6 @@ import {
   QUERY_ANALYSIS_MAX_LOG_ENTRIES,
 } from '../config/env.js';
 import { logger } from '../utils/logging/logger.js';
-import { metrics } from '../utils/monitoring/metrics.js';
 
 // ============================================================================
 // TYPES
@@ -42,6 +41,8 @@ export interface QueryAnalyzerConfig {
   explainEnabled?: boolean;
   /** Maximum queries to keep in log (default: 1000) */
   maxLogEntries?: number;
+  /** Row threshold for flagging sequential scans as problematic (default: 1000) */
+  seqScanRowThreshold?: number;
   /** Callback for slow query alerts */
   onSlowQuery?: (entry: QueryAnalysisEntry) => void;
   /** Callback for sequential scan detection */
@@ -201,6 +202,7 @@ export class QueryAnalyzer {
       logAllQueries: config.logAllQueries ?? QUERY_ANALYSIS_LOG_ALL,
       explainEnabled: config.explainEnabled ?? QUERY_ANALYSIS_EXPLAIN_ENABLED,
       maxLogEntries: config.maxLogEntries ?? QUERY_ANALYSIS_MAX_LOG_ENTRIES,
+      seqScanRowThreshold: config.seqScanRowThreshold ?? 1000,
       onSlowQuery: config.onSlowQuery ?? (() => {}),
       onSequentialScan: config.onSequentialScan ?? (() => {}),
     };
@@ -253,8 +255,8 @@ export class QueryAnalyzer {
         suggestion: 'Consider adding indexes or optimizing the query',
       });
 
-      // Record slow query metric
-      metrics.recordDbQuery(operation, true, actualDuration);
+      // Note: We don't record metrics here as the query has already been recorded
+      // by the caller. This analyzer is only for development-time diagnostics.
     }
 
     // Run EXPLAIN ANALYZE for slow queries (only for SELECT queries to avoid side effects)
@@ -300,12 +302,25 @@ export class QueryAnalyzer {
 
   /**
    * Run EXPLAIN ANALYZE on a query
+   *
+   * WARNING: EXPLAIN ANALYZE actually executes the query. Only SELECT and WITH queries
+   * are allowed to prevent unintended data modifications from INSERT/UPDATE/DELETE.
    */
   async runExplainAnalyze(
     pool: pg.Pool,
     query: string,
     params?: unknown[]
   ): Promise<ExplainResult> {
+    // Safety check: Only allow SELECT/WITH queries to prevent side effects
+    // EXPLAIN ANALYZE actually executes the query, so INSERT/UPDATE/DELETE would modify data
+    const operation = this.extractOperation(query);
+    if (operation !== 'SELECT' && operation !== 'WITH') {
+      throw new Error(
+        `EXPLAIN ANALYZE only supports SELECT queries to avoid side effects. ` +
+        `Received: ${operation} query`
+      );
+    }
+
     const explainQuery = `EXPLAIN (ANALYZE, FORMAT JSON, BUFFERS) ${query}`;
     const result = await pool.query(explainQuery, params);
 
@@ -357,7 +372,7 @@ export class QueryAnalyzer {
   private detectIssues(node: ExplainNode, issues: QueryIssue[] = []): QueryIssue[] {
     // Detect sequential scans on large tables
     if (node.nodeType === 'Seq Scan') {
-      const rowThreshold = 1000; // Consider seq scan problematic for tables with many rows
+      const rowThreshold = this.config.seqScanRowThreshold;
       if ((node.actualRows ?? node.planRows) > rowThreshold) {
         issues.push({
           type: 'sequential_scan',
