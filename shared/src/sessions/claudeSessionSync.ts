@@ -21,6 +21,7 @@ import {
 import type { SessionStatus } from './sessionLocking.js';
 import { retryWithBackoff } from '../utils/resilience/retry.js';
 import { sessionListBroadcaster } from './sessionListBroadcaster.js';
+import { TimerManager } from '../utils/lifecycle/timerManager.js';
 import {
   CLAUDE_ENVIRONMENT_ID,
   CLAUDE_API_BASE_URL,
@@ -29,6 +30,8 @@ import {
   CLAUDE_SYNC_INITIAL_DELAY_MS,
   CLAUDE_SYNC_LIMIT,
 } from '../config/env.js';
+
+import type { ITimerManager } from '../utils/lifecycle/timerManager.js';
 
 // Maximum number of concurrent API calls for parallelization
 const MAX_CONCURRENT_API_CALLS = 5;
@@ -151,8 +154,10 @@ const syncStats: SyncStats = {
   isRunning: false,
 };
 
-let syncIntervalId: NodeJS.Timeout | null = null;
-let initialTimeoutId: NodeJS.Timeout | null = null;
+// Module-level TimerManager for lifecycle tracking of background sync timers
+const syncTimerManager: ITimerManager = new TimerManager();
+let syncIntervalId: ReturnType<typeof setTimeout> | null = null;
+let initialTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Map Anthropic session status to our internal status.
@@ -1039,16 +1044,17 @@ export function startBackgroundSync(): void {
   });
 
   // Run initial sync after a short delay (let server stabilize)
-  initialTimeoutId = setTimeout(() => {
+  // Use timerManager for lifecycle tracking, unref=true allows process to exit cleanly
+  initialTimeoutId = syncTimerManager.setTimeout(() => {
     initialTimeoutId = null; // Clear reference after it fires
     logger.info('[SessionSync] Running initial sync', { component: 'SessionSync' });
     runSync();
-  }, CLAUDE_SYNC_INITIAL_DELAY_MS);
+  }, CLAUDE_SYNC_INITIAL_DELAY_MS, true);
 
-  // Schedule periodic sync
-  syncIntervalId = setInterval(() => {
+  // Schedule periodic sync using timerManager for lifecycle tracking
+  syncIntervalId = syncTimerManager.setInterval(() => {
     runSync();
-  }, CLAUDE_SYNC_INTERVAL_MS);
+  }, CLAUDE_SYNC_INTERVAL_MS, true);
 }
 
 /**
@@ -1057,13 +1063,13 @@ export function startBackgroundSync(): void {
 export function stopBackgroundSync(): void {
   // Clear initial timeout if it hasn't fired yet
   if (initialTimeoutId) {
-    clearTimeout(initialTimeoutId);
+    syncTimerManager.clearTimeout(initialTimeoutId);
     initialTimeoutId = null;
   }
 
   // Clear the periodic sync interval
   if (syncIntervalId) {
-    clearInterval(syncIntervalId);
+    syncTimerManager.clearInterval(syncIntervalId);
     syncIntervalId = null;
     logger.info('[SessionSync] Background sync service stopped', { component: 'SessionSync' });
   }

@@ -2,10 +2,12 @@ import { ASessionListBroadcaster } from './ASessionListBroadcaster.js';
 import { logger } from '../utils/logging/logger.js';
 import { metrics } from '../utils/monitoring/metrics.js';
 import { TIMEOUTS, INTERVALS, LIMITS } from '../config/constants.js';
+import { TimerManager } from '../utils/lifecycle/timerManager.js';
 
 import type { SessionListEvent } from './ASessionListBroadcaster.js';
 import type { SessionUpdateType } from './ASessionListBroadcaster.js';
 import type { ChatSession } from '../db/schema.js';
+import type { ITimerManager } from '../utils/lifecycle/timerManager.js';
 
 export type { SessionUpdateType, SessionListEvent } from './ASessionListBroadcaster.js';
 
@@ -32,34 +34,30 @@ interface UserSubscribers {
 
 class SessionListBroadcaster extends ASessionListBroadcaster {
   private users: Map<string, UserSubscribers> = new Map();
-  private cleanupInterval: NodeJS.Timeout | null = null;
-  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private timerManager: ITimerManager;
+  private cleanupIntervalId: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatIntervalId: ReturnType<typeof setTimeout> | null = null;
   private isShuttingDown = false;
 
   constructor() {
     super();
+    this.timerManager = new TimerManager();
     this.startCleanupInterval();
     this.startHeartbeatInterval();
   }
 
   private startCleanupInterval(): void {
-    this.cleanupInterval = setInterval(() => {
+    // Use timerManager for lifecycle tracking, unref=true allows process to exit cleanly
+    this.cleanupIntervalId = this.timerManager.setInterval(() => {
       this.cleanupStaleSubscribers();
-    }, CLEANUP_INTERVAL_MS);
-
-    if (this.cleanupInterval.unref) {
-      this.cleanupInterval.unref();
-    }
+    }, CLEANUP_INTERVAL_MS, true);
   }
 
   private startHeartbeatInterval(): void {
-    this.heartbeatInterval = setInterval(() => {
+    // Use timerManager for lifecycle tracking, unref=true allows process to exit cleanly
+    this.heartbeatIntervalId = this.timerManager.setInterval(() => {
       this.sendHeartbeats();
-    }, HEARTBEAT_INTERVAL_MS);
-
-    if (this.heartbeatInterval.unref) {
-      this.heartbeatInterval.unref();
-    }
+    }, HEARTBEAT_INTERVAL_MS, true);
   }
 
   private cleanupStaleSubscribers(): void {
@@ -385,15 +383,10 @@ class SessionListBroadcaster extends ASessionListBroadcaster {
   shutdown(): void {
     this.isShuttingDown = true;
 
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
-
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
+    // Dispose all timers at once via timerManager
+    this.timerManager.dispose();
+    this.cleanupIntervalId = null;
+    this.heartbeatIntervalId = null;
 
     this.users.clear();
 
