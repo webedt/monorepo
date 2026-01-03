@@ -81,4 +81,36 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
+  {
+    // Stricter rules for the shared package - enforce safe JSON parsing
+    files: ['shared/src/**/*.ts'],
+    rules: {
+      /**
+       * Disallow direct JSON.parse usage in shared package
+       *
+       * Raw JSON.parse throws on malformed input, causing runtime crashes.
+       * Use safeJsonParse from shared/src/utils/api/safeJson.js instead.
+       *
+       * Bad:  const data = JSON.parse(str);
+       * Good: const result = safeJsonParse(str);
+       *       if (result.success) { /* use result.data */ }
+       *
+       * Good with default: const data = safeJsonParse(str, defaultValue);
+       *
+       * Set to 'warn' initially to flag issues without breaking builds.
+       * The only exception is within safeJson.ts itself.
+       */
+      'no-restricted-syntax': ['warn', {
+        selector: 'CallExpression[callee.object.name="JSON"][callee.property.name="parse"]',
+        message: 'Avoid direct JSON.parse - use safeJsonParse from shared/src/utils/api/safeJson.js for safe parsing with error handling and optional logging.',
+      }],
+    },
+  },
+  {
+    // Allow JSON.parse only in the safeJson utility itself
+    files: ['shared/src/utils/api/safeJson.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
+    },
+  },
 ];

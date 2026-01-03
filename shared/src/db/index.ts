@@ -758,6 +758,25 @@ export {
   type QueryLoggerOptions,
 } from './queryLogger.js';
 
+// Re-export query analyzer utilities for development (EXPLAIN ANALYZE, slow query detection)
+export {
+  QueryAnalyzer,
+  getQueryAnalyzer,
+  createQueryAnalyzer,
+  createInstrumentedPool,
+  exportQueryLog,
+  exportQueryLogAsJson,
+  type QueryAnalyzerConfig,
+  type QueryAnalysisEntry,
+  type QueryAnalysisSummary,
+  type QueryPatternStats,
+  type QueryIssue,
+  type ExplainResult,
+  type ExplainNode,
+  type InstrumentedPoolConfig,
+  type QueryLogEntry as AnalyzedQueryPatternEntry,
+} from './queryAnalyzer.js';
+
 // Re-export composable query helpers
 export {
   // Pagination helpers

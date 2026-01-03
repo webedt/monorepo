@@ -6,8 +6,8 @@
  */
 
 import { CodexClient } from '../../codex/codexClient.js';
-import type { CodexAuth } from '../../auth/codexAuth.js';
 import { CODEX_API_BASE_URL, CODEX_DEFAULT_MODEL } from '../../config/env.js';
+import { safeJsonParse } from '../../utils/api/safeJson.js';
 import {
   AExecutionProvider,
   type ExecuteParams,
@@ -18,6 +18,8 @@ import {
   type ContentBlock,
   type ProviderCapabilities,
 } from './types.js';
+
+import type { CodexAuth } from '../../auth/codexAuth.js';
 import type { CodexEvent } from '../../codex/types.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 
@@ -51,15 +53,13 @@ function convertCodexEvent(event: CodexEvent, source: string): ExecutionEvent {
       };
 
     case 'tool_use': {
-      let toolInput: Record<string, unknown> = {};
-      if (event.toolCall) {
-        try {
-          toolInput = JSON.parse(event.toolCall.function.arguments || '{}');
-        } catch {
-          // If arguments are not valid JSON, use empty object
-          toolInput = {};
-        }
-      }
+      const toolInput: Record<string, unknown> = event.toolCall
+        ? safeJsonParse<Record<string, unknown>>(
+            event.toolCall.function.arguments || '{}',
+            {} as Record<string, unknown>,
+            { component: 'CodexRemoteProvider', logErrors: true, logLevel: 'debug' }
+          )
+        : {};
       return {
         ...baseEvent,
         type: 'tool_use',

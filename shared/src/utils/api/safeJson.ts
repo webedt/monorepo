@@ -4,6 +4,8 @@
  * @module utils/api/safeJson
  */
 
+import { logger } from '../logging/logger.js';
+
 /**
  * Result type for safe JSON parsing
  */
@@ -12,22 +14,54 @@ export type SafeJsonResult<T> =
   | { success: false; error: string };
 
 /**
+ * Options for safe JSON parsing
+ */
+export interface SafeJsonParseOptions {
+  /** Component name for logging context */
+  component?: string;
+  /** Whether to log parsing failures (default: false) */
+  logErrors?: boolean;
+  /** Log level for errors (default: 'debug') */
+  logLevel?: 'debug' | 'warn' | 'error';
+  /** Additional context to include in log messages */
+  context?: Record<string, unknown>;
+}
+
+/**
  * Safely parse JSON string without throwing
  * @param jsonString - The JSON string to parse
  * @param defaultValue - Optional default value if parsing fails
+ * @param options - Optional logging configuration
  * @returns Parsed value or default, with success indicator
  */
 export function safeJsonParse<T = unknown>(
-  jsonString: string
+  jsonString: string,
+  options?: SafeJsonParseOptions
 ): SafeJsonResult<T>;
 export function safeJsonParse<T = unknown>(
   jsonString: string,
-  defaultValue: T
+  defaultValue: T,
+  options?: SafeJsonParseOptions
 ): T;
 export function safeJsonParse<T = unknown>(
   jsonString: string,
-  defaultValue?: T
+  defaultValueOrOptions?: T | SafeJsonParseOptions,
+  maybeOptions?: SafeJsonParseOptions
 ): SafeJsonResult<T> | T {
+  // Determine if second parameter is options or default value
+  const isOptionsSecondParam = defaultValueOrOptions !== null &&
+    defaultValueOrOptions !== undefined &&
+    typeof defaultValueOrOptions === 'object' &&
+    ('component' in defaultValueOrOptions ||
+     'logErrors' in defaultValueOrOptions ||
+     'logLevel' in defaultValueOrOptions ||
+     'context' in defaultValueOrOptions);
+
+  const defaultValue = isOptionsSecondParam ? undefined : defaultValueOrOptions as T | undefined;
+  const options = isOptionsSecondParam
+    ? defaultValueOrOptions as SafeJsonParseOptions
+    : maybeOptions;
+
   try {
     const data = JSON.parse(jsonString) as T;
     if (defaultValue !== undefined) {
@@ -35,12 +69,35 @@ export function safeJsonParse<T = unknown>(
     }
     return { success: true, data };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Invalid JSON';
+
+    // Log the error if logging is enabled
+    if (options?.logErrors) {
+      const logMessage = 'Failed to parse JSON';
+      const logContext = {
+        component: options.component || 'safeJsonParse',
+        error: errorMessage,
+        inputLength: jsonString.length,
+        inputPreview: jsonString.length > 100 ? jsonString.slice(0, 100) + '...' : jsonString,
+        ...options.context,
+      };
+
+      const logLevel = options.logLevel || 'debug';
+      if (logLevel === 'error') {
+        logger.error(logMessage, new Error(errorMessage), logContext);
+      } else if (logLevel === 'warn') {
+        logger.warn(logMessage, logContext);
+      } else {
+        logger.debug(logMessage, logContext);
+      }
+    }
+
     if (defaultValue !== undefined) {
       return defaultValue;
     }
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Invalid JSON',
+      error: errorMessage,
     };
   }
 }

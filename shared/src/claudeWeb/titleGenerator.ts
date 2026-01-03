@@ -11,8 +11,10 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { GeneratedTitle, TitleGeneratorConfig, TitleGenerationEvent, TitleGenerationCallback } from './types.js';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
+
+import type { GeneratedTitle, TitleGeneratorConfig, TitleGenerationEvent, TitleGenerationCallback } from './types.js';
 
 // Constants
 const CLAUDE_AI_URL = 'https://claude.ai';
@@ -113,13 +115,12 @@ function generateTitleLocal(prompt: string): { title: string; branch_name: strin
 function parseJsonResponse(content: string): { title: string; branch_name: string } | null {
   const jsonMatch = content.match(/\{[\s\S]*?"title"[\s\S]*?"branch_name"[\s\S]*?\}/);
   if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.title && parsed.branch_name) {
-        return { title: parsed.title, branch_name: parsed.branch_name };
-      }
-    } catch {
-      // JSON parse failed
+    const parseResult = safeJsonParse<{ title?: string; branch_name?: string }>(
+      jsonMatch[0],
+      { component: 'TitleGenerator', logErrors: true, logLevel: 'debug' }
+    );
+    if (parseResult.success && parseResult.data.title && parseResult.data.branch_name) {
+      return { title: parseResult.data.title, branch_name: parseResult.data.branch_name };
     }
   }
   return null;

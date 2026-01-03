@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir, platform, userInfo } from 'os';
 import { join } from 'path';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 
 import type { ClaudeAuth, ClaudeAuthSource } from './claudeAuth.js';
 
@@ -39,11 +40,11 @@ function persistToCredentialsFile(auth: ClaudeAuth): TokenPersistenceResult {
     // Read existing credentials to preserve other fields
     let existingCredentials: Record<string, unknown> = {};
     if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
-      try {
-        existingCredentials = JSON.parse(readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8'));
-      } catch {
-        // File exists but is invalid, will overwrite
-      }
+      existingCredentials = safeJsonParse<Record<string, unknown>>(
+        readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8'),
+        {},
+        { component: 'TokenPersistence', logErrors: true, logLevel: 'debug', context: { path: CLAUDE_CREDENTIALS_PATH } }
+      );
     }
 
     // Update only the claudeAiOauth section
