@@ -1,6 +1,7 @@
 import { Component, ComponentOptions } from '../base';
 import { Button } from '../button';
 import { sanitizeHtmlPermissive } from '../../lib/sanitize';
+import { generateId } from '../../lib/accessibility';
 import './dropdown.css';
 
 export type DropdownPosition = 'bottom' | 'bottom-end' | 'top' | 'top-end';
@@ -32,6 +33,7 @@ export class Dropdown extends Component<HTMLDivElement> {
   private items: DropdownItem[] = [];
   private focusedIndex: number = -1;
   private menuItems: HTMLButtonElement[] = [];
+  private menuId: string;
 
   constructor(options: DropdownOptions) {
     super('div', {
@@ -46,16 +48,24 @@ export class Dropdown extends Component<HTMLDivElement> {
     };
 
     this.items = options.items ?? [];
+    this.menuId = generateId('dropdown-menu');
 
     // Setup trigger
     this.triggerElement = options.trigger instanceof Component
       ? options.trigger.getElement()
       : options.trigger;
     this.triggerElement.classList.add('dropdown-trigger');
+    // Add ARIA attributes to trigger
+    this.triggerElement.setAttribute('aria-haspopup', 'menu');
+    this.triggerElement.setAttribute('aria-expanded', 'false');
+    this.triggerElement.setAttribute('aria-controls', this.menuId);
 
     // Create menu
     this.menuElement = document.createElement('div');
     this.menuElement.className = `dropdown-menu dropdown-menu--${this.options.position}`;
+    this.menuElement.id = this.menuId;
+    this.menuElement.setAttribute('role', 'menu');
+    this.menuElement.setAttribute('aria-hidden', 'true');
 
     if (this.options.wide) {
       this.menuElement.classList.add('dropdown-menu--wide');
@@ -76,6 +86,7 @@ export class Dropdown extends Component<HTMLDivElement> {
       if (item.id === 'divider') {
         const divider = document.createElement('div');
         divider.className = 'dropdown-divider';
+        divider.setAttribute('role', 'separator');
         this.menuElement.appendChild(divider);
         continue;
       }
@@ -83,6 +94,7 @@ export class Dropdown extends Component<HTMLDivElement> {
       if (item.id.startsWith('header:')) {
         const header = document.createElement('div');
         header.className = 'dropdown-header';
+        header.setAttribute('role', 'presentation');
         header.textContent = item.label;
         this.menuElement.appendChild(header);
         continue;
@@ -91,6 +103,7 @@ export class Dropdown extends Component<HTMLDivElement> {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'dropdown-item';
+      button.setAttribute('role', 'menuitem');
       button.dataset.itemId = item.id;
 
       if (item.danger) {
@@ -100,11 +113,13 @@ export class Dropdown extends Component<HTMLDivElement> {
       if (item.disabled) {
         button.classList.add('dropdown-item--disabled');
         button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
       }
 
       if (item.icon) {
         const iconSpan = document.createElement('span');
         iconSpan.className = 'dropdown-item-icon';
+        iconSpan.setAttribute('aria-hidden', 'true');
         // Sanitize icon HTML to prevent XSS from user-provided content
         iconSpan.innerHTML = sanitizeHtmlPermissive(item.icon);
         button.appendChild(iconSpan);
@@ -225,8 +240,16 @@ export class Dropdown extends Component<HTMLDivElement> {
 
     this.element.classList.add('dropdown--open');
     this.triggerElement.setAttribute('aria-expanded', 'true');
+    this.menuElement.setAttribute('aria-hidden', 'false');
     this.isOpen = true;
     this.focusedIndex = -1;
+
+    // Focus first menu item for keyboard accessibility
+    if (this.menuItems.length > 0) {
+      requestAnimationFrame(() => {
+        this.focusFirst();
+      });
+    }
 
     this.options.onOpen?.();
     return this;
@@ -240,6 +263,7 @@ export class Dropdown extends Component<HTMLDivElement> {
 
     this.element.classList.remove('dropdown--open');
     this.triggerElement.setAttribute('aria-expanded', 'false');
+    this.menuElement.setAttribute('aria-hidden', 'true');
     this.isOpen = false;
     this.focusedIndex = -1;
 

@@ -75,23 +75,32 @@ export class LayerItem extends Component {
 
     this.element.className = `layer-item ${isActive ? 'active' : ''} ${layer.locked ? 'locked' : ''}`;
     this.element.setAttribute('data-layer-id', layer.id);
+    this.element.setAttribute('role', 'option');
+    this.element.setAttribute('aria-selected', String(isActive));
+    this.element.setAttribute('aria-label', `${layer.name}, ${Math.round(layer.opacity * 100)}% opacity${layer.locked ? ', locked' : ''}${layer.visible ? '' : ', hidden'}`);
 
     // Update thumbnail content (reuses cached canvas)
     this.updateThumbnail();
 
     this.element.innerHTML = `
-      <button class="layer-visibility-btn" title="${layer.visible ? 'Hide layer' : 'Show layer'}">
+      <button class="layer-visibility-btn"
+              aria-label="${layer.visible ? 'Hide' : 'Show'} ${layer.name}"
+              aria-pressed="${layer.visible}"
+              title="${layer.visible ? 'Hide layer' : 'Show layer'}">
         ${layer.visible ? '👁' : '👁‍🗨'}
       </button>
-      <div class="layer-thumbnail-container"></div>
+      <div class="layer-thumbnail-container" aria-hidden="true"></div>
       <div class="layer-info">
         <span class="layer-name"></span>
-        <span class="layer-opacity-badge">${Math.round(layer.opacity * 100)}%</span>
+        <span class="layer-opacity-badge" aria-hidden="true">${Math.round(layer.opacity * 100)}%</span>
       </div>
-      <button class="layer-lock-btn" title="${layer.locked ? 'Unlock layer' : 'Lock layer'}">
+      <button class="layer-lock-btn"
+              aria-label="${layer.locked ? 'Unlock' : 'Lock'} ${layer.name}"
+              aria-pressed="${layer.locked}"
+              title="${layer.locked ? 'Unlock layer' : 'Lock layer'}">
         ${layer.locked ? '🔒' : '🔓'}
       </button>
-      <button class="layer-menu-btn" title="Layer options">⋮</button>
+      <button class="layer-menu-btn" aria-label="Open options menu for ${layer.name}" aria-haspopup="menu" title="Layer options">⋮</button>
     `;
 
     // Set layer name using textContent to prevent XSS
@@ -221,17 +230,24 @@ export class LayerItem extends Component {
       existingMenu.remove();
     }
 
+    const menuId = `layer-menu-${layer.id}`;
+    const opacitySliderId = `${menuId}-opacity`;
+    const blendModeId = `${menuId}-blend-mode`;
+
     const menu = document.createElement('div');
     menu.className = 'layer-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', `Options for ${layer.name}`);
+    menu.id = menuId;
     menu.innerHTML = `
-      <div class="context-menu-section">
-        <label class="context-menu-label">Opacity</label>
-        <input type="range" class="opacity-slider" min="0" max="100" value="${Math.round(layer.opacity * 100)}">
-        <span class="opacity-value">${Math.round(layer.opacity * 100)}%</span>
+      <div class="context-menu-section" role="group" aria-labelledby="${opacitySliderId}-label">
+        <label class="context-menu-label" id="${opacitySliderId}-label" for="${opacitySliderId}">Opacity</label>
+        <input type="range" class="opacity-slider" id="${opacitySliderId}" min="0" max="100" value="${Math.round(layer.opacity * 100)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(layer.opacity * 100)}" aria-valuetext="${Math.round(layer.opacity * 100)} percent">
+        <span class="opacity-value" aria-hidden="true">${Math.round(layer.opacity * 100)}%</span>
       </div>
-      <div class="context-menu-section">
-        <label class="context-menu-label">Blend Mode</label>
-        <select class="blend-mode-select">
+      <div class="context-menu-section" role="group" aria-labelledby="${blendModeId}-label">
+        <label class="context-menu-label" id="${blendModeId}-label" for="${blendModeId}">Blend Mode</label>
+        <select class="blend-mode-select" id="${blendModeId}">
           <option value="normal" ${layer.blendMode === 'normal' ? 'selected' : ''}>Normal</option>
           <option value="multiply" ${layer.blendMode === 'multiply' ? 'selected' : ''}>Multiply</option>
           <option value="screen" ${layer.blendMode === 'screen' ? 'selected' : ''}>Screen</option>
@@ -243,15 +259,15 @@ export class LayerItem extends Component {
           <option value="difference" ${layer.blendMode === 'difference' ? 'selected' : ''}>Difference</option>
         </select>
       </div>
-      <div class="context-menu-divider"></div>
-      <button class="context-menu-item" data-action="duplicate">Duplicate Layer</button>
-      <button class="context-menu-item" data-action="rename">Rename Layer</button>
-      <div class="context-menu-divider"></div>
-      <button class="context-menu-item" data-action="move-up">Move Up</button>
-      <button class="context-menu-item" data-action="move-down">Move Down</button>
-      <button class="context-menu-item" data-action="merge-down">Merge Down</button>
-      <div class="context-menu-divider"></div>
-      <button class="context-menu-item context-menu-item--danger" data-action="delete">Delete Layer</button>
+      <div class="context-menu-divider" role="separator"></div>
+      <button class="context-menu-item" role="menuitem" data-action="duplicate">Duplicate Layer</button>
+      <button class="context-menu-item" role="menuitem" data-action="rename">Rename Layer</button>
+      <div class="context-menu-divider" role="separator"></div>
+      <button class="context-menu-item" role="menuitem" data-action="move-up">Move Up</button>
+      <button class="context-menu-item" role="menuitem" data-action="move-down">Move Down</button>
+      <button class="context-menu-item" role="menuitem" data-action="merge-down">Merge Down</button>
+      <div class="context-menu-divider" role="separator"></div>
+      <button class="context-menu-item context-menu-item--danger" role="menuitem" data-action="delete">Delete Layer</button>
     `;
 
     // Position menu
