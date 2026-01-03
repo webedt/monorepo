@@ -246,14 +246,14 @@ export class MidiPianoRoll extends Component {
   private setupEventListeners(): void {
     // Click to seek
     if (this.options.clickToSeek && this.scrollContainer) {
-      this.scrollContainer.addEventListener('click', (e) => {
-        const rect = this.scrollContainer!.getBoundingClientRect();
-        const x = e.clientX - rect.left + this.scrollContainer!.scrollLeft;
+      const container = this.scrollContainer;
+      container.addEventListener('click', (e) => {
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left + container.scrollLeft;
         const time = x / this.options.pixelsPerSecond;
         midiStore.seek(time);
       });
     }
-
   }
 
   private updatePlayhead(): void {

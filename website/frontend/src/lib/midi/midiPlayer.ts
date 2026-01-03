@@ -220,9 +220,9 @@ export class MidiPlayer {
   seek(time: number): void {
     const clampedTime = Math.max(0, Math.min(time, this.state.duration));
 
-    if (this.state.isPlaying && !this.state.isPaused) {
+    if (this.state.isPlaying && !this.state.isPaused && this.audioContext) {
       this.stopAllNotes();
-      this.playbackStartTime = this.audioContext!.currentTime - clampedTime / this.options.speed;
+      this.playbackStartTime = this.audioContext.currentTime - clampedTime / this.options.speed;
       this.scheduleNotes(clampedTime);
     } else {
       this.pauseTime = clampedTime;
@@ -251,11 +251,11 @@ export class MidiPlayer {
    */
   setSpeed(speed: number): void {
     const clampedSpeed = Math.max(0.25, Math.min(4, speed));
-    if (this.state.isPlaying && !this.state.isPaused) {
+    if (this.state.isPlaying && !this.state.isPaused && this.audioContext) {
       const currentTime = this.state.currentTime;
       this.options.speed = clampedSpeed;
       this.stopAllNotes();
-      this.playbackStartTime = this.audioContext!.currentTime - currentTime / this.options.speed;
+      this.playbackStartTime = this.audioContext.currentTime - currentTime / this.options.speed;
       this.scheduleNotes(currentTime);
     } else {
       this.options.speed = clampedSpeed;
