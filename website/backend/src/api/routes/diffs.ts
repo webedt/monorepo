@@ -10,7 +10,14 @@ import { Octokit } from '@octokit/rest';
 import { requireAuth } from '../middleware/auth.js';
 import { validatePathParam } from '../middleware/pathValidation.js';
 import { standardRateLimiter } from '../middleware/rateLimit.js';
-import { logger, parseDiff } from '@webedt/shared';
+import {
+  logger,
+  parseDiff,
+  BadRequestError,
+  NotFoundError,
+  InternalServerError,
+} from '@webedt/shared';
+import { asyncHandler } from '../middleware/domainErrorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import type { ParsedDiff } from '@webedt/shared';
 
@@ -92,22 +99,21 @@ function normalizeFileStatus(status: string): FileChange['status'] {
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: Request, res: Response) => {
+router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { owner, repo, base, head } = req.params;
+
+  if (!authReq.user?.githubAccessToken) {
+    throw BadRequestError.missingConfiguration('GitHub');
+  }
+
+  logger.info(`Getting diff comparison for ${owner}/${repo}: ${base}...${head}`, {
+    component: 'Diffs',
+  });
+
+  const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
   try {
-    const authReq = req as AuthRequest;
-    const { owner, repo, base, head } = req.params;
-
-    if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    logger.info(`Getting diff comparison for ${owner}/${repo}: ${base}...${head}`, {
-      component: 'Diffs',
-    });
-
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-
     // Get comparison between branches
     const { data: comparison } = await octokit.repos.compareCommits({
       owner,
@@ -174,13 +180,12 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: R
     logger.error('Failed to get diff comparison', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
-      return;
+      throw NotFoundError.forResource('Repository or branch');
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get diff comparison' });
+    throw InternalServerError.operationFailed('get diff comparison', err.message);
   }
-});
+}));
 
 /**
  * @openapi
@@ -220,18 +225,17 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: R
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (req: Request, res: Response) => {
+router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { owner, repo, base, head } = req.params;
+
+  if (!authReq.user?.githubAccessToken) {
+    throw BadRequestError.missingConfiguration('GitHub');
+  }
+
+  const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
   try {
-    const authReq = req as AuthRequest;
-    const { owner, repo, base, head } = req.params;
-
-    if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-
     const { data: comparison } = await octokit.repos.compareCommits({
       owner,
       repo,
@@ -264,13 +268,12 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
     logger.error('Failed to get changed files', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
-      return;
+      throw NotFoundError.forResource('Repository or branch');
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get changed files' });
+    throw InternalServerError.operationFailed('get changed files', err.message);
   }
-});
+}));
 
 /**
  * @openapi
@@ -315,24 +318,22 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validatePathParam(), async (req: Request, res: Response) => {
+router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validatePathParam(), asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { owner, repo, base, head } = req.params;
+  const filePath = req.params[0];
+
+  if (!authReq.user?.githubAccessToken) {
+    throw BadRequestError.missingConfiguration('GitHub');
+  }
+
+  if (!filePath) {
+    throw new BadRequestError('File path is required');
+  }
+
+  const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
   try {
-    const authReq = req as AuthRequest;
-    const { owner, repo, base, head } = req.params;
-    const filePath = req.params[0];
-
-    if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    if (!filePath) {
-      res.status(400).json({ success: false, error: 'File path is required' });
-      return;
-    }
-
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-
     // Get comparison between branches
     const { data: comparison } = await octokit.repos.compareCommits({
       owner,
@@ -345,8 +346,7 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validateP
     const file = comparison.files?.find(f => f.filename === filePath);
 
     if (!file) {
-      res.status(404).json({ success: false, error: 'File not found in diff' });
-      return;
+      throw new NotFoundError('File not found in diff', 'file', { filePath });
     }
 
     // Build raw diff for this file
@@ -375,17 +375,21 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validateP
       },
     });
   } catch (error: unknown) {
+    // Re-throw domain errors
+    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+      throw error;
+    }
+
     const err = error as { status?: number; message?: string };
     logger.error('Failed to get file diff', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
-      return;
+      throw NotFoundError.forResource('Repository or branch');
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get file diff' });
+    throw InternalServerError.operationFailed('get file diff', err.message);
   }
-});
+}));
 
 /**
  * @openapi
@@ -425,18 +429,17 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validateP
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, async (req: Request, res: Response) => {
+router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { owner, repo, base, head } = req.params;
+
+  if (!authReq.user?.githubAccessToken) {
+    throw BadRequestError.missingConfiguration('GitHub');
+  }
+
+  const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
   try {
-    const authReq = req as AuthRequest;
-    const { owner, repo, base, head } = req.params;
-
-    if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({ success: false, error: 'GitHub not connected' });
-      return;
-    }
-
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-
     const { data: comparison } = await octokit.repos.compareCommits({
       owner,
       repo,
@@ -466,12 +469,11 @@ router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, async (req: Req
     logger.error('Failed to get diff stats', error as Error, { component: 'Diffs' });
 
     if (err.status === 404) {
-      res.status(404).json({ success: false, error: 'Repository or branch not found' });
-      return;
+      throw NotFoundError.forResource('Repository or branch');
     }
 
-    res.status(500).json({ success: false, error: err.message || 'Failed to get diff stats' });
+    throw InternalServerError.operationFailed('get diff stats', err.message);
   }
-});
+}));
 
 export default router;

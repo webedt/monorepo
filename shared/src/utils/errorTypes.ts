@@ -166,7 +166,13 @@ export type DomainErrorType =
   | 'AUTHENTICATION_ERROR'
   | 'AUTHORIZATION_ERROR'
   | 'RATE_LIMIT_ERROR'
-  | 'CONFLICT_ERROR';
+  | 'CONFLICT_ERROR'
+  | 'NOT_FOUND_ERROR'
+  | 'BAD_REQUEST_ERROR'
+  | 'INTERNAL_SERVER_ERROR'
+  | 'SERVICE_UNAVAILABLE_ERROR'
+  | 'PAYLOAD_TOO_LARGE_ERROR'
+  | 'BAD_GATEWAY_ERROR';
 
 /**
  * Base class for domain-specific errors.
@@ -529,6 +535,294 @@ export function isConflictError(error: unknown): error is ConflictError {
 }
 
 /**
+ * Not found error for missing resources.
+ *
+ * Use when:
+ * - Requested resource does not exist
+ * - Entity lookup by ID returns null
+ * - Route parameter references non-existent item
+ *
+ * @example
+ * throw new NotFoundError('User not found', 'user', { userId: '123' });
+ * throw NotFoundError.forResource('Session', sessionId);
+ * throw NotFoundError.forEntity('game');
+ */
+export class NotFoundError extends DomainError {
+  readonly type = 'NOT_FOUND_ERROR' as const;
+  readonly statusCode = 404;
+
+  constructor(
+    message: string,
+    public readonly resource?: string,
+    context?: Record<string, unknown>
+  ) {
+    super(message, { ...context, ...(resource && { resource }) });
+  }
+
+  /**
+   * Create a NotFoundError for a specific resource
+   */
+  static forResource(resourceType: string, resourceId?: string): NotFoundError {
+    const message = resourceId
+      ? `${resourceType} '${resourceId}' not found`
+      : `${resourceType} not found`;
+    return new NotFoundError(message, resourceType.toLowerCase(), { resourceId });
+  }
+
+  /**
+   * Create a NotFoundError for a generic entity
+   */
+  static forEntity(entityName: string): NotFoundError {
+    return new NotFoundError(`${entityName} not found`, entityName.toLowerCase());
+  }
+}
+
+/**
+ * Type guard for NotFoundError
+ */
+export function isNotFoundError(error: unknown): error is NotFoundError {
+  return error instanceof NotFoundError;
+}
+
+/**
+ * Bad request error for general client errors.
+ *
+ * Use when:
+ * - Request is malformed but not a validation error
+ * - Missing required configuration
+ * - Invalid state for operation
+ *
+ * @example
+ * throw new BadRequestError('GitHub not connected');
+ * throw new BadRequestError('Invalid operation', { operation: 'delete', reason: 'locked' });
+ */
+export class BadRequestError extends DomainError {
+  readonly type = 'BAD_REQUEST_ERROR' as const;
+  readonly statusCode = 400;
+
+  constructor(
+    message: string,
+    context?: Record<string, unknown>
+  ) {
+    super(message, context);
+  }
+
+  /**
+   * Create a BadRequestError for missing configuration
+   */
+  static missingConfiguration(configName: string): BadRequestError {
+    return new BadRequestError(`${configName} not configured`, { configName });
+  }
+
+  /**
+   * Create a BadRequestError for invalid operation
+   */
+  static invalidOperation(operation: string, reason?: string): BadRequestError {
+    const message = reason
+      ? `Cannot ${operation}: ${reason}`
+      : `Invalid operation: ${operation}`;
+    return new BadRequestError(message, { operation, reason });
+  }
+}
+
+/**
+ * Type guard for BadRequestError
+ */
+export function isBadRequestError(error: unknown): error is BadRequestError {
+  return error instanceof BadRequestError;
+}
+
+/**
+ * Internal server error for unexpected failures.
+ *
+ * Use when:
+ * - Unexpected exception occurs
+ * - External service fails unexpectedly
+ * - Database operation fails
+ *
+ * @example
+ * throw new InternalServerError('Failed to process request');
+ * throw new InternalServerError('Database operation failed', { operation: 'insert' });
+ */
+export class InternalServerError extends DomainError {
+  readonly type = 'INTERNAL_SERVER_ERROR' as const;
+  readonly statusCode = 500;
+
+  constructor(
+    message = 'Internal server error',
+    context?: Record<string, unknown>
+  ) {
+    super(message, context);
+  }
+
+  /**
+   * Create an InternalServerError for operation failure
+   */
+  static operationFailed(operation: string, details?: string): InternalServerError {
+    const message = details
+      ? `Failed to ${operation}: ${details}`
+      : `Failed to ${operation}`;
+    return new InternalServerError(message, { operation });
+  }
+}
+
+/**
+ * Type guard for InternalServerError
+ */
+export function isInternalServerError(error: unknown): error is InternalServerError {
+  return error instanceof InternalServerError;
+}
+
+/**
+ * Service unavailable error for temporary service issues.
+ *
+ * Use when:
+ * - External service is temporarily unavailable
+ * - System is overloaded
+ * - Maintenance mode is active
+ *
+ * @example
+ * throw new ServiceUnavailableError('AI service temporarily unavailable', 60);
+ * throw ServiceUnavailableError.maintenance('Scheduled maintenance in progress');
+ */
+export class ServiceUnavailableError extends DomainError {
+  readonly type = 'SERVICE_UNAVAILABLE_ERROR' as const;
+  readonly statusCode = 503;
+
+  constructor(
+    message: string,
+    public readonly retryAfterSeconds?: number,
+    context?: Record<string, unknown>
+  ) {
+    super(message, { ...context, ...(retryAfterSeconds && { retryAfterSeconds }) });
+  }
+
+  /**
+   * Create a ServiceUnavailableError for a service being down
+   */
+  static serviceDown(serviceName: string, retryAfterSeconds?: number): ServiceUnavailableError {
+    return new ServiceUnavailableError(
+      `${serviceName} is temporarily unavailable`,
+      retryAfterSeconds,
+      { serviceName }
+    );
+  }
+
+  /**
+   * Create a ServiceUnavailableError for maintenance
+   */
+  static maintenance(message?: string): ServiceUnavailableError {
+    return new ServiceUnavailableError(
+      message || 'Service is under maintenance',
+      undefined,
+      { reason: 'maintenance' }
+    );
+  }
+}
+
+/**
+ * Type guard for ServiceUnavailableError
+ */
+export function isServiceUnavailableError(error: unknown): error is ServiceUnavailableError {
+  return error instanceof ServiceUnavailableError;
+}
+
+/**
+ * Payload too large error for oversized requests.
+ *
+ * Use when:
+ * - File upload exceeds size limit
+ * - Request body is too large
+ * - Storage quota exceeded
+ *
+ * @example
+ * throw new PayloadTooLargeError('File size exceeds 10MB limit', 10 * 1024 * 1024);
+ * throw PayloadTooLargeError.fileTooBig('image.png', 5 * 1024 * 1024, 1024 * 1024);
+ */
+export class PayloadTooLargeError extends DomainError {
+  readonly type = 'PAYLOAD_TOO_LARGE_ERROR' as const;
+  readonly statusCode = 413;
+
+  constructor(
+    message: string,
+    public readonly maxSize?: number,
+    context?: Record<string, unknown>
+  ) {
+    super(message, { ...context, ...(maxSize && { maxSize }) });
+  }
+
+  /**
+   * Create a PayloadTooLargeError for file upload
+   */
+  static fileTooBig(filename: string, maxSize: number, actualSize?: number): PayloadTooLargeError {
+    const maxSizeMB = (maxSize / (1024 * 1024)).toFixed(1);
+    return new PayloadTooLargeError(
+      `File '${filename}' exceeds maximum size of ${maxSizeMB}MB`,
+      maxSize,
+      { filename, actualSize }
+    );
+  }
+
+  /**
+   * Create a PayloadTooLargeError for quota exceeded
+   */
+  static quotaExceeded(quotaType: string, limit: number): PayloadTooLargeError {
+    return new PayloadTooLargeError(
+      `${quotaType} quota exceeded`,
+      limit,
+      { quotaType }
+    );
+  }
+}
+
+/**
+ * Type guard for PayloadTooLargeError
+ */
+export function isPayloadTooLargeError(error: unknown): error is PayloadTooLargeError {
+  return error instanceof PayloadTooLargeError;
+}
+
+/**
+ * Bad gateway error for upstream service failures.
+ *
+ * Use when:
+ * - Proxy or gateway receives invalid response from upstream
+ * - External API returns unexpected error
+ *
+ * @example
+ * throw new BadGatewayError('GitHub API returned invalid response');
+ * throw BadGatewayError.upstreamFailure('OpenAI API');
+ */
+export class BadGatewayError extends DomainError {
+  readonly type = 'BAD_GATEWAY_ERROR' as const;
+  readonly statusCode = 502;
+
+  constructor(
+    message: string,
+    context?: Record<string, unknown>
+  ) {
+    super(message, context);
+  }
+
+  /**
+   * Create a BadGatewayError for upstream service failure
+   */
+  static upstreamFailure(serviceName: string, details?: string): BadGatewayError {
+    const message = details
+      ? `${serviceName} error: ${details}`
+      : `${serviceName} returned an invalid response`;
+    return new BadGatewayError(message, { serviceName });
+  }
+}
+
+/**
+ * Type guard for BadGatewayError
+ */
+export function isBadGatewayError(error: unknown): error is BadGatewayError {
+  return error instanceof BadGatewayError;
+}
+
+/**
  * Union type of all domain errors.
  * Use for exhaustive switch statements on error types.
  *
@@ -537,15 +831,28 @@ export function isConflictError(error: unknown): error is ConflictError {
  *   switch (error.type) {
  *     case 'VALIDATION_ERROR':
  *       return res.status(400).json({ error: error.message, field: error.field });
+ *     case 'BAD_REQUEST_ERROR':
+ *       return res.status(400).json({ error: error.message });
  *     case 'AUTHENTICATION_ERROR':
  *       return res.status(401).json({ error: error.message });
  *     case 'AUTHORIZATION_ERROR':
  *       return res.status(403).json({ error: error.message });
+ *     case 'NOT_FOUND_ERROR':
+ *       return res.status(404).json({ error: error.message });
+ *     case 'CONFLICT_ERROR':
+ *       return res.status(409).json({ error: error.message });
+ *     case 'PAYLOAD_TOO_LARGE_ERROR':
+ *       return res.status(413).json({ error: error.message });
  *     case 'RATE_LIMIT_ERROR':
  *       res.setHeader('Retry-After', error.retryAfterSeconds || 60);
  *       return res.status(429).json({ error: error.message });
- *     case 'CONFLICT_ERROR':
- *       return res.status(409).json({ error: error.message });
+ *     case 'INTERNAL_SERVER_ERROR':
+ *       return res.status(500).json({ error: error.message });
+ *     case 'BAD_GATEWAY_ERROR':
+ *       return res.status(502).json({ error: error.message });
+ *     case 'SERVICE_UNAVAILABLE_ERROR':
+ *       res.setHeader('Retry-After', error.retryAfterSeconds || 60);
+ *       return res.status(503).json({ error: error.message });
  *     default:
  *       const _exhaustive: never = error;
  *       return res.status(500).json({ error: 'Unknown error' });
@@ -557,7 +864,13 @@ export type AnyDomainError =
   | AuthenticationError
   | AuthorizationError
   | RateLimitError
-  | ConflictError;
+  | ConflictError
+  | NotFoundError
+  | BadRequestError
+  | InternalServerError
+  | ServiceUnavailableError
+  | PayloadTooLargeError
+  | BadGatewayError;
 
 /**
  * Type guard to check if an error is any domain error
@@ -568,7 +881,13 @@ export function isDomainError(error: unknown): error is AnyDomainError {
     isAuthenticationError(error) ||
     isAuthorizationError(error) ||
     isRateLimitError(error) ||
-    isConflictError(error)
+    isConflictError(error) ||
+    isNotFoundError(error) ||
+    isBadRequestError(error) ||
+    isInternalServerError(error) ||
+    isServiceUnavailableError(error) ||
+    isPayloadTooLargeError(error) ||
+    isBadGatewayError(error)
   );
 }
 
