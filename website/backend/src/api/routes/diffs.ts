@@ -16,6 +16,7 @@ import {
   BadRequestError,
   NotFoundError,
   InternalServerError,
+  isDomainError,
 } from '@webedt/shared';
 import { asyncHandler } from '../middleware/domainErrorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
@@ -383,8 +384,8 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validateP
       },
     });
   } catch (error: unknown) {
-    // Re-throw domain errors
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    // Re-throw any domain errors (NotFoundError, BadRequestError, etc.)
+    if (isDomainError(error)) {
       throw error;
     }
 

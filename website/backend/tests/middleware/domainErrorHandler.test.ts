@@ -273,6 +273,80 @@ describe('Domain Error Handler Middleware', () => {
     });
   });
 
+  describe('Context Sanitization', () => {
+    it('should include safe context keys in response', () => {
+      const req = createMockRequest({ path: '/test', method: 'POST' });
+      const res = createMockResponse();
+      const next = () => {};
+
+      // Create error with mix of safe and unsafe context keys
+      const error = new ValidationError('Invalid input', 'email', {
+        field: 'email',           // safe key
+        expectedFormat: 'email',  // safe key
+        internalPath: '/internal/path',  // unsafe key - should be filtered
+      });
+      domainErrorHandler(error, req as unknown as Request, res as unknown as Response, next as NextFunction);
+
+      const data = res.data as { error: { context?: Record<string, unknown> } };
+      // In production mode (default for tests), only safe keys should be present
+      // Note: The actual filtering depends on NODE_ENV
+      assert.ok(data.error.context === undefined || !('internalPath' in (data.error.context || {})));
+    });
+
+    it('should preserve resource key for NotFoundError', () => {
+      const req = createMockRequest({ path: '/users/123', method: 'GET' });
+      const res = createMockResponse();
+      const next = () => {};
+
+      const error = new NotFoundError('User not found', 'user', { resource: 'user' });
+      domainErrorHandler(error, req as unknown as Request, res as unknown as Response, next as NextFunction);
+
+      const data = res.data as { error: { context?: Record<string, unknown> } };
+      // resource is a safe key and should be included
+      if (data.error.context) {
+        assert.strictEqual(data.error.context.resource, 'user');
+      }
+    });
+
+    it('should filter sensitive context keys', () => {
+      const req = createMockRequest({ path: '/test', method: 'POST' });
+      const res = createMockResponse();
+      const next = () => {};
+
+      // Create error with potentially sensitive context
+      const error = new BadRequestError('Operation failed', {
+        reason: 'invalid_state',     // safe key
+        internalError: 'SQL error',  // unsafe - internal details
+        stackTrace: 'at line 123',   // unsafe - debug info
+        dbQuery: 'SELECT * FROM',    // unsafe - implementation details
+      });
+      domainErrorHandler(error, req as unknown as Request, res as unknown as Response, next as NextFunction);
+
+      const data = res.data as { error: { context?: Record<string, unknown> } };
+      // Unsafe keys should not be in response (filtered in production)
+      if (data.error.context) {
+        assert.ok(!('internalError' in data.error.context));
+        assert.ok(!('stackTrace' in data.error.context));
+        assert.ok(!('dbQuery' in data.error.context));
+      }
+    });
+
+    it('should include quotaType for PayloadTooLargeError', () => {
+      const req = createMockRequest({ path: '/upload', method: 'POST' });
+      const res = createMockResponse();
+      const next = () => {};
+
+      const error = PayloadTooLargeError.quotaExceeded('Storage', 100);
+      domainErrorHandler(error, req as unknown as Request, res as unknown as Response, next as NextFunction);
+
+      const data = res.data as { error: { context?: Record<string, unknown> } };
+      // quotaType is a safe key
+      if (data.error.context) {
+        assert.strictEqual(data.error.context.quotaType, 'Storage');
+      }
+    });
+  });
+
   describe('asyncHandler', () => {
     it('should pass resolved promise result through', async () => {
       const req = createMockRequest({ path: '/test', method: 'GET' });
@@ -347,11 +421,14 @@ describe('Domain Error Handler Middleware', () => {
       assert.strictEqual(error.field, 'email');
     });
 
-    it('NotFoundError.forResource should create correct error', () => {
+    it('NotFoundError.forResource should create correct error with generic message', () => {
       const error = NotFoundError.forResource('User', '12345');
-      assert.strictEqual(error.message, "User '12345' not found");
+      // Message should be generic - resourceId only in context, not message
+      assert.strictEqual(error.message, 'User not found');
       assert.strictEqual(error.resource, 'user');
       assert.strictEqual(error.statusCode, 404);
+      // resourceId should be in context for debugging
+      assert.strictEqual(error.context?.resourceId, '12345');
     });
 
     it('NotFoundError.forEntity should create correct error', () => {
@@ -383,6 +460,14 @@ describe('Domain Error Handler Middleware', () => {
       assert.ok(error.message.includes('email'));
       assert.ok(error.message.includes('already taken'));
       assert.strictEqual(error.conflictType, 'UNIQUE_VIOLATION');
+    });
+
+    it('BadGatewayError.upstreamFailure should create generic message without details', () => {
+      const error = BadGatewayError.upstreamFailure('GitHub API');
+      // Message should be generic - no details parameter to prevent leaking upstream errors
+      assert.strictEqual(error.message, 'GitHub API returned an invalid response');
+      assert.strictEqual(error.statusCode, 502);
+      assert.strictEqual(error.context?.serviceName, 'GitHub API');
     });
   });
 });

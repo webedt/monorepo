@@ -19,8 +19,6 @@ import {
   isServiceUnavailableError,
   isPayloadTooLargeError,
   isBadGatewayError,
-  RateLimitError,
-  ServiceUnavailableError,
   NODE_ENV,
 } from '@webedt/shared';
 import type { AnyDomainError } from '@webedt/shared';
@@ -166,18 +164,12 @@ export const domainErrorHandler: ErrorRequestHandler = (
   logDomainError(err, req);
 
   // Set Retry-After header for rate limit and service unavailable errors
-  if (isRateLimitError(err)) {
-    const rateLimitErr = err as RateLimitError;
-    if (rateLimitErr.retryAfterSeconds) {
-      res.setHeader('Retry-After', rateLimitErr.retryAfterSeconds.toString());
-    }
+  if (isRateLimitError(err) && err.retryAfterSeconds) {
+    res.setHeader('Retry-After', err.retryAfterSeconds.toString());
   }
 
-  if (isServiceUnavailableError(err)) {
-    const serviceErr = err as ServiceUnavailableError;
-    if (serviceErr.retryAfterSeconds) {
-      res.setHeader('Retry-After', serviceErr.retryAfterSeconds.toString());
-    }
+  if (isServiceUnavailableError(err) && err.retryAfterSeconds) {
+    res.setHeader('Retry-After', err.retryAfterSeconds.toString());
   }
 
   // Return response with appropriate status code

@@ -560,13 +560,17 @@ export class NotFoundError extends DomainError {
   }
 
   /**
-   * Create a NotFoundError for a specific resource
+   * Create a NotFoundError for a specific resource.
+   *
+   * Note: The resourceId is only included in context (which is sanitized in production),
+   * not in the message, to prevent leaking sensitive identifiers to clients.
    */
   static forResource(resourceType: string, resourceId?: string): NotFoundError {
-    const message = resourceId
-      ? `${resourceType} '${resourceId}' not found`
-      : `${resourceType} not found`;
-    return new NotFoundError(message, resourceType.toLowerCase(), { resourceId });
+    return new NotFoundError(
+      `${resourceType} not found`,
+      resourceType.toLowerCase(),
+      resourceId ? { resourceId } : undefined
+    );
   }
 
   /**
@@ -817,13 +821,16 @@ export class BadGatewayError extends DomainError {
   }
 
   /**
-   * Create a BadGatewayError for upstream service failure
+   * Create a BadGatewayError for upstream service failure.
+   *
+   * Note: Do not pass error details from upstream services as they could
+   * leak sensitive implementation information to clients.
    */
-  static upstreamFailure(serviceName: string, details?: string): BadGatewayError {
-    const message = details
-      ? `${serviceName} error: ${details}`
-      : `${serviceName} returned an invalid response`;
-    return new BadGatewayError(message, { serviceName });
+  static upstreamFailure(serviceName: string): BadGatewayError {
+    return new BadGatewayError(
+      `${serviceName} returned an invalid response`,
+      { serviceName }
+    );
   }
 }
 
