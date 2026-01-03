@@ -8,10 +8,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
-import type { AGitHubClient } from './AGitHubClient.js';
 import { GitHelper } from './gitHelper.js';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 import { generateSessionPath, parseRepoUrl } from '../utils/helpers/sessionPathHelper.js';
+
+import type { AGitHubClient } from './AGitHubClient.js';
 
 // ============================================================================
 // Types
@@ -992,12 +994,12 @@ export class GitHubOperations {
   private getMetadata(sessionRoot: string): SessionMetadata | null {
     const metadataPath = path.join(sessionRoot, '.session-metadata.json');
     if (fs.existsSync(metadataPath)) {
-      try {
-        const content = fs.readFileSync(metadataPath, 'utf-8');
-        return JSON.parse(content);
-      } catch {
-        return null;
-      }
+      const content = fs.readFileSync(metadataPath, 'utf-8');
+      return safeJsonParse<SessionMetadata>(
+        content,
+        null as unknown as SessionMetadata,
+        { component: 'GitHubOperations', logErrors: true, logLevel: 'debug', context: { path: metadataPath } }
+      );
     }
     return null;
   }

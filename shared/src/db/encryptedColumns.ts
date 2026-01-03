@@ -18,6 +18,7 @@
  */
 
 import { customType } from 'drizzle-orm/pg-core';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 
 import {
   safeEncrypt,
@@ -114,11 +115,12 @@ export function encryptedJsonColumn<T>(columnName: string) {
           return safeDecryptJson<T>(value);
         }
         // Try to parse as JSON string (shouldn't happen but handle gracefully)
-        try {
-          return JSON.parse(value) as T;
-        } catch {
-          return null;
-        }
+        const parseResult = safeJsonParse<T>(value, {
+          component: 'EncryptedColumns',
+          logErrors: true,
+          logLevel: 'debug',
+        });
+        return parseResult.success ? parseResult.data : null;
       }
       // Handle plain JSON object (legacy unencrypted data or encryption disabled)
       if (typeof value === 'object') {

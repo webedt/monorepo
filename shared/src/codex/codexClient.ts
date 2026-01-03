@@ -1,5 +1,9 @@
 import { randomUUID } from 'crypto';
 import { ACodexClient } from './ACodexClient.js';
+import { CodexError } from './types.js';
+import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
+
 import type { CodexAuth } from '../auth/codexAuth.js';
 import type { CodexClientConfig } from './types.js';
 import type { CreateCodexSessionParams } from './types.js';
@@ -12,8 +16,6 @@ import type { CodexPollOptions } from './types.js';
 import type { CodexContentBlock } from './types.js';
 import type { CodexMessage } from './types.js';
 import type { OpenAIStreamEvent } from './types.js';
-import { CodexError } from './types.js';
-import { logger } from '../utils/logging/logger.js';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_MODEL = 'gpt-4o';
@@ -408,30 +410,30 @@ export class CodexClient extends ACodexClient {
           const data = line.slice(6); // Remove 'data: ' prefix
           if (data === '[DONE]') continue;
 
-          try {
-            const event = JSON.parse(data) as OpenAIStreamEvent;
-            await this.handleStreamEvent(event, session.id, onEvent);
+          const parseResult = safeJsonParse<OpenAIStreamEvent>(data, {
+            component: 'CodexClient',
+            logErrors: true,
+            logLevel: 'debug',
+            context: { sessionId: session.id },
+          });
 
-            // Collect output text
-            if (event.delta) {
-              fullOutput += event.delta;
-            }
+          if (!parseResult.success) continue;
 
-            // Track completion and token usage
-            if (event.response?.status === 'completed') {
-              numTurns++;
-              if (event.response.usage) {
-                inputTokens += event.response.usage.input_tokens;
-                outputTokens += event.response.usage.output_tokens;
-              }
+          const event = parseResult.data;
+          await this.handleStreamEvent(event, session.id, onEvent);
+
+          // Collect output text
+          if (event.delta) {
+            fullOutput += event.delta;
+          }
+
+          // Track completion and token usage
+          if (event.response?.status === 'completed') {
+            numTurns++;
+            if (event.response.usage) {
+              inputTokens += event.response.usage.input_tokens;
+              outputTokens += event.response.usage.output_tokens;
             }
-          } catch (parseError) {
-            // Log parse errors for debugging malformed chunks
-            logger.debug('Failed to parse stream chunk', {
-              component: 'CodexClient',
-              sessionId: session.id,
-              error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
-            });
           }
         }
       }

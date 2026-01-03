@@ -10,6 +10,8 @@ import { Lucia } from 'lucia';
 import { NodePostgresAdapter } from '@lucia-auth/adapter-postgresql';
 import { pool } from '../db/index.js';
 import { isProduction } from '../config/env.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
+
 import type { ClaudeAuth } from './claudeAuth.js';
 import type { CodexAuth } from './codexAuth.js';
 
@@ -36,12 +38,13 @@ function safeParseJsonAuth<T>(data: string | T | null | undefined): T | null {
   if (!data) return null;
   if (typeof data !== 'string') return data as T;
 
-  try {
-    return JSON.parse(data) as T;
-  } catch (error) {
-    console.error('[Auth] Failed to parse auth data:', error);
-    return null;
-  }
+  const result = safeJsonParse<T>(data, {
+    component: 'LuciaAuth',
+    logErrors: true,
+    logLevel: 'error',
+  });
+
+  return result.success ? result.data : null;
 }
 
 export const lucia = new Lucia(adapter, {

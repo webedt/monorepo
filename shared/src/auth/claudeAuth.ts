@@ -9,6 +9,7 @@ import { homedir, platform, userInfo } from 'os';
 import { join } from 'path';
 import { desc } from 'drizzle-orm';
 import { CLAUDE_ACCESS_TOKEN } from '../config/env.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 import { ATokenRefreshProvider } from './ATokenRefreshProvider.js';
 
 import type { OAuthTokenResponse } from './ATokenRefreshProvider.js';
@@ -152,12 +153,15 @@ function getCredentialsFromKeychain(): { accessToken: string; refreshToken?: str
     ).trim();
 
     if (result) {
-      const credentials = JSON.parse(result);
-      if (credentials.claudeAiOauth?.accessToken) {
+      const parseResult = safeJsonParse<{ claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number } }>(
+        result,
+        { component: 'ClaudeAuth', logErrors: true, logLevel: 'debug' }
+      );
+      if (parseResult.success && parseResult.data.claudeAiOauth?.accessToken) {
         return {
-          accessToken: credentials.claudeAiOauth.accessToken,
-          refreshToken: credentials.claudeAiOauth.refreshToken,
-          expiresAt: credentials.claudeAiOauth.expiresAt,
+          accessToken: parseResult.data.claudeAiOauth.accessToken,
+          refreshToken: parseResult.data.claudeAiOauth.refreshToken,
+          expiresAt: parseResult.data.claudeAiOauth.expiresAt,
         };
       }
     }
@@ -213,24 +217,21 @@ export async function getClaudeCredentials(
   }
 
   // 3. Credentials file (~/.claude/.credentials.json)
-  try {
-    if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
-      const credentialsContent = readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8');
-      const credentials = JSON.parse(credentialsContent);
+  if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
+    const credentialsContent = readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8');
+    const parseResult = safeJsonParse<{ claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number } }>(
+      credentialsContent,
+      { component: 'ClaudeAuth', logErrors: true, logLevel: 'debug', context: { path: CLAUDE_CREDENTIALS_PATH } }
+    );
 
-      if (credentials.claudeAiOauth?.accessToken) {
-        return {
-          accessToken: credentials.claudeAiOauth.accessToken,
-          refreshToken: credentials.claudeAiOauth.refreshToken,
-          expiresAt: credentials.claudeAiOauth.expiresAt,
-          source: 'credentials-file',
-        };
-      }
+    if (parseResult.success && parseResult.data.claudeAiOauth?.accessToken) {
+      return {
+        accessToken: parseResult.data.claudeAiOauth.accessToken,
+        refreshToken: parseResult.data.claudeAiOauth.refreshToken,
+        expiresAt: parseResult.data.claudeAiOauth.expiresAt,
+        source: 'credentials-file',
+      };
     }
-  } catch (error) {
-    // File doesn't exist or is invalid - log for debugging, continue to next source
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.debug('getClaudeCredentials: Failed to read credentials file:', message);
   }
 
   // 4. macOS Keychain (Claude Code stores credentials here)

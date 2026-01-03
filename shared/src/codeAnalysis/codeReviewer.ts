@@ -5,6 +5,7 @@
 
 import { Octokit } from '@octokit/rest';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 
 import type { ClaudeRemoteAuth } from '../claudeWeb/types.js';
@@ -317,40 +318,40 @@ ${diff}
   }
 
   private parseReviewOutput(output: string): ReviewResult {
-    try {
-      const jsonMatch = output.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return {
-          approved: false,
-          issues: [],
-          summary: 'Failed to parse review output',
-        };
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      return {
-        approved: Boolean(parsed.approved),
-        summary: parsed.summary || '',
-        issues: (parsed.issues || []).map((issue: ReviewIssue) => ({
-          severity: issue.severity || 'info',
-          file: issue.file,
-          line: issue.line,
-          message: issue.message || '',
-          suggestion: issue.suggestion,
-        })),
-      };
-    } catch (error) {
-      logger.warn('Failed to parse review output', {
-        component: 'CodeReviewerService',
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
       return {
         approved: false,
         issues: [],
         summary: 'Failed to parse review output',
       };
     }
+
+    const parseResult = safeJsonParse<{ approved?: boolean; summary?: string; issues?: ReviewIssue[] }>(
+      jsonMatch[0],
+      { component: 'CodeReviewerService', logErrors: true, logLevel: 'warn' }
+    );
+
+    if (!parseResult.success) {
+      return {
+        approved: false,
+        issues: [],
+        summary: 'Failed to parse review output',
+      };
+    }
+
+    const parsed = parseResult.data;
+    return {
+      approved: Boolean(parsed.approved),
+      summary: parsed.summary || '',
+      issues: (parsed.issues || []).map((issue: ReviewIssue) => ({
+        severity: issue.severity || 'info',
+        file: issue.file,
+        line: issue.line,
+        message: issue.message || '',
+        suggestion: issue.suggestion,
+      })),
+    };
   }
 
   private formatReviewBody(result: ReviewResult): string {

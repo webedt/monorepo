@@ -11,6 +11,7 @@ import { ACodeAnalyzer } from './ACodeAnalyzer.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { getClaudeCredentials, CLAUDE_CREDENTIALS_PATH } from '../auth/claudeAuth.js';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 import { CLAUDE_ENVIRONMENT_ID, LLM_FALLBACK_REPO_URL, CLAUDE_ACCESS_TOKEN } from '../config/env.js';
 
 import type { CodeAnalysisParams } from './types.js';
@@ -204,33 +205,33 @@ function parseAnalysisResponse(content: string): { findings: AnalysisFinding[]; 
     };
   }
 
-  try {
-    const parsed = JSON.parse(jsonStr) as { findings?: AnalysisFinding[]; assessment?: string };
+  const parseResult = safeJsonParse<{ findings?: AnalysisFinding[]; assessment?: string }>(
+    jsonStr,
+    { component: 'CodeAnalyzer', logErrors: true, logLevel: 'warn' }
+  );
 
-    const findings = (parsed.findings || []).filter((f): f is AnalysisFinding => {
-      return (
-        typeof f.severity === 'string' &&
-        ['critical', 'high', 'medium', 'low', 'info'].includes(f.severity) &&
-        typeof f.category === 'string' &&
-        typeof f.title === 'string' &&
-        typeof f.description === 'string'
-      );
-    });
-
-    return {
-      findings,
-      assessment: parsed.assessment || 'Analysis complete.',
-    };
-  } catch (parseError) {
-    logger.warn('Failed to parse analysis JSON', {
-      component: 'CodeAnalyzer',
-      error: parseError instanceof Error ? parseError.message : String(parseError),
-    });
+  if (!parseResult.success) {
     return {
       findings: [],
       assessment: content.trim() || 'Unable to parse analysis response.',
     };
   }
+
+  const parsed = parseResult.data;
+  const findings = (parsed.findings || []).filter((f): f is AnalysisFinding => {
+    return (
+      typeof f.severity === 'string' &&
+      ['critical', 'high', 'medium', 'low', 'info'].includes(f.severity) &&
+      typeof f.category === 'string' &&
+      typeof f.title === 'string' &&
+      typeof f.description === 'string'
+    );
+  });
+
+  return {
+    findings,
+    assessment: parsed.assessment || 'Analysis complete.',
+  };
 }
 
 /**

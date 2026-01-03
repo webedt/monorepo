@@ -5,6 +5,7 @@
 
 import { APaymentProvider } from './APaymentProvider.js';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 import {
   PAYPAL_CLIENT_ID,
   PAYPAL_CLIENT_SECRET,
@@ -255,14 +256,13 @@ export class PayPalProvider extends APaymentProvider {
       );
 
       const purchaseUnit = order.purchase_units?.[0];
-      let metadata: PaymentMetadata = { userId: '' };
-      try {
-        if (purchaseUnit && 'custom_id' in purchaseUnit) {
-          metadata = JSON.parse((purchaseUnit as { custom_id?: string }).custom_id || '{}');
-        }
-      } catch {
-        // Ignore parse errors
-      }
+      const metadata: PaymentMetadata = purchaseUnit && 'custom_id' in purchaseUnit
+        ? safeJsonParse<PaymentMetadata>(
+            (purchaseUnit as { custom_id?: string }).custom_id || '{}',
+            { userId: '' },
+            { component: 'PayPalProvider', logErrors: true, logLevel: 'debug' }
+          )
+        : { userId: '' };
 
       return {
         id: order.id,
@@ -321,14 +321,13 @@ export class PayPalProvider extends APaymentProvider {
       );
 
       const purchaseUnit = order.purchase_units?.[0];
-      let metadata: PaymentMetadata = { userId: '' };
-      try {
-        if (purchaseUnit && 'custom_id' in purchaseUnit) {
-          metadata = JSON.parse((purchaseUnit as { custom_id?: string }).custom_id || '{}');
-        }
-      } catch {
-        // Ignore parse errors
-      }
+      const metadata: PaymentMetadata = purchaseUnit && 'custom_id' in purchaseUnit
+        ? safeJsonParse<PaymentMetadata>(
+            (purchaseUnit as { custom_id?: string }).custom_id || '{}',
+            { userId: '' },
+            { component: 'PayPalProvider', logErrors: true, logLevel: 'debug' }
+          )
+        : { userId: '' };
 
       return {
         id: order.id,
@@ -450,7 +449,18 @@ export class PayPalProvider extends APaymentProvider {
       const [transmissionId, timestamp, transmissionSig, authAlgo, certUrl] = headerParts;
       const payloadString =
         typeof payload === 'string' ? payload : payload.toString('utf8');
-      const webhookEvent = JSON.parse(payloadString);
+
+      const parseResult = safeJsonParse<{ event_type?: string }>(payloadString, {
+        component: 'PayPalProvider',
+        logErrors: true,
+        logLevel: 'error',
+      });
+
+      if (!parseResult.success) {
+        return { isValid: false, error: `Failed to parse webhook payload: ${parseResult.error}` };
+      }
+
+      const webhookEvent = parseResult.data;
 
       // Verify with PayPal
       const verifyResponse = await this.request<{ verification_status: string }>(
@@ -471,12 +481,15 @@ export class PayPalProvider extends APaymentProvider {
         return { isValid: false, error: 'Webhook verification failed' };
       }
 
-      const eventType = mapPayPalEventType(webhookEvent.event_type);
+      const eventType = webhookEvent.event_type ? mapPayPalEventType(webhookEvent.event_type) : null;
       if (!eventType) {
         return { isValid: true, event: undefined };
       }
 
-      const event = this.parsePayPalEvent(webhookEvent, eventType);
+      const event = this.parsePayPalEvent(
+        webhookEvent as unknown as { id: string; event_type: string; resource: { id?: string; custom_id?: string; status?: string; amount?: { value: string; currency_code: string }; supplementary_data?: { related_ids?: { order_id?: string } } }; create_time: string },
+        eventType
+      );
       return { isValid: true, event };
     } catch (error) {
       logger.error('PayPal webhook verification failed', error as Error, {
@@ -524,14 +537,13 @@ export class PayPalProvider extends APaymentProvider {
 
       const purchaseUnit = capture.purchase_units?.[0];
       const captureDetails = purchaseUnit?.payments?.captures?.[0];
-      let metadata: PaymentMetadata = { userId: '' };
-      try {
-        if (purchaseUnit && 'custom_id' in purchaseUnit) {
-          metadata = JSON.parse((purchaseUnit as { custom_id?: string }).custom_id || '{}');
-        }
-      } catch {
-        // Ignore parse errors
-      }
+      const metadata: PaymentMetadata = purchaseUnit && 'custom_id' in purchaseUnit
+        ? safeJsonParse<PaymentMetadata>(
+            (purchaseUnit as { custom_id?: string }).custom_id || '{}',
+            { userId: '' },
+            { component: 'PayPalProvider', logErrors: true, logLevel: 'debug' }
+          )
+        : { userId: '' };
 
       logger.info('PayPal order captured', {
         component: 'PayPalProvider',
@@ -578,15 +590,13 @@ export class PayPalProvider extends APaymentProvider {
     eventType: WebhookEventType
   ): WebhookEvent {
     const resource = event.resource;
-    let metadata: PaymentMetadata = { userId: '' };
-
-    try {
-      if (resource.custom_id) {
-        metadata = JSON.parse(resource.custom_id);
-      }
-    } catch {
-      // Ignore parse errors
-    }
+    const metadata: PaymentMetadata = resource.custom_id
+      ? safeJsonParse<PaymentMetadata>(
+          resource.custom_id,
+          { userId: '' },
+          { component: 'PayPalProvider', logErrors: true, logLevel: 'debug' }
+        )
+      : { userId: '' };
 
     return {
       id: event.id,

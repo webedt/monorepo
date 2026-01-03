@@ -18,6 +18,7 @@
 
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import { AI_WORKER_URL, AI_WORKER_SECRET } from '../../config/env.js';
+import { safeJsonParse } from '../../utils/api/safeJson.js';
 import {
   AExecutionProvider,
   type ExecuteParams,
@@ -394,49 +395,55 @@ export class SelfHostedWorkerProvider extends AExecutionProvider {
             currentData = currentData ? `${currentData}\n${dataContent}` : dataContent;
           } else if (line === '' && currentData) {
             // End of message, process it
-            try {
-              const event = JSON.parse(currentData) as ExecutionEvent;
+            const parseResult = safeJsonParse<ExecutionEvent>(currentData, {
+              component: 'SelfHostedWorkerProvider',
+              logErrors: true,
+              logLevel: 'warn',
+              context: { chatSessionId, dataPreview: currentData.slice(0, 200) },
+            });
 
-              // Override type if event type was specified
-              if (currentEventType) {
-                // Warn about unrecognized event types for debugging
-                if (!KNOWN_EVENT_TYPES.has(currentEventType)) {
-                  this.logExecution('warn', 'Unrecognized event type from worker', {
-                    chatSessionId,
-                    eventType: currentEventType,
-                  });
-                }
-                event.type = currentEventType as ExecutionEventType;
-              }
-
-              // Add source if not present
-              if (!event.source) {
-                event.source = this.name;
-              }
-
-              // Capture result data from specific event types
-              if (event.type === 'session_created' && event.remoteSessionId) {
-                result.remoteSessionId = event.remoteSessionId;
-                result.remoteWebUrl = event.remoteWebUrl;
-              }
-
-              if (event.type === 'result' || event.type === 'completed') {
-                if (event.branch) result.branch = event.branch;
-                if (event.totalCost) result.totalCost = event.totalCost;
-                if (event.duration_ms) result.durationMs = event.duration_ms;
-              }
-
-              if (event.type === 'error') {
-                result.status = 'failed';
-              }
-
-              await onEvent(event);
-            } catch (parseError) {
-              this.logExecution('warn', 'Failed to parse worker event', {
-                chatSessionId,
-                data: currentData.slice(0, 200),
-              });
+            if (!parseResult.success) {
+              currentEventType = '';
+              currentData = '';
+              continue;
             }
+
+            const event = parseResult.data;
+
+            // Override type if event type was specified
+            if (currentEventType) {
+              // Warn about unrecognized event types for debugging
+              if (!KNOWN_EVENT_TYPES.has(currentEventType)) {
+                this.logExecution('warn', 'Unrecognized event type from worker', {
+                  chatSessionId,
+                  eventType: currentEventType,
+                });
+              }
+              event.type = currentEventType as ExecutionEventType;
+            }
+
+            // Add source if not present
+            if (!event.source) {
+              event.source = this.name;
+            }
+
+            // Capture result data from specific event types
+            if (event.type === 'session_created' && event.remoteSessionId) {
+              result.remoteSessionId = event.remoteSessionId;
+              result.remoteWebUrl = event.remoteWebUrl;
+            }
+
+            if (event.type === 'result' || event.type === 'completed') {
+              if (event.branch) result.branch = event.branch;
+              if (event.totalCost) result.totalCost = event.totalCost;
+              if (event.duration_ms) result.durationMs = event.duration_ms;
+            }
+
+            if (event.type === 'error') {
+              result.status = 'failed';
+            }
+
+            await onEvent(event);
 
             currentEventType = '';
             currentData = '';

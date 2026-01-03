@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { AClaudeWebClient } from './AClaudeWebClient.js';
 import { parseGitUrl } from '../utils/helpers/gitUrlHelper.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
+
 import type { ClaudeRemoteClientConfig } from './types.js';
 import type { ClaudeWebClientConfig } from './types.js';
 import type { CreateSessionParams } from './types.js';
@@ -553,30 +555,31 @@ export class ClaudeWebClient extends AClaudeWebClient {
       };
 
       const messageHandler = (data: Buffer | string) => {
-        try {
-          const message = JSON.parse(data.toString());
-          if (message.type === 'control_response' && message.response?.request_id === requestId) {
-            if (settled) return;
-            settled = true;
-            cleanup();
+        const parseResult = safeJsonParse<{ type?: string; response?: { request_id?: string; subtype?: string; error?: string } }>(
+          data.toString(),
+          process.env.NODE_ENV === 'development'
+            ? { component: 'ClaudeWebClient', logErrors: true, logLevel: 'debug' }
+            : undefined
+        );
 
-            if (message.response.subtype === 'success') {
-              resolve(message.response);
-            } else if (message.response.subtype === 'error') {
-              reject(new ClaudeRemoteError(
-                `Control request '${subtype}' failed: ${message.response.error || 'Unknown error'}`,
-                400
-              ));
-            } else {
-              resolve(message.response);
-            }
-          }
-        } catch (error) {
-          // Non-JSON messages (heartbeats, binary frames) are expected on WebSocket
-          // Only log in development for debugging unusual cases
-          if (process.env.NODE_ENV === 'development') {
-            const msg = error instanceof Error ? error.message : 'Unknown parse error';
-            console.debug(`sendControlRequest: Non-JSON message received: ${msg}`);
+        // Non-JSON messages (heartbeats, binary frames) are expected on WebSocket
+        if (!parseResult.success) return;
+
+        const message = parseResult.data;
+        if (message.type === 'control_response' && message.response?.request_id === requestId) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+
+          if (message.response.subtype === 'success') {
+            resolve(message.response);
+          } else if (message.response.subtype === 'error') {
+            reject(new ClaudeRemoteError(
+              `Control request '${subtype}' failed: ${message.response.error || 'Unknown error'}`,
+              400
+            ));
+          } else {
+            resolve(message.response);
           }
         }
       };
@@ -725,82 +728,83 @@ export class ClaudeWebClient extends AClaudeWebClient {
       }
 
       const messageHandler = async (data: Buffer | string) => {
-        try {
-          const rawData = data.toString();
+        const rawData = data.toString();
 
-          // Call raw message callback before any processing
-          if (onRawMessage) {
-            await onRawMessage(rawData);
-          }
+        // Call raw message callback before any processing
+        if (onRawMessage) {
+          await onRawMessage(rawData);
+        }
 
-          const message = JSON.parse(rawData);
+        const parseResult = safeJsonParse<{ type?: string; data?: SessionEvent; uuid?: string; status?: string }>(
+          rawData,
+          process.env.NODE_ENV === 'development'
+            ? { component: 'ClaudeWebClient', logErrors: true, logLevel: 'debug' }
+            : undefined
+        );
 
-          if (message.type === 'event' && message.data) {
-            const event = message.data as SessionEvent;
-            if (!seenEventIds.has(event.uuid)) {
-              seenEventIds.add(event.uuid);
-              await onEvent(event);
+        // Non-JSON messages (heartbeats, keep-alives) are expected on WebSocket
+        if (!parseResult.success) return;
 
-              if (!branch) {
-                branch = this.extractBranchName([event]);
-              }
+        const message = parseResult.data;
 
-              if (event.type === 'result') {
-                safeResolve({
-                  sessionId,
-                  status: 'completed',
-                  title: title || '',
-                  branch,
-                  totalCost: event.total_cost_usd as number | undefined,
-                  durationMs: event.duration_ms as number | undefined,
-                  numTurns: event.num_turns as number | undefined,
-                  result: event.result as string | undefined,
-                });
-              }
+        if (message.type === 'event' && message.data) {
+          const event = message.data as SessionEvent;
+          if (!seenEventIds.has(event.uuid)) {
+            seenEventIds.add(event.uuid);
+            await onEvent(event);
+
+            if (!branch) {
+              branch = this.extractBranchName([event]);
             }
-          }
 
-          if (message.uuid && message.type && message.type !== 'event') {
-            const event = message as SessionEvent;
-            if (!seenEventIds.has(event.uuid)) {
-              seenEventIds.add(event.uuid);
-              await onEvent(event);
-
-              if (!branch) {
-                branch = this.extractBranchName([event]);
-              }
-
-              if (event.type === 'result') {
-                safeResolve({
-                  sessionId,
-                  status: 'completed',
-                  title: title || '',
-                  branch,
-                  totalCost: event.total_cost_usd as number | undefined,
-                  durationMs: event.duration_ms as number | undefined,
-                  numTurns: event.num_turns as number | undefined,
-                  result: event.result as string | undefined,
-                });
-              }
-            }
-          }
-
-          if (message.type === 'session_status') {
-            if (message.status === 'completed' || message.status === 'failed') {
+            if (event.type === 'result') {
               safeResolve({
                 sessionId,
-                status: message.status,
+                status: 'completed',
                 title: title || '',
                 branch,
+                totalCost: event.total_cost_usd as number | undefined,
+                durationMs: event.duration_ms as number | undefined,
+                numTurns: event.num_turns as number | undefined,
+                result: event.result as string | undefined,
               });
             }
           }
-        } catch (error) {
-          // Non-JSON messages (heartbeats, keep-alives) are expected on WebSocket
-          // Only log in development for debugging unusual cases
-          if (process.env.NODE_ENV === 'development') {
-            const msg = error instanceof Error ? error.message : 'Unknown parse error';
-            console.debug(`streamEvents: Non-JSON message received: ${msg}`);
+        }
+
+        if (message.uuid && message.type && message.type !== 'event') {
+          const event = message as unknown as SessionEvent;
+          if (!seenEventIds.has(event.uuid)) {
+            seenEventIds.add(event.uuid);
+            await onEvent(event);
+
+            if (!branch) {
+              branch = this.extractBranchName([event]);
+            }
+
+            if (event.type === 'result') {
+              safeResolve({
+                sessionId,
+                status: 'completed',
+                title: title || '',
+                branch,
+                totalCost: event.total_cost_usd as number | undefined,
+                durationMs: event.duration_ms as number | undefined,
+                numTurns: event.num_turns as number | undefined,
+                result: event.result as string | undefined,
+              });
+            }
+          }
+        }
+
+        if (message.type === 'session_status') {
+          if (message.status === 'completed' || message.status === 'failed') {
+            safeResolve({
+              sessionId,
+              status: message.status,
+              title: title || '',
+              branch,
+            });
           }
         }
       };
