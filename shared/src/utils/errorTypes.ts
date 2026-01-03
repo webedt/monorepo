@@ -640,9 +640,21 @@ export function isBadRequestError(error: unknown): error is BadRequestError {
  * - External service fails unexpectedly
  * - Database operation fails
  *
+ * IMPORTANT: Never include raw error messages from external services
+ * in the error message. These details could leak implementation details
+ * to clients. Instead, log error details server-side and use a generic
+ * message for the client.
+ *
  * @example
  * throw new InternalServerError('Failed to process request');
  * throw new InternalServerError('Database operation failed', { operation: 'insert' });
+ *
+ * // DON'T do this - leaks internal details:
+ * throw InternalServerError.operationFailed('save user', externalError.message);
+ *
+ * // DO this - log details separately:
+ * logger.error('Failed to save user', error, { userId });
+ * throw InternalServerError.operationFailed('save user');
  */
 export class InternalServerError extends DomainError {
   readonly type = 'INTERNAL_SERVER_ERROR' as const;
@@ -656,13 +668,13 @@ export class InternalServerError extends DomainError {
   }
 
   /**
-   * Create an InternalServerError for operation failure
+   * Create an InternalServerError for operation failure.
+   *
+   * Note: The message returned is generic and safe for clients.
+   * Log detailed error information server-side before throwing.
    */
-  static operationFailed(operation: string, details?: string): InternalServerError {
-    const message = details
-      ? `Failed to ${operation}: ${details}`
-      : `Failed to ${operation}`;
-    return new InternalServerError(message, { operation });
+  static operationFailed(operation: string): InternalServerError {
+    return new InternalServerError(`Failed to ${operation}`, { operation });
   }
 }
 

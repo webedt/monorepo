@@ -21,10 +21,43 @@ import {
   isBadGatewayError,
   RateLimitError,
   ServiceUnavailableError,
+  NODE_ENV,
 } from '@webedt/shared';
 import type { AnyDomainError } from '@webedt/shared';
 import { logger } from '@webedt/shared';
 import { getCorrelationId } from '@webedt/shared';
+
+/**
+ * Keys that are safe to include in error responses.
+ * Other context keys are logged but not exposed to clients.
+ */
+const SAFE_CONTEXT_KEYS = new Set([
+  'field',           // Validation errors - which field failed
+  'resource',        // Not found errors - what type of resource
+  'resourceId',      // Not found errors - which resource ID (if not sensitive)
+  'expectedFormat',  // Validation errors - expected format
+  'min',             // Validation range errors
+  'max',             // Validation range errors
+  'quotaType',       // Payload too large errors
+  'reason',          // Generic reason for client errors
+]);
+
+/**
+ * Filter context to only include safe keys for client response.
+ * Full context is still logged server-side.
+ */
+function sanitizeContext(context: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!context) return undefined;
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(context)) {
+    if (SAFE_CONTEXT_KEYS.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
 
 /**
  * Standard error response format for domain errors
@@ -41,18 +74,26 @@ interface DomainErrorResponse {
 }
 
 /**
- * Create standardized error response
+ * Create standardized error response.
+ * In production, only safe context keys are included.
+ * In development, full context is included for debugging.
  */
 function createErrorResponse(
   error: AnyDomainError,
   requestId?: string
 ): DomainErrorResponse {
+  // In development, include full context for debugging
+  // In production, only include sanitized safe keys
+  const contextForResponse = NODE_ENV === 'development'
+    ? error.context
+    : sanitizeContext(error.context);
+
   return {
     success: false,
     error: {
       message: error.message,
       code: error.type,
-      ...(error.context && Object.keys(error.context).length > 0 && { context: error.context }),
+      ...(contextForResponse && Object.keys(contextForResponse).length > 0 && { context: contextForResponse }),
     },
     timestamp: new Date().toISOString(),
     ...(requestId && { requestId }),

@@ -177,13 +177,17 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, asyncHandler(
     res.json({ success: true, data: result });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
-    logger.error('Failed to get diff comparison', error as Error, { component: 'Diffs' });
+    // Log full error details server-side, but don't expose to client
+    logger.error('Failed to get diff comparison', error as Error, {
+      component: 'Diffs',
+      errorMessage: err.message,
+    });
 
     if (err.status === 404) {
       throw NotFoundError.forResource('Repository or branch');
     }
 
-    throw InternalServerError.operationFailed('get diff comparison', err.message);
+    throw InternalServerError.operationFailed('get diff comparison');
   }
 }));
 
@@ -265,13 +269,17 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, asyncHa
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
-    logger.error('Failed to get changed files', error as Error, { component: 'Diffs' });
+    // Log full error details server-side, but don't expose to client
+    logger.error('Failed to get changed files', error as Error, {
+      component: 'Diffs',
+      errorMessage: err.message,
+    });
 
     if (err.status === 404) {
       throw NotFoundError.forResource('Repository or branch');
     }
 
-    throw InternalServerError.operationFailed('get changed files', err.message);
+    throw InternalServerError.operationFailed('get changed files');
   }
 }));
 
@@ -381,13 +389,17 @@ router.get('/repos/:owner/:repo/file-diff/:base/:head/*', requireAuth, validateP
     }
 
     const err = error as { status?: number; message?: string };
-    logger.error('Failed to get file diff', error as Error, { component: 'Diffs' });
+    // Log full error details server-side, but don't expose to client
+    logger.error('Failed to get file diff', error as Error, {
+      component: 'Diffs',
+      errorMessage: err.message,
+    });
 
     if (err.status === 404) {
       throw NotFoundError.forResource('Repository or branch');
     }
 
-    throw InternalServerError.operationFailed('get file diff', err.message);
+    throw InternalServerError.operationFailed('get file diff');
   }
 }));
 
@@ -466,13 +478,17 @@ router.get('/repos/:owner/:repo/stats/:base/:head', requireAuth, asyncHandler(as
     });
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
-    logger.error('Failed to get diff stats', error as Error, { component: 'Diffs' });
+    // Log full error details server-side, but don't expose to client
+    logger.error('Failed to get diff stats', error as Error, {
+      component: 'Diffs',
+      errorMessage: err.message,
+    });
 
     if (err.status === 404) {
       throw NotFoundError.forResource('Repository or branch');
     }
 
-    throw InternalServerError.operationFailed('get diff stats', err.message);
+    throw InternalServerError.operationFailed('get diff stats');
   }
 }));
 
