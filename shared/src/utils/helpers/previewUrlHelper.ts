@@ -47,6 +47,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { logger } from '../logging/logger.js';
+import { safeJsonParse } from '../api/safeJson.js';
 
 /**
  * Configuration from `.webedt` file.
@@ -105,22 +106,25 @@ export async function getPreviewUrl(
   try {
     // If workspace path is provided, try to read .webedt file
     if (workspacePath) {
+      const webedtPath = path.join(workspacePath, '.webedt');
       try {
-        const webedtPath = path.join(workspacePath, '.webedt');
         const webedtContent = await fs.readFile(webedtPath, 'utf-8');
-        const config: WebedtConfig = JSON.parse(webedtContent);
+        const parseResult = safeJsonParse<WebedtConfig>(
+          webedtContent,
+          { component: 'PreviewUrlHelper', logErrors: true, logLevel: 'warn', context: { path: webedtPath } }
+        );
 
-        if (config.preview_url) {
+        if (parseResult.success && parseResult.data.preview_url) {
           logger.info('Using preview URL from .webedt file', {
             component: 'PreviewUrlHelper',
-            previewUrl: config.preview_url
+            previewUrl: parseResult.data.preview_url
           });
-          return config.preview_url;
+          return parseResult.data.preview_url;
         }
       } catch (error) {
-        // .webedt file doesn't exist or is invalid - this is expected for most repos
+        // .webedt file doesn't exist - this is expected for most repos
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          logger.warn('Failed to parse .webedt file, using default preview URL', {
+          logger.warn('Failed to read .webedt file, using default preview URL', {
             component: 'PreviewUrlHelper'
           });
         }
@@ -227,10 +231,14 @@ export async function hasWebedtFile(workspacePath: string): Promise<boolean> {
  * ```
  */
 export async function readWebedtConfig(workspacePath: string): Promise<WebedtConfig | null> {
+  const webedtPath = path.join(workspacePath, '.webedt');
   try {
-    const webedtPath = path.join(workspacePath, '.webedt');
     const content = await fs.readFile(webedtPath, 'utf-8');
-    return JSON.parse(content);
+    const parseResult = safeJsonParse<WebedtConfig>(
+      content,
+      { component: 'PreviewUrlHelper', logErrors: true, logLevel: 'warn', context: { path: webedtPath } }
+    );
+    return parseResult.success ? parseResult.data : null;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       logger.warn('Failed to read .webedt file', { component: 'PreviewUrlHelper' });

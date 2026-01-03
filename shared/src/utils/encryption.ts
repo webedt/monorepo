@@ -11,6 +11,7 @@
 
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'crypto';
 import { logger } from './logging/logger.js';
+import { safeJsonParse } from './api/safeJson.js';
 import { ENCRYPTION_KEY, ENCRYPTION_SALT } from '../config/env.js';
 
 // Constants
@@ -216,13 +217,15 @@ export function decryptJson<T>(encryptedData: string): T | null {
   }
 
   const jsonString = decrypt(encryptedData);
-  try {
-    return JSON.parse(jsonString) as T;
-  } catch {
-    // If JSON parse fails, the data might not be encrypted JSON
-    // This handles backward compatibility
-    return null;
-  }
+  const parseResult = safeJsonParse<T>(jsonString, {
+    component: 'Encryption',
+    logErrors: true,
+    logLevel: 'debug',
+  });
+
+  // If JSON parse fails, the data might not be encrypted JSON
+  // This handles backward compatibility
+  return parseResult.success ? parseResult.data : null;
 }
 
 /**
@@ -311,28 +314,24 @@ export function safeDecryptJson<T>(value: string | T | null | undefined): T | nu
 
   if (!isEncryptionEnabled()) {
     // Try to parse as JSON, return null if invalid
-    try {
-      return JSON.parse(value as string) as T;
-    } catch {
-      logger.warn('Failed to parse unencrypted JSON value', {
-        component: 'Encryption',
-        valueLength: (value as string).length,
-      });
-      return null;
-    }
+    const parseResult = safeJsonParse<T>(value as string, {
+      component: 'Encryption',
+      logErrors: true,
+      logLevel: 'warn',
+      context: { valueLength: (value as string).length },
+    });
+    return parseResult.success ? parseResult.data : null;
   }
 
   // If not encrypted, try parsing as JSON
   if (!isEncrypted(value as string)) {
-    try {
-      return JSON.parse(value as string) as T;
-    } catch {
-      logger.warn('Failed to parse unencrypted JSON value', {
-        component: 'Encryption',
-        valueLength: (value as string).length,
-      });
-      return null;
-    }
+    const parseResult = safeJsonParse<T>(value as string, {
+      component: 'Encryption',
+      logErrors: true,
+      logLevel: 'warn',
+      context: { valueLength: (value as string).length },
+    });
+    return parseResult.success ? parseResult.data : null;
   }
 
   try {

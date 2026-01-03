@@ -10,6 +10,7 @@ import { AGeminiClient, type GeminiEventCallback } from './AGeminiClient.js';
 import { GeminiError } from './types.js';
 import { GEMINI_API_BASE_URL, GEMINI_DEFAULT_MODEL } from '../config/env.js';
 import { logger } from '../utils/logging/logger.js';
+import { safeJsonParse } from '../utils/api/safeJson.js';
 
 import type { GeminiClientConfig } from './types.js';
 import type { GenerateContentParams } from './types.js';
@@ -43,11 +44,7 @@ function parseStreamLine(line: string): GenerateContentStreamChunk | null {
     return null;
   }
 
-  try {
-    return JSON.parse(data) as GenerateContentStreamChunk;
-  } catch {
-    return null;
-  }
+  return safeJsonParse<GenerateContentStreamChunk>(data, null as unknown as GenerateContentStreamChunk);
 }
 
 export class GeminiClient extends AGeminiClient {
